@@ -13,8 +13,11 @@
                 {% if current_profile %}
                     <div class="alert alert-info">
                         <strong>Current Profile:</strong><br>
-                        {{ current_profile.display_name }}<br>
-                        <small class="text-muted">{{ current_profile.name }}</small>
+                        Long: {{ current_profile.long_name }}<br>
+                        Short: <span class="text-monospace">{{ current_profile.short_name }}</span><br>
+                        Node ID: <span class="text-monospace">{{ current_profile.node_id }}</span><br>
+                        Channel: {{ current_profile.channel }}<br>
+                        Key: <span class="text-monospace">{{ current_profile.key }}</span>
                     </div>
                 {% else %}
                     <div class="alert alert-warning">
@@ -26,7 +29,7 @@
                     <option value="">Select a profile...</option>
                     {% for profile_id, profile in profiles.items() %}
                         <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
-                            {{ profile.display_name }}
+                            {{ profile.short_name }}
                         </option>
                     {% endfor %}
                 </select>

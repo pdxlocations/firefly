@@ -90,21 +90,25 @@ class ProfileManager:
         profile_id = str(uuid.uuid4())
         self.profiles[profile_id] = {
             'id': profile_id,
-            'name': name,
-            'display_name': display_name,
-            'description': description,
+            'node_id': name,            # backwards-compat: treat previous 'name' arg as node_id
+            'long_name': display_name,  # backwards-compat: treat previous 'display_name' arg as long_name
+            'short_name': description if description else '',  # placeholder if old callers pass description
+            'channel': '',
+            'key': '',
             'created_at': datetime.now().isoformat()
         }
         self.save_profiles()
         return profile_id
     
-    def update_profile(self, profile_id, name, display_name, description=""):
+    def update_profile(self, profile_id, node_id, long_name, short_name, channel, key):
         """Update an existing profile"""
         if profile_id in self.profiles:
             self.profiles[profile_id].update({
-                'name': name,
-                'display_name': display_name,
-                'description': description,
+                'node_id': node_id,
+                'long_name': long_name,
+                'short_name': short_name,
+                'channel': channel,
+                'key': key,
                 'updated_at': datetime.now().isoformat()
             })
             self.save_profiles()
@@ -200,6 +204,10 @@ class UDPChatServer:
                     'timestamp': message_data.get('timestamp', datetime.now().isoformat()),
                     'sender_ip': addr[0]
                 }
+
+                # Skip echoing back self-sent messages
+                if addr[0] == '127.0.0.1' or message_data.get('sender') == (current_profile['short_name'] if current_profile else None):
+                    continue
                 
                 messages.append(message)
                 
@@ -217,8 +225,8 @@ class UDPChatServer:
         
         try:
             message_data = {
-                'sender': sender_profile['name'],
-                'sender_display': sender_profile['display_name'],
+                'sender': sender_profile.get('short_name', 'Unknown'),
+                'sender_display': sender_profile.get('long_name', 'Unknown'),
                 'content': message_content,
                 'timestamp': datetime.now().isoformat()
             }
@@ -229,8 +237,8 @@ class UDPChatServer:
             # Add to local messages
             message = {
                 'id': str(uuid.uuid4()),
-                'sender': sender_profile['name'],
-                'sender_display': sender_profile['display_name'],
+                'sender': sender_profile.get('short_name', 'Unknown'),
+                'sender_display': sender_profile.get('long_name', 'Unknown'),
                 'content': message_content,
                 'timestamp': message_data['timestamp'],
                 'sender_ip': 'self'
@@ -275,15 +283,23 @@ def create_profile():
     """Create a new profile"""
     data = request.get_json()
     
-    if not data or not data.get('name') or not data.get('display_name'):
-        return jsonify({'error': 'Name and display_name are required'}), 400
-    
-    profile_id = profile_manager.create_profile(
-        data['name'],
-        data['display_name'],
-        data.get('description', '')
-    )
-    
+    required = ['node_id', 'long_name', 'short_name', 'channel', 'key']
+    if not data or any(not data.get(k) for k in required):
+        return jsonify({'error': 'node_id, long_name, short_name, channel, key are required'}), 400
+
+    # Create and store the profile
+    profile_id = str(uuid.uuid4())
+    profile_manager.profiles[profile_id] = {
+        'id': profile_id,
+        'node_id': data['node_id'],
+        'long_name': data['long_name'],
+        'short_name': data['short_name'],
+        'channel': data['channel'],
+        'key': data['key'],
+        'created_at': datetime.now().isoformat()
+    }
+    profile_manager.save_profiles()
+
     return jsonify({'profile_id': profile_id, 'message': 'Profile created successfully'})
 
 
@@ -292,14 +308,17 @@ def update_profile(profile_id):
     """Update an existing profile"""
     data = request.get_json()
     
-    if not data or not data.get('name') or not data.get('display_name'):
-        return jsonify({'error': 'Name and display_name are required'}), 400
-    
+    required = ['node_id', 'long_name', 'short_name', 'channel', 'key']
+    if not data or any(not data.get(k) for k in required):
+        return jsonify({'error': 'node_id, long_name, short_name, channel, key are required'}), 400
+
     success = profile_manager.update_profile(
         profile_id,
-        data['name'],
-        data['display_name'],
-        data.get('description', '')
+        data['node_id'],
+        data['long_name'],
+        data['short_name'],
+        data['channel'],
+        data['key']
     )
     
     if success:

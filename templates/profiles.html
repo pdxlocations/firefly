@@ -12,19 +12,24 @@
             <div class="card-body">
                 <form id="createProfileForm">
                     <div class="mb-3">
-                        <label for="newProfileName" class="form-label">Username *</label>
-                        <input type="text" class="form-control" id="newProfileName" required maxlength="50">
-                        <div class="form-text">Unique username for identification (no spaces recommended)</div>
+                        <label for="newNodeId" class="form-label">Node ID *</label>
+                        <input type="text" class="form-control" id="newNodeId" required maxlength="64" placeholder="e.g. !deadbeef">
                     </div>
                     <div class="mb-3">
-                        <label for="newProfileDisplayName" class="form-label">Display Name *</label>
-                        <input type="text" class="form-control" id="newProfileDisplayName" required maxlength="100">
-                        <div class="form-text">Name shown in chat messages</div>
+                        <label for="newLongName" class="form-label">Long Name *</label>
+                        <input type="text" class="form-control" id="newLongName" required maxlength="100" placeholder="e.g. UDP Test">
                     </div>
                     <div class="mb-3">
-                        <label for="newProfileDescription" class="form-label">Description</label>
-                        <textarea class="form-control" id="newProfileDescription" rows="3" maxlength="500"></textarea>
-                        <div class="form-text">Optional description or notes</div>
+                        <label for="newShortName" class="form-label">Short Name *</label>
+                        <input type="text" class="form-control" id="newShortName" required maxlength="16" placeholder="e.g. UDP">
+                    </div>
+                    <div class="mb-3">
+                        <label for="newChannel" class="form-label">Channel *</label>
+                        <input type="text" class="form-control" id="newChannel" required maxlength="64" placeholder="e.g. LongFast">
+                    </div>
+                    <div class="mb-3">
+                        <label for="newKey" class="form-label">Key *</label>
+                        <input type="text" class="form-control" id="newKey" required maxlength="256" placeholder="e.g. AQ==">
                     </div>
                     <button type="submit" class="btn btn-primary">Create Profile</button>
                 </form>
@@ -44,11 +49,9 @@
                             <div class="profile-item border rounded p-3 mb-3" data-profile-id="{{ profile_id }}">
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div class="flex-grow-1">
-                                        <h6 class="mb-1">{{ profile.display_name }}</h6>
-                                        <small class="text-muted">@{{ profile.name }}</small>
-                                        {% if profile.description %}
-                                            <p class="mt-2 mb-1">{{ profile.description }}</p>
-                                        {% endif %}
+                                        <h6 class="mb-1">{{ profile.long_name }}</h6>
+                                        <small class="text-muted">Short: {{ profile.short_name }} • Node: {{ profile.node_id }}</small>
+                                        <p class="mt-2 mb-1">Channel: {{ profile.channel }} | Key: {{ profile.key }}</p>
                                         <small class="text-muted">Created: {{ profile.created_at[:10] }}</small>
                                     </div>
                                     <div class="btn-group-vertical" role="group">
@@ -86,16 +89,24 @@
                 <form id="editProfileForm">
                     <input type="hidden" id="editProfileId">
                     <div class="mb-3">
-                        <label for="editProfileName" class="form-label">Username *</label>
-                        <input type="text" class="form-control" id="editProfileName" required maxlength="50">
+                        <label for="editNodeId" class="form-label">Node ID *</label>
+                        <input type="text" class="form-control" id="editNodeId" required maxlength="64">
                     </div>
                     <div class="mb-3">
-                        <label for="editProfileDisplayName" class="form-label">Display Name *</label>
-                        <input type="text" class="form-control" id="editProfileDisplayName" required maxlength="100">
+                        <label for="editLongName" class="form-label">Long Name *</label>
+                        <input type="text" class="form-control" id="editLongName" required maxlength="100">
                     </div>
                     <div class="mb-3">
-                        <label for="editProfileDescription" class="form-label">Description</label>
-                        <textarea class="form-control" id="editProfileDescription" rows="3" maxlength="500"></textarea>
+                        <label for="editShortName" class="form-label">Short Name *</label>
+                        <input type="text" class="form-control" id="editShortName" required maxlength="16">
+                    </div>
+                    <div class="mb-3">
+                        <label for="editChannel" class="form-label">Channel *</label>
+                        <input type="text" class="form-control" id="editChannel" required maxlength="64">
+                    </div>
+                    <div class="mb-3">
+                        <label for="editKey" class="form-label">Key *</label>
+                        <input type="text" class="form-control" id="editKey" required maxlength="256">
                     </div>
                 </form>
             </div>
@@ -114,8 +125,11 @@
         </div>
         <div class="card-body">
             <ul class="mb-0">
-                <li><strong>Username:</strong> Should be unique and identify you to other users</li>
-                <li><strong>Display Name:</strong> Can be more descriptive and is shown in chat messages</li>
+                <li><strong>Node ID:</strong> Unique identifier for your device or node</li>
+                <li><strong>Long Name:</strong> Descriptive name shown in chat messages</li>
+                <li><strong>Short Name:</strong> Short identifier shown in lists and compact views</li>
+                <li><strong>Channel:</strong> Communication channel used</li>
+                <li><strong>Key:</strong> Encryption or access key</li>
                 <li><strong>Multiple Profiles:</strong> You can create multiple profiles for different purposes</li>
                 <li><strong>Profile Selection:</strong> Go back to the chat page to select which profile to use</li>
             </ul>
@@ -139,9 +153,21 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     document.getElementById('clearMessagesBtn').addEventListener('click', clearMessages);
+    document.getElementById('createProfileForm').addEventListener('submit', createProfile);
+    document.getElementById('saveProfileBtn').addEventListener('click', updateProfile);
+
+    // Delegate edit and delete buttons
+    document.getElementById('profilesList')?.addEventListener('click', function(e) {
+        if (e.target.classList.contains('edit-profile-btn')) {
+            openEditModal(e.target.getAttribute('data-profile-id'));
+        } else if (e.target.classList.contains('delete-profile-btn')) {
+            deleteProfile(e.target.getAttribute('data-profile-id'));
+        }
+    });
 
     // Now load existing messages (non-blocking)
     loadMessages();
+    loadProfiles();
 });
 
 function loadProfiles() {
@@ -155,91 +181,79 @@ function loadProfiles() {
 
 function createProfile(e) {
     e.preventDefault();
-    
-    const name = document.getElementById('newProfileName').value.trim();
-    const displayName = document.getElementById('newProfileDisplayName').value.trim();
-    const description = document.getElementById('newProfileDescription').value.trim();
-    
-    if (!name || !displayName) {
-        alert('Username and Display Name are required');
+    const payload = {
+        node_id: document.getElementById('newNodeId').value.trim(),
+        long_name: document.getElementById('newLongName').value.trim(),
+        short_name: document.getElementById('newShortName').value.trim(),
+        channel: document.getElementById('newChannel').value.trim(),
+        key: document.getElementById('newKey').value.trim(),
+    };
+    if (Object.values(payload).some(v => !v)) {
+        alert('All fields are required');
         return;
     }
-    
     fetch('/api/profiles', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            name: name,
-            display_name: displayName,
-            description: description
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
-        if (data.error) {
-            alert('Error: ' + data.error);
-        } else {
-            alert('Profile created successfully!');
-            location.reload(); // Reload to show the new profile
-        }
+        if (data.error) return alert('Error: ' + data.error);
+        alert('Profile created successfully!');
+        location.reload();
     })
-    .catch(error => {
-        console.error('Error creating profile:', error);
+    .catch(err => {
+        console.error('Error creating profile:', err);
         alert('Error creating profile');
     });
 }
 
 function openEditModal(profileId) {
     const profile = profiles[profileId];
-    if (!profile) {
-        alert('Profile not found');
-        return;
-    }
-    
+    if (!profile) { alert('Profile not found'); return; }
     document.getElementById('editProfileId').value = profileId;
-    document.getElementById('editProfileName').value = profile.name;
-    document.getElementById('editProfileDisplayName').value = profile.display_name;
-    document.getElementById('editProfileDescription').value = profile.description || '';
-    
+    document.getElementById('editNodeId').value = profile.node_id || '';
+    document.getElementById('editLongName').value = profile.long_name || '';
+    document.getElementById('editShortName').value = profile.short_name || '';
+    document.getElementById('editChannel').value = profile.channel || '';
+    document.getElementById('editKey').value = profile.key || '';
     new bootstrap.Modal(document.getElementById('editProfileModal')).show();
 }
 
 function updateProfile() {
     const profileId = document.getElementById('editProfileId').value;
-    const name = document.getElementById('editProfileName').value.trim();
-    const displayName = document.getElementById('editProfileDisplayName').value.trim();
-    const description = document.getElementById('editProfileDescription').value.trim();
-    
-    if (!name || !displayName) {
-        alert('Username and Display Name are required');
+    const node_id = document.getElementById('editNodeId').value.trim();
+    const long_name = document.getElementById('editLongName').value.trim();
+    const short_name = document.getElementById('editShortName').value.trim();
+    const channel = document.getElementById('editChannel').value.trim();
+    const key = document.getElementById('editKey').value.trim();
+
+    if (!node_id || !long_name || !short_name || !channel || !key) {
+        alert('All fields are required');
         return;
     }
-    
+
     fetch(`/api/profiles/${profileId}`, {
         method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            name: name,
-            display_name: displayName,
-            description: description
+            node_id: node_id,
+            long_name: long_name,
+            short_name: short_name,
+            channel: channel,
+            key: key
         })
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
-        if (data.error) {
-            alert('Error: ' + data.error);
-        } else {
-            alert('Profile updated successfully!');
-            bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
-            location.reload(); // Reload to show the updated profile
-        }
+        if (data.error) return alert('Error: ' + data.error);
+        alert('Profile updated successfully!');
+        bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
+        location.reload();
     })
-    .catch(error => {
-        console.error('Error updating profile:', error);
+    .catch(err => {
+        console.error('Error updating profile:', err);
         alert('Error updating profile');
     });
 }
@@ -251,7 +265,7 @@ function deleteProfile(profileId) {
         return;
     }
     
-    if (!confirm(`Are you sure you want to delete the profile "${profile.display_name}"? This action cannot be undone.`)) {
+    if (!confirm(`Are you sure you want to delete the profile "${profile.long_name}"? This action cannot be undone.`)) {
         return;
     }
     

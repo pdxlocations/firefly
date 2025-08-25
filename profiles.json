@@ -1,16 +1,21 @@
+
 {
   "c289e800-f73e-4e7b-af12-9e988bbc2ea0": {
     "id": "c289e800-f73e-4e7b-af12-9e988bbc2ea0",
-    "name": "ben",
-    "display_name": "bern",
-    "description": "",
+    "node_id": "ben",
+    "long_name": "bern",
+    "short_name": "ben",
+    "channel": "",
+    "key": "",
     "created_at": "2025-08-24T23:26:58.635152"
   },
   "bdde8128-2047-4e9d-9a4e-83c6efe098a1": {
     "id": "bdde8128-2047-4e9d-9a4e-83c6efe098a1",
-    "name": "bob",
-    "display_name": "bob",
-    "description": "",
+    "node_id": "bob",
+    "long_name": "bob",
+    "short_name": "bob",
+    "channel": "",
+    "key": "",
     "created_at": "2025-08-24T23:36:28.179705"
   }
 }

@@ -1,0 +1,174 @@
+/* Custom styles for UDP Chat App */
+
+body {
+    background-color: #f8f9fa;
+}
+
+.message {
+    border-left: 3px solid #007bff;
+    background-color: #ffffff;
+    transition: background-color 0.3s ease;
+}
+
+.message:hover {
+    background-color: #f8f9fa;
+}
+
+.message .text-primary {
+    color: #007bff !important;
+}
+
+.message .text-info {
+    color: #17a2b8 !important;
+}
+
+#messagesContainer {
+    background-color: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.profile-item {
+    transition: all 0.3s ease;
+    background-color: #ffffff;
+}
+
+.profile-item:hover {
+    background-color: #f8f9fa;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.card {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border: none;
+}
+
+.card-header {
+    background-color: #ffffff;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: 600;
+}
+
+.navbar-brand {
+    font-weight: bold;
+}
+
+.connection-status {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.btn-group-vertical .btn {
+    margin-bottom: 0.25rem;
+}
+
+.btn-group-vertical .btn:last-child {
+    margin-bottom: 0;
+}
+
+/* Scrollbar styling for message container */
+#messagesContainer::-webkit-scrollbar {
+    width: 8px;
+}
+
+#messagesContainer::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+#messagesContainer::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+
+#messagesContainer::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .col-md-3, .col-md-9 {
+        margin-bottom: 1rem;
+    }
+    
+    #messagesContainer {
+        height: 300px;
+    }
+}
+
+/* Loading animation */
+.loading {
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+    margin-right: 0.5rem;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Status badges */
+.badge.bg-success {
+    background-color: #28a745 !important;
+}
+
+.badge.bg-danger {
+    background-color: #dc3545 !important;
+}
+
+.badge.bg-secondary {
+    background-color: #6c757d !important;
+}
+
+/* Form improvements */
+.form-control:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.btn-primary {
+    background-color: #007bff;
+    border-color: #007bff;
+}
+
+.btn-primary:hover {
+    background-color: #0056b3;
+    border-color: #004085;
+}
+
+/* Message input styling */
+.input-group .btn {
+    border-left: none;
+}
+
+.input-group .form-control:focus {
+    z-index: 3;
+}
+
+/* Alert improvements */
+.alert {
+    border: none;
+    border-radius: 0.5rem;
+}
+
+/* Modal improvements */
+.modal-content {
+    border: none;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+}
+
+.modal-header {
+    border-bottom: 1px solid #dee2e6;
+    background-color: #f8f9fa;
+}
+
+.modal-footer {
+    border-top: 1px solid #dee2e6;
+    background-color: #f8f9fa;
+}

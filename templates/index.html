@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}Chat - UDP Chat{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header">
+                <h5>Profile Selection</h5>
+            </div>
+            <div class="card-body">
+                {% if current_profile %}
+                    <div class="alert alert-info">
+                        <strong>Current Profile:</strong><br>
+                        {{ current_profile.display_name }}<br>
+                        <small class="text-muted">{{ current_profile.name }}</small>
+                    </div>
+                {% else %}
+                    <div class="alert alert-warning">
+                        No profile selected
+                    </div>
+                {% endif %}
+                
+                <select id="profileSelect" class="form-select mb-2">
+                    <option value="">Select a profile...</option>
+                    {% for profile_id, profile in profiles.items() %}
+                        <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
+                            {{ profile.display_name }}
+                        </option>
+                    {% endfor %}
+                </select>
+                
+                <div class="d-grid gap-2">
+                    <button id="setProfileBtn" class="btn btn-primary btn-sm">Set Profile</button>
+                    <a href="{{ url_for('profiles') }}" class="btn btn-outline-secondary btn-sm">Manage Profiles</a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6>Connection Status</h6>
+            </div>
+            <div class="card-body">
+                <span id="connectionStatus" class="badge bg-secondary">Connecting...</span>
+                <div class="mt-2">
+                    <small class="text-muted">Multicast: 224.0.0.69 • Port: 4403</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-9">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Chat Messages</h5>
+                <button id="clearMessagesBtn" class="btn btn-outline-danger btn-sm">Clear Messages</button>
+            </div>
+            <div class="card-body">
+                <div id="messagesContainer" class="mb-3" style="height: 400px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.25rem; padding: 10px;">
+                    <!-- Messages will be populated here -->
+                </div>
+                
+                <div class="input-group">
+                    <input type="text" id="messageInput" class="form-control" placeholder="Type your message..." maxlength="1000">
+                    <button id="sendBtn" class="btn btn-primary" type="button">Send</button>
+                </div>
+                <div class="form-text">Press Enter to send. Maximum 1000 characters.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="mt-4">
+    <div class="card">
+        <div class="card-header">
+            <h6>Instructions</h6>
+        </div>
+        <div class="card-body">
+            <ul class="mb-0">
+                <li>Select or create a profile to start chatting</li>
+                <li>Messages are broadcast via UDP to the local network on port 4403</li>
+                <li>Anyone running this app on the same network can receive and send messages</li>
+                <li>Messages are stored only during the current session</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Chat-specific JavaScript
+console.log('[page] index.js inline loaded');
+let currentProfile = null;
+let socket = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize WebSocket connection
+    initializeSocket();
+    
+    // Load current profile
+    loadCurrentProfile();
+    
+    // Set up event listeners first so the UI is interactive immediately
+    document.getElementById('setProfileBtn').addEventListener('click', setProfile);
+    document.getElementById('sendBtn').addEventListener('click', sendMessage);
+    document.getElementById('messageInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+    document.getElementById('clearMessagesBtn').addEventListener('click', clearMessages);
+
+    // Now load existing messages (non-blocking)
+    loadMessages();
+});
+
+function initializeSocket() {
+    socket = io();
+
+    socket.on('connect', function() {
+        console.log('[socket] connected');
+        document.getElementById('connectionStatus').className = 'badge bg-success';
+        document.getElementById('connectionStatus').textContent = 'Connected';
+    });
+
+    socket.on('connect_error', function(err) {
+        console.error('[socket] connect_error', err);
+        document.getElementById('connectionStatus').className = 'badge bg-danger';
+        document.getElementById('connectionStatus').textContent = 'Connect error';
+    });
+
+    socket.on('reconnect_attempt', function(n) {
+        console.warn('[socket] reconnect_attempt', n);
+        document.getElementById('connectionStatus').className = 'badge bg-warning';
+        document.getElementById('connectionStatus').textContent = 'Reconnecting…';
+    });
+
+    socket.on('disconnect', function(reason) {
+        console.warn('[socket] disconnected', reason);
+        document.getElementById('connectionStatus').className = 'badge bg-danger';
+        document.getElementById('connectionStatus').textContent = 'Disconnected';
+    });
+
+    socket.on('new_message', function(message) {
+        addMessageToUI(message);
+    });
+}
+
+function loadCurrentProfile() {
+    fetch('/api/current-profile')
+        .then(response => response.json())
+        .then(profile => {
+            currentProfile = profile;
+            if (profile) {
+                document.getElementById('profileSelect').value = profile.id;
+            }
+        })
+        .catch(error => console.error('Error loading current profile:', error));
+}
+
+function loadMessages() {
+    fetch('/api/messages')
+        .then(response => response.json())
+        .then(list => {
+            const container = document.getElementById('messagesContainer');
+            if (!container) return;
+            container.innerHTML = '';
+            (list || []).forEach(addMessageToUI);
+        })
+        .catch(err => {
+            console.error('Error loading messages:', err);
+            // Do not throw; we still want the rest of the page JS to run
+        });
+}
+
+function setProfile() {
+    const profileId = document.getElementById('profileSelect').value;
+    
+    fetch('/api/current-profile', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ profile_id: profileId || null })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            currentProfile = data.profile || null;
+            location.reload(); // Reload to update the UI
+        }
+    })
+    .catch(error => {
+        console.error('Error setting profile:', error);
+        alert('Error setting profile');
+    });
+}
+
+async function sendMessage() {
+    const btn = document.getElementById('sendBtn');
+    const messageInput = document.getElementById('messageInput');
+    const message = messageInput.value.trim();
+    if (!message) return;
+    if (!currentProfile) { alert('Please select a profile first'); return; }
+    btn.disabled = true;
+    try {
+        const response = await fetch('/api/send-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message })
+        });
+        const data = await response.json().catch(() => ({ error: 'Invalid JSON response' }));
+        if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+        messageInput.value = '';
+    } catch (err) {
+        console.error('Error sending message:', err);
+        alert('Error sending message: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        messageInput.focus();
+    }
+}
+
+function addMessageToUI(message) {
+    const container = document.getElementById('messagesContainer');
+    const messageEl = document.createElement('div');
+    messageEl.className = 'message mb-2 p-2 border-bottom';
+    
+    const timestamp = new Date(message.timestamp).toLocaleTimeString();
+    const isOwnMessage = message.sender_ip === 'self';
+    
+    messageEl.innerHTML = `
+        <div class="d-flex justify-content-between align-items-start">
+            <div class="flex-grow-1">
+                <strong class="${isOwnMessage ? 'text-primary' : 'text-info'}">${escapeHtml(message.sender_display)}</strong>
+                <small class="text-muted">(${escapeHtml(message.sender)})</small>
+                ${isOwnMessage ? '<span class="badge bg-primary ms-1">You</span>' : ''}
+                <div class="mt-1">${escapeHtml(message.content)}</div>
+            </div>
+            <small class="text-muted">${timestamp}</small>
+        </div>
+    `;
+    
+    container.appendChild(messageEl);
+    container.scrollTop = container.scrollHeight;
+}
+
+function clearMessages() {
+    if (confirm('Are you sure you want to clear all messages? This only clears the display, not the server history.')) {
+        document.getElementById('messagesContainer').innerHTML = '';
+    }
+}
+
+function escapeHtml(unsafe) {
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+</script>
+{% endblock %}

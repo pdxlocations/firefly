@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+
+{% block title %}Profiles - UDP Chat{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5>Create New Profile</h5>
+            </div>
+            <div class="card-body">
+                <form id="createProfileForm">
+                    <div class="mb-3">
+                        <label for="newProfileName" class="form-label">Username *</label>
+                        <input type="text" class="form-control" id="newProfileName" required maxlength="50">
+                        <div class="form-text">Unique username for identification (no spaces recommended)</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="newProfileDisplayName" class="form-label">Display Name *</label>
+                        <input type="text" class="form-control" id="newProfileDisplayName" required maxlength="100">
+                        <div class="form-text">Name shown in chat messages</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="newProfileDescription" class="form-label">Description</label>
+                        <textarea class="form-control" id="newProfileDescription" rows="3" maxlength="500"></textarea>
+                        <div class="form-text">Optional description or notes</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create Profile</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5>Existing Profiles</h5>
+            </div>
+            <div class="card-body">
+                {% if profiles %}
+                    <div id="profilesList">
+                        {% for profile_id, profile in profiles.items() %}
+                            <div class="profile-item border rounded p-3 mb-3" data-profile-id="{{ profile_id }}">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div class="flex-grow-1">
+                                        <h6 class="mb-1">{{ profile.display_name }}</h6>
+                                        <small class="text-muted">@{{ profile.name }}</small>
+                                        {% if profile.description %}
+                                            <p class="mt-2 mb-1">{{ profile.description }}</p>
+                                        {% endif %}
+                                        <small class="text-muted">Created: {{ profile.created_at[:10] }}</small>
+                                    </div>
+                                    <div class="btn-group-vertical" role="group">
+                                        <button class="btn btn-outline-primary btn-sm edit-profile-btn" data-profile-id="{{ profile_id }}">
+                                            Edit
+                                        </button>
+                                        <button class="btn btn-outline-danger btn-sm delete-profile-btn" data-profile-id="{{ profile_id }}">
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center text-muted">
+                        <p>No profiles created yet.</p>
+                        <p>Create your first profile to start chatting!</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Profile Modal -->
+<div class="modal fade" id="editProfileModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Profile</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editProfileForm">
+                    <input type="hidden" id="editProfileId">
+                    <div class="mb-3">
+                        <label for="editProfileName" class="form-label">Username *</label>
+                        <input type="text" class="form-control" id="editProfileName" required maxlength="50">
+                    </div>
+                    <div class="mb-3">
+                        <label for="editProfileDisplayName" class="form-label">Display Name *</label>
+                        <input type="text" class="form-control" id="editProfileDisplayName" required maxlength="100">
+                    </div>
+                    <div class="mb-3">
+                        <label for="editProfileDescription" class="form-label">Description</label>
+                        <textarea class="form-control" id="editProfileDescription" rows="3" maxlength="500"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveProfileBtn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="mt-4">
+    <div class="card">
+        <div class="card-header">
+            <h6>Profile Management Tips</h6>
+        </div>
+        <div class="card-body">
+            <ul class="mb-0">
+                <li><strong>Username:</strong> Should be unique and identify you to other users</li>
+                <li><strong>Display Name:</strong> Can be more descriptive and is shown in chat messages</li>
+                <li><strong>Multiple Profiles:</strong> You can create multiple profiles for different purposes</li>
+                <li><strong>Profile Selection:</strong> Go back to the chat page to select which profile to use</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let profiles = {};
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Set up event listeners first so the UI is interactive immediately
+    document.getElementById('setProfileBtn').addEventListener('click', setProfile);
+    document.getElementById('sendBtn').addEventListener('click', sendMessage);
+    document.getElementById('messageInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+    document.getElementById('clearMessagesBtn').addEventListener('click', clearMessages);
+
+    // Now load existing messages (non-blocking)
+    loadMessages();
+});
+
+function loadProfiles() {
+    fetch('/api/profiles')
+        .then(response => response.json())
+        .then(data => {
+            profiles = data;
+        })
+        .catch(error => console.error('Error loading profiles:', error));
+}
+
+function createProfile(e) {
+    e.preventDefault();
+    
+    const name = document.getElementById('newProfileName').value.trim();
+    const displayName = document.getElementById('newProfileDisplayName').value.trim();
+    const description = document.getElementById('newProfileDescription').value.trim();
+    
+    if (!name || !displayName) {
+        alert('Username and Display Name are required');
+        return;
+    }
+    
+    fetch('/api/profiles', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            name: name,
+            display_name: displayName,
+            description: description
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            alert('Profile created successfully!');
+            location.reload(); // Reload to show the new profile
+        }
+    })
+    .catch(error => {
+        console.error('Error creating profile:', error);
+        alert('Error creating profile');
+    });
+}
+
+function openEditModal(profileId) {
+    const profile = profiles[profileId];
+    if (!profile) {
+        alert('Profile not found');
+        return;
+    }
+    
+    document.getElementById('editProfileId').value = profileId;
+    document.getElementById('editProfileName').value = profile.name;
+    document.getElementById('editProfileDisplayName').value = profile.display_name;
+    document.getElementById('editProfileDescription').value = profile.description || '';
+    
+    new bootstrap.Modal(document.getElementById('editProfileModal')).show();
+}
+
+function updateProfile() {
+    const profileId = document.getElementById('editProfileId').value;
+    const name = document.getElementById('editProfileName').value.trim();
+    const displayName = document.getElementById('editProfileDisplayName').value.trim();
+    const description = document.getElementById('editProfileDescription').value.trim();
+    
+    if (!name || !displayName) {
+        alert('Username and Display Name are required');
+        return;
+    }
+    
+    fetch(`/api/profiles/${profileId}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            name: name,
+            display_name: displayName,
+            description: description
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            alert('Profile updated successfully!');
+            bootstrap.Modal.getInstance(document.getElementById('editProfileModal')).hide();
+            location.reload(); // Reload to show the updated profile
+        }
+    })
+    .catch(error => {
+        console.error('Error updating profile:', error);
+        alert('Error updating profile');
+    });
+}
+
+function deleteProfile(profileId) {
+    const profile = profiles[profileId];
+    if (!profile) {
+        alert('Profile not found');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete the profile "${profile.display_name}"? This action cannot be undone.`)) {
+        return;
+    }
+    
+    fetch(`/api/profiles/${profileId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            alert('Profile deleted successfully!');
+            location.reload(); // Reload to update the profile list
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting profile:', error);
+        alert('Error deleting profile');
+    });
+}
+
+function loadMessages() {
+    fetch('/api/messages')
+        .then(response => response.json())
+        .then(list => {
+            const container = document.getElementById('messagesContainer');
+            if (!container) return;
+            container.innerHTML = '';
+            (list || []).forEach(addMessageToUI);
+        })
+        .catch(err => {
+            console.error('Error loading messages:', err);
+            // Do not throw; we still want the rest of the page JS to run
+        });
+}
+</script>
+{% endblock %}

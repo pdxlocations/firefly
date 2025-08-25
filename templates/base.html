@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}UDP Chat{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">UDP Chat</a>
+            <div class="navbar-nav">
+                <a class="nav-link" href="{{ url_for('index') }}">Chat</a>
+                <a class="nav-link" href="{{ url_for('profiles') }}">Profiles</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@{{ socketio_client_version }}/dist/socket.io.min.js"></script>
+    <script>
+      console.log('[client] Using socket.io-client version from CDN:', '{{ socketio_client_version }}');
+      console.log('[server] python-socketio={{ python_socketio_version }} engineio={{ python_engineio_version }}');
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% block scripts %}
+    <script>
+    console.log('[page] index.js inline loaded');
+
+    function initializeSocket() {
+        socket = io();
+
+        socket.on('connect', function() {
+            console.log('[socket] connected');
+            document.getElementById('connectionStatus').className = 'badge bg-success';
+            document.getElementById('connectionStatus').textContent = 'Connected';
+        });
+
+        socket.on('connect_error', function(err) {
+            console.error('[socket] connect_error', err);
+            document.getElementById('connectionStatus').className = 'badge bg-danger';
+            document.getElementById('connectionStatus').textContent = 'Connect error';
+        });
+
+        socket.on('reconnect_attempt', function(n) {
+            console.warn('[socket] reconnect_attempt', n);
+            document.getElementById('connectionStatus').className = 'badge bg-warning';
+            document.getElementById('connectionStatus').textContent = 'Reconnecting…';
+        });
+
+        socket.on('disconnect', function(reason) {
+            console.warn('[socket] disconnected', reason);
+            document.getElementById('connectionStatus').className = 'badge bg-danger';
+            document.getElementById('connectionStatus').textContent = 'Disconnected';
+        });
+
+        socket.on('new_message', function(message) {
+            addMessageToUI(message);
+        });
+    }
+
+    async function sendMessage() {
+        const btn = document.getElementById('sendBtn');
+        const messageInput = document.getElementById('messageInput');
+        const message = messageInput.value.trim();
+        if (!message) return;
+        if (!currentProfile) { alert('Please select a profile first'); return; }
+        btn.disabled = true;
+        try {
+            const response = await fetch('/api/send-message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message })
+            });
+            const data = await response.json().catch(() => ({ error: 'Invalid JSON response' }));
+            if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+            messageInput.value = '';
+        } catch (err) {
+            console.error('Error sending message:', err);
+            alert('Error sending message: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            messageInput.focus();
+        }
+    }
+
+    function loadMessages() {
+        fetch('/api/messages')
+            .then(response => response.json())
+            .then(list => {
+                const container = document.getElementById('messagesContainer');
+                if (!container) return;
+                container.innerHTML = '';
+                (list || []).forEach(addMessageToUI);
+            })
+            .catch(err => {
+                console.error('Error loading messages:', err);
+                // Do not throw; we still want the rest of the page JS to run
+            });
+    }
+    </script>
+    <script>
+    // Also handle Enter to send
+    document.getElementById('messageInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+    </script>
+    <script>
+    // User instructions update
+    // Replace the port 12345 with 4403 in the instructions list item
+    document.addEventListener('DOMContentLoaded', function() {
+        const instructionItems = document.querySelectorAll('li');
+        instructionItems.forEach(li => {
+            if (li.textContent.includes('Messages are broadcast via UDP to the local network on port 12345')) {
+                li.textContent = 'Messages are broadcast via UDP to the local network on port 4403';
+            }
+        });
+    });
+    </script>
+    {% endblock %}
+</body>
+</html>

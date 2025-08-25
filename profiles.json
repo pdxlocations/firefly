@@ -1,4 +1,3 @@
-
 {
   "c289e800-f73e-4e7b-af12-9e988bbc2ea0": {
     "id": "c289e800-f73e-4e7b-af12-9e988bbc2ea0",
@@ -17,5 +16,14 @@
     "channel": "",
     "key": "",
     "created_at": "2025-08-24T23:36:28.179705"
+  },
+  "5ac5407e-cf2c-4fa2-a835-d59323800b2e": {
+    "id": "5ac5407e-cf2c-4fa2-a835-d59323800b2e",
+    "node_id": "!deadbeaf",
+    "long_name": "UDP Test",
+    "short_name": "UDP",
+    "channel": "LongFast",
+    "key": "AQ==",
+    "created_at": "2025-08-25T00:17:04.533807"
   }
 }

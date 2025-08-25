@@ -62,7 +62,7 @@ def main():
         # Start UDP server
         if udp_server.start():
             print("UDP Chat Server started successfully")
-            socketio.run(app, host='0.0.0.0', port=5007, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
+            socketio.run(app, host='0.0.0.0', port=5008, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
         else:
             print("Failed to start UDP server")
             sys.exit(1)

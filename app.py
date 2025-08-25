@@ -14,6 +14,10 @@ import struct
 import socketio as py_socketio
 import engineio
 
+from encryption import decrypt_packet
+
+from meshtastic.protobuf import mesh_pb2
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", logger=True, engineio_logger=True)
@@ -182,6 +186,8 @@ class UDPChatServer:
         if self.socket:
             self.socket.close()
     
+    
+
     def listen_for_messages(self):
         """Listen for incoming UDP messages"""
         while self.running:
@@ -189,30 +195,46 @@ class UDPChatServer:
                 data, addr = self.socket.recvfrom(MAX_MESSAGE_LENGTH)
                 try:
                     print(f"[UDP IN] from {addr[0]}:{addr[1]} {len(data)}B")
-                    print(f"[RAW] {data!r}")
-                except Exception as e:
-                    print(f"[PRINT ERROR] {e}")
+                    # print(f"[RAW] {data!r}")
 
-                message_data = json.loads(data.decode('utf-8'))
-                
-                # Add message to global messages list
-                message = {
-                    'id': str(uuid.uuid4()),
-                    'sender': message_data.get('sender', 'Unknown'),
-                    'sender_display': message_data.get('sender_display', 'Unknown'),
-                    'content': message_data.get('content', ''),
-                    'timestamp': message_data.get('timestamp', datetime.now().isoformat()),
-                    'sender_ip': addr[0]
-                }
+                    mp = mesh_pb2.MeshPacket()
+                    mp.ParseFromString(data)
 
-                # Skip echoing back self-sent messages
-                if addr[0] == '127.0.0.1' or message_data.get('sender') == (current_profile['short_name'] if current_profile else None):
-                    continue
-                
-                messages.append(message)
-                
-                # Emit to all connected web clients
-                socketio.emit('new_message', message)
+
+                    if mp.HasField("encrypted") and not mp.HasField("decoded"):
+                        decoded = decrypt_packet(mp, "AQ==")
+                        if decoded is not None:
+                            mp.decoded.CopyFrom(decoded)
+
+                        if mp.HasField("decoded") and mp.decoded.portnum == "TEXT_MESSAGE_APP":
+                            message = mp.decoded.payload.decode('utf-8', errors='replace')  
+                        print (mp)
+                        print ()
+                        print (message)
+
+                    except Exception as e:
+                        print(f"[PRINT ERROR] {e}")
+
+                    message_data = json.loads(data.decode('utf-8'))
+                    
+                    # Add message to global messages list
+                    message = {
+                        'id': str(uuid.uuid4()),
+                        'sender': message_data.get('sender', 'Unknown'),
+                        'sender_display': message_data.get('sender_display', 'Unknown'),
+                        'content': message,
+                        'timestamp': message_data.get('timestamp', datetime.now().isoformat()),
+                        'sender_ip': addr[0]
+                    }
+
+                    # Skip echoing back self-sent messages
+                    if addr[0] == '127.0.0.1' or message_data.get('sender') == (current_profile['short_name'] if current_profile else None):
+                        continue
+                    
+                    messages.append(message)
+                    
+                    # Emit to all connected web clients
+                    socketio.emit('new_message', message)
                 
             except Exception as e:
                 if self.running:

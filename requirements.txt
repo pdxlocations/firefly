@@ -3,3 +3,5 @@ Flask-SocketIO==5.3.6
 python-socketio==5.9.0
 python-engineio==4.7.1
 eventlet==0.33.3
+meshtastic==2.7.1
+cryptography==45.0.6

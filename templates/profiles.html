@@ -140,33 +140,29 @@
 
 {% block scripts %}
 <script>
+console.log('[profiles] script loaded');
 let profiles = {};
 
 document.addEventListener('DOMContentLoaded', function() {
     // Set up event listeners first so the UI is interactive immediately
-    document.getElementById('setProfileBtn').addEventListener('click', setProfile);
-    document.getElementById('sendBtn').addEventListener('click', sendMessage);
-    document.getElementById('messageInput').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            sendMessage();
-        }
-    });
-    document.getElementById('clearMessagesBtn').addEventListener('click', clearMessages);
     document.getElementById('createProfileForm').addEventListener('submit', createProfile);
     document.getElementById('saveProfileBtn').addEventListener('click', updateProfile);
 
-    // Delegate edit and delete buttons
+    // Delegate edit and delete buttons robustly (use closest)
     document.getElementById('profilesList')?.addEventListener('click', function(e) {
-        if (e.target.classList.contains('edit-profile-btn')) {
-            openEditModal(e.target.getAttribute('data-profile-id'));
-        } else if (e.target.classList.contains('delete-profile-btn')) {
-            deleteProfile(e.target.getAttribute('data-profile-id'));
+        const editBtn = e.target.closest('.edit-profile-btn');
+        const delBtn = e.target.closest('.delete-profile-btn');
+        if (editBtn) {
+            openEditModal(editBtn.getAttribute('data-profile-id'));
+            return;
+        }
+        if (delBtn) {
+            deleteProfile(delBtn.getAttribute('data-profile-id'));
+            return;
         }
     });
 
-    // Now load existing messages (non-blocking)
-    loadMessages();
+    // Only load profiles, not messages
     loadProfiles();
 });
 
@@ -287,19 +283,6 @@ function deleteProfile(profileId) {
     });
 }
 
-function loadMessages() {
-    fetch('/api/messages')
-        .then(response => response.json())
-        .then(list => {
-            const container = document.getElementById('messagesContainer');
-            if (!container) return;
-            container.innerHTML = '';
-            (list || []).forEach(addMessageToUI);
-        })
-        .catch(err => {
-            console.error('Error loading messages:', err);
-            // Do not throw; we still want the rest of the page JS to run
-        });
-}
+</script>
 </script>
 {% endblock %}

@@ -193,27 +193,26 @@ class UDPChatServer:
         while self.running:
             try:
                 data, addr = self.socket.recvfrom(MAX_MESSAGE_LENGTH)
-                try:
-                    print(f"[UDP IN] from {addr[0]}:{addr[1]} {len(data)}B")
-                    # print(f"[RAW] {data!r}")
 
-                    mp = mesh_pb2.MeshPacket()
-                    mp.ParseFromString(data)
+                print(f"[UDP IN] from {addr[0]}:{addr[1]} {len(data)}B")
+                # print(f"[RAW] {data!r}")
+
+                mp = mesh_pb2.MeshPacket()
+                mp.ParseFromString(data)
 
 
-                    if mp.HasField("encrypted") and not mp.HasField("decoded"):
-                        decoded = decrypt_packet(mp, "AQ==")
-                        if decoded is not None:
-                            mp.decoded.CopyFrom(decoded)
+                if mp.HasField("encrypted") and not mp.HasField("decoded"):
+                    decoded = decrypt_packet(mp, "AQ==")
+                    if decoded is not None:
+                        mp.decoded.CopyFrom(decoded)
 
-                        if mp.HasField("decoded") and mp.decoded.portnum == "TEXT_MESSAGE_APP":
-                            message = mp.decoded.payload.decode('utf-8', errors='replace')  
-                        print (mp)
-                        print ()
-                        print (message)
+                if mp.HasField("decoded") and mp.decoded.portnum == "1":
+                    message = mp.decoded.payload.decode('utf-8', errors='replace')  
+                    print (mp)
+                    print ()
+                    print (message)
 
-                    except Exception as e:
-                        print(f"[PRINT ERROR] {e}")
+
 
                     message_data = json.loads(data.decode('utf-8'))
                     

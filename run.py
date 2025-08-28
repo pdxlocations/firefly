@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple runner script for the UDP Chat Application
+Simple runner script for the MUDP Chat Application
 """
 
 import sys
@@ -40,7 +40,7 @@ def check_dependencies():
 
 def main():
     """Main entry point"""
-    print("UDP Chat Application")
+    print("MUDP Chat Application")
     print("=" * 50)
 
     # Check Python version
@@ -51,7 +51,7 @@ def main():
     if not check_dependencies():
         sys.exit(1)
 
-    print("Starting UDP Chat Application...")
+    print("Starting MUDP Chat Application...")
     print(f"Access the application at: http://localhost:{SERVER_PORT}")
     print("Press Ctrl+C to stop the application")
     print("-" * 50)
@@ -62,7 +62,7 @@ def main():
 
         # Start UDP server
         if udp_server.start():
-            print("UDP Chat Server started successfully")
+            print("MUDP Chat Server started successfully")
             socketio.run(
                 app, host="0.0.0.0", port=SERVER_PORT, debug=True, use_reloader=True, allow_unsafe_werkzeug=True
             )

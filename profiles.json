@@ -1,16 +1,74 @@
 {
-  "c289e800-f73e-4e7b-af12-9e988bbc2ea0": {
-    "id": "c289e800-f73e-4e7b-af12-9e988bbc2ea0",
-    "name": "ben",
-    "display_name": "bern",
-    "description": "",
-    "created_at": "2025-08-24T23:26:58.635152"
+  "e7b312f4-1122-4a3a-baaa-12ff3ac0aa01": {
+    "id": "e7b312f4-1122-4a3a-baaa-12ff3ac0aa01",
+    "node_id": "!badc0de",
+    "long_name": "Packet Whisperer",
+    "short_name": "Wisp",
+    "channel": "ShortFast",
+    "key": "AQ==",
+    "created_at": "2025-08-27T22:40:00.000001"
   },
-  "bdde8128-2047-4e9d-9a4e-83c6efe098a1": {
-    "id": "bdde8128-2047-4e9d-9a4e-83c6efe098a1",
-    "name": "bob",
-    "display_name": "bob",
-    "description": "",
-    "created_at": "2025-08-24T23:36:28.179705"
+  "1a93fd12-2233-4a3a-bbbb-23fe4ad0bb02": {
+    "id": "1a93fd12-2233-4a3a-bbbb-23fe4ad0bb02",
+    "node_id": "!beefcafe",
+    "long_name": "UDP Genie",
+    "short_name": "Geni",
+    "channel": "ShortFast",
+    "key": "AQ==",
+    "created_at": "2025-08-27T22:40:00.000002"
+  },
+  "2b84ec23-3344-4a3a-cccc-34ed5be0cc03": {
+    "id": "2b84ec23-3344-4a3a-cccc-34ed5be0cc03",
+    "node_id": "!cafebabe",
+    "long_name": "Mesh Rider",
+    "short_name": "Ridr",
+    "channel": "ShortFast",
+    "key": "AQ==",
+    "created_at": "2025-08-27T22:40:00.000003"
+  },
+  "3c75db34-4455-4a3a-dddd-45dc6cf0dd04": {
+    "id": "3c75db34-4455-4a3a-dddd-45dc6cf0dd04",
+    "node_id": "!f00dbabe",
+    "long_name": "Echo Phantom",
+    "short_name": "Echo",
+    "channel": "ShortFast",
+    "key": "AQ==",
+    "created_at": "2025-08-27T22:40:00.000004"
+  },
+  "4d66ca45-5566-4a3a-eeee-56cb7df0ee05": {
+    "id": "4d66ca45-5566-4a3a-eeee-56cb7df0ee05",
+    "node_id": "!decafbad",
+    "long_name": "Ping Lord",
+    "short_name": "Ping",
+    "channel": "ShortFast",
+    "key": "AQ==",
+    "created_at": "2025-08-27T22:40:00.000005"
+  },
+  "5e57b956-6677-4a3a-ffff-67ba8ef0ff06": {
+    "id": "5e57b956-6677-4a3a-ffff-67ba8ef0ff06",
+    "node_id": "!0ddba11a",
+    "long_name": "Captain Multicast",
+    "short_name": "Capn",
+    "channel": "ShortFast",
+    "key": "AQ==",
+    "created_at": "2025-08-27T22:40:00.000006"
+  },
+  "6f489867-7788-4a3a-aaaa-78a99ff0aa07": {
+    "id": "6f489867-7788-4a3a-aaaa-78a99ff0aa07",
+    "node_id": "!facefeed",
+    "long_name": "Byte Bandit",
+    "short_name": "Band",
+    "channel": "ShortFast",
+    "key": "AQ==",
+    "created_at": "2025-08-27T22:40:00.000007"
+  },
+  "7059a978-8899-4a3a-bbbb-89b0aff0bb08": {
+    "id": "7059a978-8899-4a3a-bbbb-89b0aff0bb08",
+    "node_id": "!feedf00d",
+    "long_name": "Signal Sprite",
+    "short_name": "Sigl",
+    "channel": "ShortFast",
+    "key": "AQ==",
+    "created_at": "2025-08-27T22:40:00.000008"
   }
 }

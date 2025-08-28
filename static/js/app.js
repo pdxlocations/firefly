@@ -1,4 +1,4 @@
-// Common JavaScript utilities for UDP Chat App
+// Common JavaScript utilities for MUDP Chat App
 
 // Utility functions
 const Utils = {

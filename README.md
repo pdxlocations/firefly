@@ -1,4 +1,4 @@
-# UDP Chat Application
+# MUDP Chat Application
 
 A real-time web-based chat application that communicates over UDP on the local network. Built with Python Flask and WebSockets for real-time messaging with user profile management.
 

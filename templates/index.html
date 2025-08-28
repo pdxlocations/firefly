@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Chat - UDP Chat{% endblock %}
+{% block title %}Chat - MUDP Chat{% endblock %}
 
 {% block content %}
 <div class="row">
@@ -13,8 +13,11 @@
                 {% if current_profile %}
                     <div class="alert alert-info">
                         <strong>Current Profile:</strong><br>
-                        {{ current_profile.display_name }}<br>
-                        <small class="text-muted">{{ current_profile.name }}</small>
+                        Long: {{ current_profile.long_name }}<br>
+                        Short: <span class="text-monospace">{{ current_profile.short_name }}</span><br>
+                        Node ID: <span class="text-monospace">{{ current_profile.node_id }}</span><br>
+                        Channel: {{ current_profile.channel }}<br>
+                        Key: <span class="text-monospace">{{ current_profile.key }}</span>
                     </div>
                 {% else %}
                     <div class="alert alert-warning">
@@ -26,7 +29,7 @@
                     <option value="">Select a profile...</option>
                     {% for profile_id, profile in profiles.items() %}
                         <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
-                            {{ profile.display_name }}
+                            {{ profile.short_name }}
                         </option>
                     {% endfor %}
                 </select>
@@ -97,8 +100,21 @@ let currentProfile = null;
 let socket = null;
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize WebSocket connection
-    initializeSocket();
+    // Initialize WebSocket connection (don’t block the rest of the UI if this fails)
+    try {
+        if (typeof io !== 'undefined') {
+            initializeSocket();
+        } else {
+            throw new Error('socket.io-client not loaded');
+        }
+    } catch (e) {
+        console.error('[socket] init failed:', e);
+        const badge = document.getElementById('connectionStatus');
+        if (badge) {
+            badge.className = 'badge bg-danger';
+            badge.textContent = 'Socket error';
+        }
+    }
     
     // Load current profile
     loadCurrentProfile();
@@ -232,7 +248,8 @@ function addMessageToUI(message) {
     const messageEl = document.createElement('div');
     messageEl.className = 'message mb-2 p-2 border-bottom';
     
-    const timestamp = new Date(message.timestamp).toLocaleTimeString();
+    const ts = message && message.timestamp ? new Date(message.timestamp) : new Date();
+    const timestamp = isNaN(ts.getTime()) ? '' : ts.toLocaleTimeString();
     const isOwnMessage = message.sender_ip === 'self';
     
     messageEl.innerHTML = `

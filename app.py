@@ -432,6 +432,6 @@ if __name__ == "__main__":
     if udp_server.start():
         app.config["TEMPLATES_AUTO_RELOAD"] = True
         print(f"Starting Flask-SocketIO server on http://localhost:5007 (mudp {MCAST_GRP}:{MCAST_PORT}) ...")
-        socketio.run(app, host="0.0.0.0", port=5007, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
+        socketio.run(app, host="0.0.0.0", port=5011, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
     else:
         print("Failed to start UDP server")

@@ -2,6 +2,8 @@
 
 A real-time web-based chat application that communicates over UDP on the local network. Built with Python Flask and WebSockets for real-time messaging with user profile management.
 
+<img width="1239" height="653" alt="image" src="https://github.com/user-attachments/assets/b8914af6-0343-464b-9bc1-e8403c1ff103" />
+
 ## Features
 
 - **Real-time Chat**: Send and receive messages instantly across the local network

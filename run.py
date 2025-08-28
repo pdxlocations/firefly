@@ -5,7 +5,7 @@ Simple runner script for the MUDP Chat Application
 
 import sys
 
-SERVER_PORT = 5009
+SERVER_PORT = 5011
 
 
 def check_python_version():

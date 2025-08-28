@@ -5,7 +5,7 @@ A real-time web-based chat application that communicates over UDP on the local n
 ## Features
 
 - **Real-time Chat**: Send and receive messages instantly across the local network
-- **UDP Broadcasting**: Messages are broadcast via UDP to all devices on the same network
+- **UDP Multicast**: Messages are sent via UDP multicast to all devices on the same network
 - **User Profiles**: Create, edit, and manage multiple user profiles
 - **Web Interface**: Clean, responsive web interface built with Bootstrap
 - **Real-time Updates**: WebSocket integration for instant message delivery
@@ -21,13 +21,14 @@ A real-time web-based chat application that communicates over UDP on the local n
 
 1. **Clone or download this project**
    ```bash
-   cd mudpchat-2
+   git clone https://github.com/pdxlocations/mudpchat.git
+   cd mudpchat
    ```
 
 2. **Create a virtual environment (recommended)**
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   python3 -m venv .venv
+   source .venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. **Install dependencies**
@@ -41,12 +42,13 @@ A real-time web-based chat application that communicates over UDP on the local n
 
 1. **Run the application**
    ```bash
-   python app.py
+   python run.py
    ```
+   You can also run app.py directly for testing, but run.py is the recommended entry point.
 
 2. **Open your web browser**
-   - Navigate to `http://localhost:5000`
-   - Or access from other devices on the network using your computer's IP address: `http://YOUR_IP:5000`
+   - Navigate to `http://localhost:5011`
+   - Or access from other devices on the network using your computer's IP address: `http://YOUR_IP:5011`
 
 ### Using the Chat
 
@@ -79,16 +81,15 @@ To chat with others on your network:
 
 You can modify these settings in `app.py`:
 
-- **UDP_PORT**: Default is 12345 (change if port conflicts occur)
-- **BROADCAST_IP**: Default is '255.255.255.255' (broadcast to entire subnet)
-- **MAX_MESSAGE_LENGTH**: Default is 1024 characters
-- **Flask port**: Default is 5000 (change in the last line of app.py)
+- **MCAST_GRP**: Default is 224.0.0.69 (multicast group address)
+- **MCAST_PORT**: Default is 4403 (UDP multicast port)
+- **Flask port**: Default is 5011 (change in run.py)
 
 ## Network Requirements
 
 - All devices must be on the same local network
-- UDP port 12345 must be available and not blocked by firewalls
-- For best results, ensure your network allows UDP broadcasting
+- UDP multicast port 4403 must be available and not blocked by firewalls
+- For best results, ensure your network allows UDP multicast traffic
 
 ## File Structure
 
@@ -139,7 +140,7 @@ If you get a "port already in use" error:
 - **Real-time**: WebSocket connections for instant updates
 - **Networking**: UDP sockets for local network communication
 - **Storage**: JSON file for profile persistence
-- **Threading**: Background threads for UDP message listening
+- **Threading**: Flask-SocketIO uses the threading backend, and UDPPacketStream runs a background listener thread for receiving packets
 
 ## Security Considerations
 

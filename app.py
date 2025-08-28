@@ -50,21 +50,41 @@ def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
     else:
         print(f"encrypted: { {packet.encrypted} }")
 
-    # print("id:", packet.id or None)
-    # print("rx_time:", packet.rx_time or None)
-    # print("rx_snr:", packet.rx_snr or None)
-    # print("hop_limit:", packet.hop_limit or None)
-    # priority_name = mesh_pb2.MeshPacket.Priority.Name(packet.priority) if packet.priority else "N/A"
-    # print("priority:", priority_name or None)
-    # print("rx_rssi:", packet.rx_rssi or None)
-    # print("hop_start:", packet.hop_start or None)
-    # print("next_hop:", packet.next_hop or None)
-    # print("relay_node:", packet.relay_node or None)
+    print("id:", packet.id or None)
+    print("rx_time:", packet.rx_time or None)
+    print("rx_snr:", packet.rx_snr or None)
+    print("hop_limit:", packet.hop_limit or None)
+    priority_name = mesh_pb2.MeshPacket.Priority.Name(packet.priority) if packet.priority else "N/A"
+    print("priority:", priority_name or None)
+    print("rx_rssi:", packet.rx_rssi or None)
+    print("hop_start:", packet.hop_start or None)
+    print("next_hop:", packet.next_hop or None)
+    print("relay_node:", packet.relay_node or None)
 
 
+def _my_node_num():
+    """Return numeric node id derived from node.node_id like '!deadbeef', else None."""
+    try:
+        nid = getattr(node, 'node_id', None)
+        if isinstance(nid, str) and nid.startswith('!'):
+            return int(nid[1:], 16)
+    except Exception:
+        pass
+    return None
+
+def _is_from_me(packet):
+    try:
+        my_num = _my_node_num()
+        sender_num = getattr(packet, 'from', None)
+        return (my_num is not None) and (sender_num == my_num)
+    except Exception:
+        return False
 
 def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
     msg = packet.decoded.payload.decode("utf-8", "ignore")
+    if _is_from_me(packet):
+        # Ignore our own messages received back from the network (we already mirror locally)
+        return
     print(f"\n[RECV] From: {getattr(packet, 'from', None)} Message: {msg}")
 
     # Push into in-memory log and notify connected clients
@@ -82,7 +102,7 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
     except Exception as e:
         print(f"Failed to emit incoming message: {e}")
 
-pub.subscribe(on_recieve, "mesh.rx.packet")
+# pub.subscribe(on_recieve, "mesh.rx.packet")
 pub.subscribe(on_text_message, "mesh.rx.port.1")
 
 

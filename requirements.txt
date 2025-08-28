@@ -5,3 +5,4 @@ python-engineio==4.7.1
 eventlet==0.33.3
 meshtastic==2.7.1
 cryptography==45.0.6
+mudp==1.0.0a7

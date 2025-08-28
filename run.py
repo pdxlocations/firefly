@@ -4,8 +4,8 @@ Simple runner script for the UDP Chat Application
 """
 
 import sys
-import subprocess
-import os
+
+SERVER_PORT = 5009
 
 def check_python_version():
     """Check if Python version is compatible"""
@@ -49,7 +49,7 @@ def main():
         sys.exit(1)
     
     print("Starting UDP Chat Application...")
-    print("Access the application at: http://localhost:5007")
+    print(f"Access the application at: http://localhost:{SERVER_PORT}")
     print("Press Ctrl+C to stop the application")
     print("-" * 50)
     
@@ -62,7 +62,7 @@ def main():
         # Start UDP server
         if udp_server.start():
             print("UDP Chat Server started successfully")
-            socketio.run(app, host='0.0.0.0', port=5009, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
+            socketio.run(app, host='0.0.0.0', port=SERVER_PORT, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
         else:
             print("Failed to start UDP server")
             sys.exit(1)

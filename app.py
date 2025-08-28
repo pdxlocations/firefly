@@ -4,17 +4,11 @@ import json
 
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit
 import uuid
 import os
-
-
 import socketio as py_socketio
 import engineio
-
-SOCKETIO_CLIENT_VERSION = "4.7.5"  # compatible with python-socketio 5.x
-
-
 from pubsub import pub
 
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
@@ -23,15 +17,16 @@ from mudp import UDPPacketStream, node, conn, send_text_message
 
 MCAST_GRP = "224.0.0.69"
 MCAST_PORT = 4403
-KEY = "1PG7OiApB1nwvP+rz05pAQ=="
+PROFILES_FILE = 'profiles.json'
+SOCKETIO_CLIENT_VERSION = "4.7.5"
 
-# node.channel = "ShortFast"
-# node.node_id = "!deadbeef"
-# node.long_name = "UDP Test"
-# node.short_name = "UDP"
-# node.key = "AQ=="
+current_profile = None
+messages = []
 
-interface = UDPPacketStream(MCAST_GRP, MCAST_PORT, key=KEY)
+key = "1PG7OiApB1nwvP+rz05pAQ=="
+
+
+interface = UDPPacketStream(MCAST_GRP, MCAST_PORT, key=key)
 conn.setup_multicast(MCAST_GRP, MCAST_PORT)
 
 
@@ -106,17 +101,6 @@ def inject_versions():
     }
 
 
-PROFILES_FILE = 'profiles.json'
-MAX_MESSAGE_LENGTH = 1024
-
-
-# Global variables
-current_profile = None
-messages = []
-udp_socket = None
-running = False
-
-
 class ProfileManager:
     def __init__(self):
         self.profiles_file = PROFILES_FILE
@@ -137,21 +121,6 @@ class ProfileManager:
         """Save profiles to JSON file"""
         with open(self.profiles_file, 'w') as f:
             json.dump(self.profiles, f, indent=2)
-    
-    def create_profile(self, name, display_name, description=""):
-        """Create a new profile"""
-        profile_id = str(uuid.uuid4())
-        self.profiles[profile_id] = {
-            'id': profile_id,
-            'node_id': name,            # backwards-compat: treat previous 'name' arg as node_id
-            'long_name': display_name,  # backwards-compat: treat previous 'display_name' arg as long_name
-            'short_name': description if description else '',  # placeholder if old callers pass description
-            'channel': '',
-            'key': '',
-            'created_at': datetime.now().isoformat()
-        }
-        self.save_profiles()
-        return profile_id
     
     def update_profile(self, profile_id, node_id, long_name, short_name, channel, key):
         """Update an existing profile"""
@@ -419,6 +388,6 @@ if __name__ == '__main__':
     if udp_server.start():
         app.config['TEMPLATES_AUTO_RELOAD'] = True
         print(f"Starting Flask-SocketIO server on http://localhost:5007 (mudp {MCAST_GRP}:{MCAST_PORT}) ...")
-        socketio.run(app, host='0.0.0.0', port=5007, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
+        socketio.run(app, host='0.0.0.0', port=5000, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
     else:
         print("Failed to start UDP server")

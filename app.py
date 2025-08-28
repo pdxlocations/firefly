@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+from collections import deque
 
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
@@ -22,6 +23,23 @@ SOCKETIO_CLIENT_VERSION = "4.7.5"
 
 current_profile = None
 messages = []
+
+# De-duplication cache for received packets to avoid double-display
+_DEDUP_CACHE = set()
+_DEDUP_QUEUE = deque(maxlen=500)
+
+
+def _already_seen(key):
+    """Return True if we've already processed a message with this key; otherwise record it and return False."""
+    if key in _DEDUP_CACHE:
+        return True
+    _DEDUP_CACHE.add(key)
+    _DEDUP_QUEUE.append(key)
+    if len(_DEDUP_CACHE) > _DEDUP_QUEUE.maxlen:
+        old = _DEDUP_QUEUE.popleft()
+        _DEDUP_CACHE.discard(old)
+    return False
+
 
 key = "1PG7OiApB1nwvP+rz05pAQ=="
 
@@ -86,6 +104,13 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
     if _is_from_me(packet):
         # Ignore our own messages received back from the network (we already mirror locally)
         return
+
+    pkt_id = getattr(packet, "id", 0) or 0
+    if not pkt_id:
+        return
+    if _already_seen(("id", pkt_id)):
+        return
+
     print(f"\n[RECV] From: {getattr(packet, 'from', None)} Message: {msg}")
 
     # Push into in-memory log and notify connected clients
@@ -104,7 +129,7 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
         print(f"Failed to emit incoming message: {e}")
 
 
-# pub.subscribe(on_recieve, "mesh.rx.packet")
+pub.subscribe(on_recieve, "mesh.rx.packet")
 pub.subscribe(on_text_message, "mesh.rx.port.1")
 
 
@@ -407,6 +432,6 @@ if __name__ == "__main__":
     if udp_server.start():
         app.config["TEMPLATES_AUTO_RELOAD"] = True
         print(f"Starting Flask-SocketIO server on http://localhost:5007 (mudp {MCAST_GRP}:{MCAST_PORT}) ...")
-        socketio.run(app, host="0.0.0.0", port=5000, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
+        socketio.run(app, host="0.0.0.0", port=5007, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
     else:
         print("Failed to start UDP server")

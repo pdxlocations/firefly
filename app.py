@@ -1,66 +1,114 @@
 #!/usr/bin/env python3
 
 import json
-import socket
-import threading
-import time
+
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import uuid
 import os
-import struct
+
 
 import socketio as py_socketio
 import engineio
 
-from encryption import decrypt_packet
+SOCKETIO_CLIENT_VERSION = "4.7.5"  # compatible with python-socketio 5.x
 
-from meshtastic.protobuf import mesh_pb2
+
+from pubsub import pub
+
+from meshtastic.protobuf import mesh_pb2, portnums_pb2
+from mudp import UDPPacketStream, node, conn, send_text_message
+
+
+MCAST_GRP = "224.0.0.69"
+MCAST_PORT = 4403
+KEY = "1PG7OiApB1nwvP+rz05pAQ=="
+
+# node.channel = "ShortFast"
+# node.node_id = "!deadbeef"
+# node.long_name = "UDP Test"
+# node.short_name = "UDP"
+# node.key = "AQ=="
+
+interface = UDPPacketStream(MCAST_GRP, MCAST_PORT, key=KEY)
+conn.setup_multicast(MCAST_GRP, MCAST_PORT)
+
+
+
+def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
+    print(f"\n[RECV] Packet received from {addr}")
+    print("from:", getattr(packet, "from", None))
+    print("to:", packet.to)
+    print("channel:", packet.channel or None)
+
+    if packet.HasField("decoded"):
+        port_name = portnums_pb2.PortNum.Name(packet.decoded.portnum) if packet.decoded.portnum else "N/A"
+        print("decoded {")
+        print("  portnum:", port_name)
+        try:
+            print("  payload:", packet.decoded.payload.decode("utf-8", "ignore"))
+        except Exception:
+            print("  payload (raw bytes):", packet.decoded.payload)
+        print("  bitfield:", packet.decoded.bitfield or None)
+        print("}")
+    else:
+        print(f"encrypted: { {packet.encrypted} }")
+
+    # print("id:", packet.id or None)
+    # print("rx_time:", packet.rx_time or None)
+    # print("rx_snr:", packet.rx_snr or None)
+    # print("hop_limit:", packet.hop_limit or None)
+    # priority_name = mesh_pb2.MeshPacket.Priority.Name(packet.priority) if packet.priority else "N/A"
+    # print("priority:", priority_name or None)
+    # print("rx_rssi:", packet.rx_rssi or None)
+    # print("hop_start:", packet.hop_start or None)
+    # print("next_hop:", packet.next_hop or None)
+    # print("relay_node:", packet.relay_node or None)
+
+
+
+def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
+    msg = packet.decoded.payload.decode("utf-8", "ignore")
+    print(f"\n[RECV] From: {getattr(packet, 'from', None)} Message: {msg}")
+
+    # Push into in-memory log and notify connected clients
+    try:
+        message = {
+            'id': str(uuid.uuid4()),
+            'sender': str(getattr(packet, 'from', 'Unknown')),
+            'sender_display': str(getattr(packet, 'from', 'Unknown')),
+            'content': msg,
+            'timestamp': datetime.now().isoformat(),
+            'sender_ip': (addr[0] if isinstance(addr, tuple) and len(addr) >= 1 else 'mesh')
+        }
+        messages.append(message)
+        socketio.emit('new_message', message)
+    except Exception as e:
+        print(f"Failed to emit incoming message: {e}")
+
+pub.subscribe(on_recieve, "mesh.rx.packet")
+pub.subscribe(on_text_message, "mesh.rx.port.1")
+
+
+
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", logger=True, engineio_logger=True)
 
-# Configuration
-UDP_PORT = int(os.getenv('UDP_PORT', 4403))
-MULTICAST_GROUP = os.getenv('MULTICAST_GROUP', '224.0.0.69')
-MULTICAST_IFACE = os.getenv('MULTICAST_IFACE', '0.0.0.0')  # interface IP for join (0.0.0.0 = default)
-MULTICAST_TTL = int(os.getenv('MULTICAST_TTL', 1))
-PROFILES_FILE = 'profiles.json'
-MAX_MESSAGE_LENGTH = 1024
-
-# Determine compatible Socket.IO client version for the installed python-socketio
-try:
-    _sio_ver = py_socketio.__version__
-    _engio_ver = engineio.__version__
-except Exception:
-    _sio_ver = 'unknown'
-    _engio_ver = 'unknown'
-
-def _client_version_for_server(server_version: str) -> str:
-    try:
-        major = int(server_version.split('.')[0])
-    except Exception:
-        return '4.7.5'  # safe modern default
-    # Mapping based on python-socketio compatibility
-    if major <= 4:
-        return '2.5.0'   # python-socketio 4.x ↔ JS 2.x
-    if major == 5:
-        return '3.1.3'   # python-socketio 5.x ↔ JS 3.x
-    return '4.7.5'       # python-socketio 6.x+ ↔ JS 4.x
-
-SOCKETIO_CLIENT_VERSION = _client_version_for_server(_sio_ver if _sio_ver != 'unknown' else '6.0.0')
-
 @app.context_processor
 def inject_versions():
     return {
         'socketio_client_version': SOCKETIO_CLIENT_VERSION,
-        'python_socketio_version': _sio_ver,
-        'python_engineio_version': _engio_ver,
+        'python_socketio_version': getattr(py_socketio, '__version__', 'unknown'),
+        'python_engineio_version': getattr(engineio, '__version__', 'unknown'),
     }
 
-print(f"[VERSIONS] python-socketio={_sio_ver} engineio={_engio_ver} -> client JS {SOCKETIO_CLIENT_VERSION}")
+
+PROFILES_FILE = 'profiles.json'
+MAX_MESSAGE_LENGTH = 1024
+
 
 # Global variables
 current_profile = None
@@ -79,6 +127,18 @@ class ProfileManager:
         if os.path.exists(self.profiles_file):
             try:
                 with open(self.profiles_file, 'r') as f:
+
+
+                    node.channel = "ShortFast"
+                    node.node_id = "!deadbeef"
+                    node.long_name = "UDP Test"
+                    node.short_name = "UDP"
+                    node.key = "AQ=="
+
+
+
+
+
                     return json.load(f)
             except:
                 return {}
@@ -137,140 +197,52 @@ class ProfileManager:
 
 
 class UDPChatServer:
-    def __init__(self, port=UDP_PORT):
-        self.port = port
-        self.socket = None
+    def __init__(self):
         self.running = False
-        
+
     def start(self):
-        """Start the UDP server"""
+        """Start the mudp interface receiver"""
         try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # Allow multiple listeners and quick restarts
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            except Exception:
-                pass
-            self.socket.bind(('', self.port))
-
-            # Join the multicast group on the specified interface
-            group_bytes = socket.inet_aton(MULTICAST_GROUP)
-            iface_bytes = socket.inet_aton(MULTICAST_IFACE)
-            mreq = struct.pack('=4s4s', group_bytes, iface_bytes)
-            self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
-            self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-            try:
-                self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, iface_bytes)
-            except Exception:
-                pass
-            print(f"Joined multicast group {MULTICAST_GROUP} on iface {MULTICAST_IFACE}, port {self.port}")
-
+            interface.start()
             self.running = True
-            
-            # Start listening thread
-            listen_thread = threading.Thread(target=self.listen_for_messages)
-            listen_thread.daemon = True
-            listen_thread.start()
-            
-            print(f"UDP Chat Server started on port {self.port}")
+            print(f"Joined multicast group {MCAST_GRP} on port {MCAST_PORT} via mudp")
             return True
         except Exception as e:
-            print(f"Failed to start UDP server: {e}")
+            print(f"Failed to start mudp interface: {e}")
             return False
-    
+
     def stop(self):
-        """Stop the UDP server"""
+        """Stop the mudp interface"""
         self.running = False
-        if self.socket:
-            self.socket.close()
-    
-    
-
-    def listen_for_messages(self):
-        """Listen for incoming UDP messages"""
-        while self.running:
-            try:
-                data, addr = self.socket.recvfrom(MAX_MESSAGE_LENGTH)
-
-                print(f"[UDP IN] from {addr[0]}:{addr[1]} {len(data)}B")
-                # print(f"[RAW] {data!r}")
-
-                mp = mesh_pb2.MeshPacket()
-                mp.ParseFromString(data)
-
-
-                if mp.HasField("encrypted") and not mp.HasField("decoded"):
-                    decoded = decrypt_packet(mp, "AQ==")
-                    if decoded is not None:
-                        mp.decoded.CopyFrom(decoded)
-
-                if mp.HasField("decoded") and mp.decoded.portnum == "1":
-                    message = mp.decoded.payload.decode('utf-8', errors='replace')  
-                    print (mp)
-                    print ()
-                    print (message)
-
-
-
-                    message_data = json.loads(data.decode('utf-8'))
-                    
-                    # Add message to global messages list
-                    message = {
-                        'id': str(uuid.uuid4()),
-                        'sender': message_data.get('sender', 'Unknown'),
-                        'sender_display': message_data.get('sender_display', 'Unknown'),
-                        'content': message,
-                        'timestamp': message_data.get('timestamp', datetime.now().isoformat()),
-                        'sender_ip': addr[0]
-                    }
-
-                    # Skip echoing back self-sent messages
-                    if addr[0] == '127.0.0.1' or message_data.get('sender') == (current_profile['short_name'] if current_profile else None):
-                        continue
-                    
-                    messages.append(message)
-                    
-                    # Emit to all connected web clients
-                    socketio.emit('new_message', message)
-                
-            except Exception as e:
-                if self.running:
-                    print(f"Error receiving message: {e}")
-    
-    def send_message(self, message_content, sender_profile):
-        """Send a message via UDP broadcast"""
-        if not self.socket or not sender_profile:
-            return False
-        
         try:
-            message_data = {
-                'sender': sender_profile.get('short_name', 'Unknown'),
-                'sender_display': sender_profile.get('long_name', 'Unknown'),
-                'content': message_content,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            message_json = json.dumps(message_data).encode('utf-8')
-            self.socket.sendto(message_json, (MULTICAST_GROUP, self.port))
-            
-            # Add to local messages
+            interface.stop()
+        except Exception:
+            pass
+
+    def send_message(self, message_content, sender_profile):
+        """Send a text message via mudp"""
+        if not sender_profile:
+            return False
+        try:
+            send_text_message(message_content)
+
+            # Mirror to local UI
             message = {
                 'id': str(uuid.uuid4()),
                 'sender': sender_profile.get('short_name', 'Unknown'),
                 'sender_display': sender_profile.get('long_name', 'Unknown'),
                 'content': message_content,
-                'timestamp': message_data['timestamp'],
+                'timestamp': datetime.now().isoformat(),
                 'sender_ip': 'self'
             }
-            
             messages.append(message)
-            socketio.emit('new_message', message)
-            
+            try:
+                socketio.emit('new_message', message)
+            except Exception:
+                pass
             return True
         except Exception as e:
-            print(f"Error sending message: {e}")
+            print(f"Error sending message via mudp: {e}")
             return False
 
 
@@ -447,11 +419,11 @@ def handle_disconnect():
 
 
 if __name__ == '__main__':
-    print(f"[STARTUP] Will load client JS @{SOCKETIO_CLIENT_VERSION} for python-socketio {_sio_ver}")
+    print("[STARTUP] Using mudp UDPPacketStream for UDP multicast I/O")
     # Start UDP server
     if udp_server.start():
         app.config['TEMPLATES_AUTO_RELOAD'] = True
-        print(f"Starting Flask-SocketIO server on http://localhost:5007 (multicast {MULTICAST_GROUP}:{UDP_PORT}) ...")
+        print(f"Starting Flask-SocketIO server on http://localhost:5007 (mudp {MCAST_GRP}:{MCAST_PORT}) ...")
         socketio.run(app, host='0.0.0.0', port=5007, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
     else:
         print("Failed to start UDP server")

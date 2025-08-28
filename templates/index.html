@@ -100,8 +100,21 @@ let currentProfile = null;
 let socket = null;
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize WebSocket connection
-    initializeSocket();
+    // Initialize WebSocket connection (don’t block the rest of the UI if this fails)
+    try {
+        if (typeof io !== 'undefined') {
+            initializeSocket();
+        } else {
+            throw new Error('socket.io-client not loaded');
+        }
+    } catch (e) {
+        console.error('[socket] init failed:', e);
+        const badge = document.getElementById('connectionStatus');
+        if (badge) {
+            badge.className = 'badge bg-danger';
+            badge.textContent = 'Socket error';
+        }
+    }
     
     // Load current profile
     loadCurrentProfile();
@@ -235,7 +248,8 @@ function addMessageToUI(message) {
     const messageEl = document.createElement('div');
     messageEl.className = 'message mb-2 p-2 border-bottom';
     
-    const timestamp = new Date(message.timestamp).toLocaleTimeString();
+    const ts = message && message.timestamp ? new Date(message.timestamp) : new Date();
+    const timestamp = isNaN(ts.getTime()) ? '' : ts.toLocaleTimeString();
     const isOwnMessage = message.sender_ip === 'self';
     
     messageEl.innerHTML = `

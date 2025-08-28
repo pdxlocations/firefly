@@ -55,14 +55,14 @@ def main():
     
     try:
         # Import and run the app
-        from app import app, socketio, udp_server, SOCKETIO_CLIENT_VERSION, _sio_ver
+        from app import app, socketio, udp_server
         
-        print(f"[STARTUP] Will load client JS @{SOCKETIO_CLIENT_VERSION} for python-socketio {_sio_ver}")
+        # print(f"[STARTUP] Will load client JS @{SOCKETIO_CLIENT_VERSION} for python-socketio {_sio_ver}")
         
         # Start UDP server
         if udp_server.start():
             print("UDP Chat Server started successfully")
-            socketio.run(app, host='0.0.0.0', port=5008, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
+            socketio.run(app, host='0.0.0.0', port=5009, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
         else:
             print("Failed to start UDP server")
             sys.exit(1)

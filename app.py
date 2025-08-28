@@ -128,17 +128,6 @@ class ProfileManager:
             try:
                 with open(self.profiles_file, 'r') as f:
 
-
-                    node.channel = "ShortFast"
-                    node.node_id = "!deadbeef"
-                    node.long_name = "UDP Test"
-                    node.short_name = "UDP"
-                    node.key = "AQ=="
-
-
-
-
-
                     return json.load(f)
             except:
                 return {}
@@ -358,6 +347,12 @@ def set_current_profile():
     print(f"[API] set_current_profile -> requested id={profile_id} exists={bool(profile)}")
     if profile:
         current_profile = profile
+        node.channel = profile.get('channel', '')
+        node.node_id = profile.get('node_id', '')
+        node.long_name = profile.get('long_name', '')
+        node.short_name = profile.get('short_name', '')
+        node.key = profile.get('key', '')
+        print(f"[PROFILE] Loaded node attrs from profile {profile.get('id', 'unknown')}")
         return jsonify({'message': 'Profile set successfully', 'profile': current_profile})
     else:
         return jsonify({'error': 'Profile not found'}), 404

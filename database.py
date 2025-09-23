@@ -356,11 +356,27 @@ class Database:
         """Get database statistics"""
         with sqlite3.connect(self.db_path) as conn:
             if profile_id:
-                cursor = conn.execute("""
-                    SELECT 
-                        (SELECT COUNT(*) FROM nodes WHERE profile_id = ?) as node_count,
-                        (SELECT COUNT(*) FROM messages WHERE profile_id = ?) as message_count
-                """, (profile_id, profile_id))
+                # Get the profile's channel to count messages for that channel
+                profile_cursor = conn.execute("""
+                    SELECT channel, key FROM profiles WHERE id = ?
+                """, (profile_id,))
+                profile_row = profile_cursor.fetchone()
+                
+                if profile_row:
+                    from encryption import generate_hash
+                    channel = generate_hash(profile_row[0], profile_row[1])
+                    
+                    cursor = conn.execute("""
+                        SELECT 
+                            (SELECT COUNT(*) FROM nodes WHERE profile_id = ?) as node_count,
+                            (SELECT COUNT(*) FROM messages WHERE channel = ?) as message_count
+                    """, (profile_id, channel))
+                else:
+                    cursor = conn.execute("""
+                        SELECT 
+                            (SELECT COUNT(*) FROM nodes WHERE profile_id = ?) as node_count,
+                            0 as message_count
+                    """, (profile_id,))
             else:
                 cursor = conn.execute("""
                     SELECT 
@@ -439,10 +455,10 @@ class Database:
                 WHERE n.profile_id = ? 
                 AND EXISTS (
                     SELECT 1 FROM messages m 
-                    WHERE m.profile_id = ? AND m.sender_num = n.node_num AND m.channel = ?
+                    WHERE m.sender_num = n.node_num AND m.channel = ?
                 )
                 ORDER BY n.last_seen DESC
-            """, (profile_id, profile_id, channel))
+            """, (profile_id, channel))
             
             nodes = []
             for row in cursor:

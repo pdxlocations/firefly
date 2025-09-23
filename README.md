@@ -6,12 +6,14 @@ A real-time web-based chat application that communicates over UDP on the local n
 
 ## Features
 
-- **Real-time Chat**: Send and receive messages instantly across the local network
-- **UDP Multicast**: Messages are sent via UDP multicast to all devices on the same network
-- **User Profiles**: Create, edit, and manage multiple user profiles
+- **Real-time Chat**: Send and receive messages instantly across the Meshtastic network
+- **Meshtastic Integration**: Connect to Meshtastic mesh networks via UDP multicast
+- **Node Discovery**: Automatically discover and track nodes on the mesh network
+- **User Profiles**: Create, edit, and manage multiple Meshtastic profiles
+- **Database Storage**: Persistent storage of seen nodes and message history per profile
 - **Web Interface**: Clean, responsive web interface built with Bootstrap
-- **Real-time Updates**: WebSocket integration for instant message delivery
-- **Local Network**: No internet required - works entirely on your local network
+- **Real-time Updates**: WebSocket integration for instant message and node discovery
+- **Detailed Node Information**: View hardware details, roles, and connection statistics
 
 ## Requirements
 
@@ -52,12 +54,17 @@ A real-time web-based chat application that communicates over UDP on the local n
    - Navigate to `http://localhost:5011`
    - Or access from other devices on the network using your computer's IP address: `http://YOUR_IP:5011`
 
-### Using the Chat
+### Using the Application
 
-1. **Create a Profile**
+1. **Create a Meshtastic Profile**
    - Go to the "Profiles" page
    - Click "Create New Profile"
-   - Fill in your username and display name
+   - Fill in your Meshtastic node details:
+     - **Node ID**: Your Meshtastic node ID (e.g., !deadbeef)
+     - **Long Name**: Full display name for your node
+     - **Short Name**: Short identifier (4 chars max)
+     - **Channel**: Meshtastic channel name
+     - **Key**: Encryption key for the channel
    - Click "Create Profile"
 
 2. **Select Your Profile**
@@ -65,10 +72,10 @@ A real-time web-based chat application that communicates over UDP on the local n
    - Select your profile from the dropdown
    - Click "Set Profile"
 
-3. **Start Chatting**
-   - Type your message in the input field
-   - Press Enter or click "Send"
-   - Your message will be broadcast to all other chat applications on the network
+3. **Start Using the Network**
+   - **Chat**: Type messages to communicate with other nodes
+   - **View Nodes**: Check the "Nodes" page to see discovered mesh nodes
+   - **Monitor Activity**: Watch real-time updates as nodes join and send messages
 
 ### Multiple Instances
 
@@ -79,6 +86,29 @@ To chat with others on your network:
 3. Each person needs to create their own profile
 4. Messages will be automatically shared between all running instances
 
+## Pages and Features
+
+### Chat Page
+- Real-time messaging with other Meshtastic nodes
+- Profile selection and management
+- Connection status monitoring
+- Quick overview of recently seen nodes
+
+### Nodes Page
+- Comprehensive list of all discovered mesh nodes
+- Detailed node information including:
+  - Hardware model and role
+  - First/last seen timestamps
+  - Packet counts and signal information
+  - MAC addresses and public keys
+- Interactive node details modal
+- Statistics overview
+
+### Profiles Page
+- Create, edit, and delete Meshtastic profiles
+- Configure node ID, names, channel, and encryption key
+- Switch between different profiles
+
 ## Configuration
 
 You can modify these settings in `app.py`:
@@ -86,23 +116,29 @@ You can modify these settings in `app.py`:
 - **MCAST_GRP**: Default is 224.0.0.69 (multicast group address)
 - **MCAST_PORT**: Default is 4403 (UDP multicast port)
 - **Flask port**: Default is 5011 (change in run.py)
+- **Database**: SQLite database stored as `mudpchat.db`
 
 ## Network Requirements
 
-- All devices must be on the same local network
+- Connection to a Meshtastic network via UDP multicast
 - UDP multicast port 4403 must be available and not blocked by firewalls
 - For best results, ensure your network allows UDP multicast traffic
+- Compatible with MUDP (Meshtastic UDP) protocol implementations
 
 ## File Structure
 
 ```
-mudpchat-2/
+mudpchat/
 ├── app.py              # Main Flask application
+├── database.py         # Database models and operations
+├── encryption.py       # Meshtastic encryption/decryption
 ├── requirements.txt    # Python dependencies
-├── profiles.json       # User profiles (created automatically)
+├── run.py             # Application launcher
+├── mudpchat.db        # SQLite database (created automatically)
 ├── templates/
-│   ├── base.html      # Base template
+│   ├── base.html      # Base template with navigation
 │   ├── index.html     # Chat interface
+│   ├── nodes.html     # Node discovery and details
 │   └── profiles.html  # Profile management
 └── static/
     ├── css/
@@ -138,19 +174,32 @@ If you get a "port already in use" error:
 ## Technical Details
 
 - **Backend**: Python Flask with Flask-SocketIO
+- **Database**: SQLite for persistent data storage
 - **Frontend**: HTML5, CSS3, JavaScript (ES6+)
 - **Real-time**: WebSocket connections for instant updates
-- **Networking**: UDP sockets for local network communication
-- **Storage**: JSON file for profile persistence
+- **Networking**: Meshtastic MUDP protocol over UDP multicast
+- **Mesh Integration**: Direct integration with Meshtastic protobuf messages
+- **Node Discovery**: Automatic NODEINFO_APP packet processing
 - **Threading**: Flask-SocketIO uses the threading backend, and UDPPacketStream runs a background listener thread for receiving packets
+- **Data Storage**: Profiles, nodes, and messages are stored per-profile in SQLite database
+- **Profile Persistence**: Profiles survive application restarts and are safely migrated from JSON
+
+## Data Persistence
+
+- **Profile Storage**: All profiles are stored in `mudpchat.db` SQLite database
+- **Automatic Migration**: Existing `profiles.json` files are automatically migrated on first run
+- **Persistent Data**: Profiles, nodes, and messages survive application restarts
+- **Safe Migration**: Migration only occurs once when database is empty
+- **Backup Protection**: Original JSON files are preserved as `.migrated` backups
 
 ## Security Considerations
 
-- This application is designed for local network use only
-- No authentication or encryption is implemented
-- Messages are sent in plain text over UDP
-- Do not use on untrusted networks
-- Consider firewall rules if security is a concern
+- This application integrates with Meshtastic mesh networks
+- Uses Meshtastic's built-in AES encryption for message security
+- Node information and messages are stored locally in SQLite database
+- Database contains channel encryption keys - protect the database file
+- Web interface runs on localhost by default (configure as needed)
+- Consider firewall rules if exposing the web interface beyond localhost
 
 ## License
 

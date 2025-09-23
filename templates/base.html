@@ -4,16 +4,462 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}MUDP Chat{% endblock %}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        /* Meshtastic Web Client Color Palette */
+        :root {
+            /* Dark Theme Colors - Matching Meshtastic Web */
+            --mudp-dark-bg: #0f172a;
+            --mudp-dark-surface: #1e293b;
+            --mudp-dark-surface-hover: #334155;
+            --mudp-dark-border: #475569;
+            --mudp-dark-text: #ebebeb;
+            --mudp-dark-text-muted: #bdbdbd;
+            
+            /* Light Theme Colors - Matching Meshtastic Web */
+            --mudp-light-bg: #ffffff;
+            --mudp-light-surface: #f8fafc;
+            --mudp-light-surface-hover: #f1f5f9;
+            --mudp-light-border: #e2e8f0;
+            --mudp-light-text: #111132;
+            --mudp-light-text-muted: #64748b;
+            
+            /* Meshtastic Accent Colors */
+            --mudp-primary: #67ea94;
+            --mudp-primary-hover: #4caf50;
+            --mudp-secondary: #64748b;
+            --mudp-success: #10b981;
+            --mudp-warning: #f59e0b;
+            --mudp-danger: #ef4444;
+            --mudp-info: #3b82f6;
+        }
+        
+        /* Enhanced dark mode with custom colors */
+        [data-bs-theme="dark"] {
+            color-scheme: dark;
+            background-color: var(--mudp-dark-bg) !important;
+            color: var(--mudp-dark-text) !important;
+        }
+        
+        [data-bs-theme="light"] {
+            color-scheme: light;
+            background-color: var(--mudp-light-bg) !important;
+            color: var(--mudp-light-text) !important;
+        }
+        
+        /* Enhanced body styling */
+        body[data-bs-theme="dark"] {
+            background: linear-gradient(135deg, var(--mudp-dark-bg) 0%, #161b22 100%) !important;
+            color: var(--mudp-dark-text) !important;
+            min-height: 100vh;
+        }
+        
+        body[data-bs-theme="light"] {
+            background: linear-gradient(135deg, var(--mudp-light-bg) 0%, #ffffff 100%) !important;
+            color: var(--mudp-light-text) !important;
+            min-height: 100vh;
+        }
+        
+        /* Enhanced component styling with custom colors */
+        [data-bs-theme="dark"] .bg-light {
+            background-color: var(--mudp-dark-surface) !important;
+            color: var(--mudp-dark-text) !important;
+        }
+        
+        [data-bs-theme="dark"] .border {
+            border-color: var(--mudp-dark-border) !important;
+        }
+        
+        [data-bs-theme="dark"] .text-muted {
+            color: var(--mudp-dark-text-muted) !important;
+        }
+        
+        [data-bs-theme="light"] .text-muted {
+            color: var(--mudp-light-text-muted) !important;
+        }
+        
+        /* Enhanced card styling */
+        [data-bs-theme="dark"] .card {
+            background-color: var(--mudp-dark-surface) !important;
+            border: 1px solid var(--mudp-dark-border) !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3) !important;
+            backdrop-filter: blur(8px);
+        }
+        
+        [data-bs-theme="light"] .card {
+            background-color: var(--mudp-light-surface) !important;
+            border: 1px solid var(--mudp-light-border) !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+        }
+        
+        /* Enhanced form controls */
+        [data-bs-theme="dark"] .form-control {
+            background-color: var(--mudp-dark-surface) !important;
+            border: 1px solid var(--mudp-dark-border) !important;
+            color: var(--mudp-dark-text) !important;
+            transition: all 0.2s ease;
+        }
+        
+        [data-bs-theme="dark"] .form-control:focus {
+            background-color: var(--mudp-dark-surface-hover) !important;
+            border-color: var(--mudp-primary) !important;
+            outline: none !important;
+        }
+        
+        [data-bs-theme="light"] .form-control {
+            background-color: var(--mudp-light-surface) !important;
+            border: 1px solid var(--mudp-light-border) !important;
+            color: var(--mudp-light-text) !important;
+        }
+        
+        /* Enhanced messages container */
+        [data-bs-theme="dark"] #messagesContainer {
+            background-color: var(--mudp-dark-surface) !important;
+            border: 1px solid var(--mudp-dark-border) !important;
+            border-radius: 12px !important;
+        }
+        
+        [data-bs-theme="light"] #messagesContainer {
+            background-color: var(--mudp-light-surface) !important;
+            border: 1px solid var(--mudp-light-border) !important;
+            border-radius: 12px !important;
+        }
+        
+        /* Enhanced card headers */
+        [data-bs-theme="dark"] .card-header {
+            background: linear-gradient(135deg, var(--mudp-dark-surface) 0%, var(--mudp-dark-surface-hover) 100%) !important;
+            border-bottom: 1px solid var(--mudp-dark-border) !important;
+            color: var(--mudp-dark-text) !important;
+            font-weight: 600;
+            border-radius: 12px 12px 0 0 !important;
+        }
+        
+        [data-bs-theme="light"] .card-header {
+            background: linear-gradient(135deg, var(--mudp-light-surface) 0%, var(--mudp-light-surface-hover) 100%) !important;
+            border-bottom: 1px solid var(--mudp-light-border) !important;
+            color: var(--mudp-light-text) !important;
+            font-weight: 600;
+            border-radius: 12px 12px 0 0 !important;
+        }
+        
+        /* Enhanced card body */
+        [data-bs-theme="dark"] .card-body {
+            background-color: var(--mudp-dark-surface) !important;
+            color: var(--mudp-dark-text) !important;
+        }
+        
+        [data-bs-theme="light"] .card-body {
+            background-color: var(--mudp-light-surface) !important;
+            color: var(--mudp-light-text) !important;
+        }
+        
+        /* Fix individual message boxes */
+        [data-bs-theme="dark"] .message {
+            background-color: var(--bs-dark) !important;
+            border-color: var(--bs-border-color-translucent) !important;
+            color: var(--bs-light) !important;
+        }
+        
+        /* Fix alert components (profile selections, etc.) */
+        [data-bs-theme="dark"] .alert-info {
+            background-color: var(--bs-info-bg-subtle) !important;
+            border-color: var(--bs-info-border-subtle) !important;
+            color: var(--bs-info-text-emphasis) !important;
+        }
+        
+        [data-bs-theme="dark"] .alert-warning {
+            background-color: var(--bs-warning-bg-subtle) !important;
+            border-color: var(--bs-warning-border-subtle) !important;
+            color: var(--bs-warning-text-emphasis) !important;
+        }
+        
+        [data-bs-theme="dark"] .alert-success {
+            background-color: var(--bs-success-bg-subtle) !important;
+            border-color: var(--bs-success-border-subtle) !important;
+            color: var(--bs-success-text-emphasis) !important;
+        }
+        
+        [data-bs-theme="dark"] .alert-danger {
+            background-color: var(--bs-danger-bg-subtle) !important;
+            border-color: var(--bs-danger-border-subtle) !important;
+            color: var(--bs-danger-text-emphasis) !important;
+        }
+        
+        /* Fix dropdown/select elements */
+        [data-bs-theme="dark"] .form-select {
+            background-color: var(--bs-dark-bg-subtle) !important;
+            border-color: var(--bs-border-color) !important;
+            color: var(--bs-body-color) !important;
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e") !important;
+        }
+        
+        /* Fix button styling in dark mode */
+        [data-bs-theme="dark"] .btn-primary {
+            background-color: var(--bs-primary) !important;
+            border-color: var(--bs-primary) !important;
+        }
+        
+        [data-bs-theme="dark"] .btn-outline-secondary {
+            color: var(--bs-secondary) !important;
+            border-color: var(--bs-secondary) !important;
+        }
+        
+        [data-bs-theme="dark"] .btn-outline-secondary:hover {
+            background-color: var(--bs-secondary) !important;
+            color: var(--bs-light) !important;
+        }
+        
+        /* Fix table styling in dark mode */
+        [data-bs-theme="dark"] .table {
+            color: var(--bs-body-color) !important;
+        }
+        
+        [data-bs-theme="dark"] .table-dark {
+            background-color: var(--bs-dark) !important;
+        }
+        
+        [data-bs-theme="dark"] .table-hover tbody tr:hover {
+            background-color: var(--bs-dark-bg-subtle) !important;
+        }
+        
+        /* Fix code/monospace elements */
+        [data-bs-theme="dark"] code {
+            background-color: var(--bs-dark) !important;
+            color: var(--bs-pink) !important;
+        }
+        
+        /* Fix badges in dark mode */
+        [data-bs-theme="dark"] .badge {
+            color: var(--bs-light) !important;
+        }
+        
+        /* Fix profile banner in dark mode */
+        [data-bs-theme="dark"] #currentProfileBanner .card-body {
+            background-color: var(--bs-dark-bg-subtle) !important;
+            border-color: var(--bs-primary) !important;
+        }
+        
+        /* Fix profile item containers (on profiles page) */
+        [data-bs-theme="dark"] .profile-item {
+            background-color: var(--bs-dark-bg-subtle) !important;
+            border-color: var(--bs-border-color) !important;
+            color: var(--bs-body-color) !important;
+        }
+        
+        /* Fix modal components */
+        [data-bs-theme="dark"] .modal-content {
+            background-color: var(--bs-dark-bg-subtle) !important;
+            border-color: var(--bs-border-color) !important;
+        }
+        
+        [data-bs-theme="dark"] .modal-header {
+            background-color: var(--bs-dark) !important;
+            border-color: var(--bs-border-color) !important;
+            color: var(--bs-light) !important;
+        }
+        
+        [data-bs-theme="dark"] .modal-body {
+            background-color: var(--bs-dark-bg-subtle) !important;
+            color: var(--bs-body-color) !important;
+        }
+        
+        [data-bs-theme="dark"] .modal-footer {
+            background-color: var(--bs-dark-bg-subtle) !important;
+            border-color: var(--bs-border-color) !important;
+        }
+        
+        /* Fix form labels in dark mode */
+        [data-bs-theme="dark"] .form-label {
+            color: var(--bs-body-color) !important;
+        }
+        
+        /* Fix outline buttons in dark mode */
+        [data-bs-theme="dark"] .btn-outline-primary {
+            color: var(--bs-primary) !important;
+            border-color: var(--bs-primary) !important;
+        }
+        
+        [data-bs-theme="dark"] .btn-outline-primary:hover {
+            background-color: var(--bs-primary) !important;
+            color: var(--bs-white) !important;
+        }
+        
+        [data-bs-theme="dark"] .btn-outline-danger {
+            color: var(--bs-danger) !important;
+            border-color: var(--bs-danger) !important;
+        }
+        
+        [data-bs-theme="dark"] .btn-outline-danger:hover {
+            background-color: var(--bs-danger) !important;
+            color: var(--bs-white) !important;
+        }
+        
+        /* Fix button group styling */
+        [data-bs-theme="dark"] .btn-group-vertical .btn {
+            border-color: var(--bs-border-color) !important;
+        }
+        
+        /* Fix close button in modals */
+        [data-bs-theme="dark"] .btn-close {
+            filter: invert(1) grayscale(100%) brightness(200%);
+        }
+        
+        /* Enhanced navbar styling */
+        .navbar {
+            backdrop-filter: blur(10px);
+            border-bottom: 2px solid var(--mudp-primary) !important;
+        }
+        
+        /* Dark theme navbar */
+        [data-bs-theme="dark"] .navbar {
+            background: #0a0f1a !important;
+        }
+        
+        [data-bs-theme="dark"] .navbar-brand,
+        [data-bs-theme="dark"] .navbar .nav-link {
+            color: #ffffff !important;
+        }
+        
+        /* Light theme navbar */
+        [data-bs-theme="light"] .navbar {
+            background: #ffffff !important;
+        }
+        
+        [data-bs-theme="light"] .navbar-brand,
+        [data-bs-theme="light"] .navbar .nav-link {
+            color: #1f2937 !important;
+        }
+        
+        .navbar-brand {
+            font-weight: 700 !important;
+            font-size: 1.25rem !important;
+        }
+        
+        /* Theme toggle button styling */
+        [data-bs-theme="dark"] .navbar .btn-outline-light {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            color: #ffffff !important;
+        }
+        
+        [data-bs-theme="dark"] .navbar .btn-outline-light:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.6);
+        }
+        
+        [data-bs-theme="light"] .navbar .btn-outline-light {
+            border: 2px solid rgba(31, 41, 55, 0.3);
+            background: rgba(31, 41, 55, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            color: #1f2937 !important;
+        }
+        
+        [data-bs-theme="light"] .navbar .btn-outline-light:hover {
+            background: rgba(31, 41, 55, 0.2);
+            border-color: rgba(31, 41, 55, 0.6);
+        }
+        
+        /* Enhanced theme toggle button */
+        #themeToggle {
+            min-width: 44px;
+            height: 44px;
+            border-radius: 12px !important;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        [data-bs-theme="dark"] #themeToggle:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        [data-bs-theme="dark"] #themeToggle:active {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        [data-bs-theme="light"] #themeToggle:hover {
+            background: rgba(31, 41, 55, 0.2);
+        }
+        
+        [data-bs-theme="light"] #themeToggle:active {
+            background: rgba(31, 41, 55, 0.3);
+        }
+        
+        /* Enhanced button styling */
+        .btn {
+            border-radius: 12px;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: none;
+        }
+        
+        .btn-primary {
+            background: var(--mudp-primary);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--mudp-primary-hover);
+        }
+        
+        .btn-secondary {
+            background: var(--mudp-secondary);
+            color: white;
+            border: none;
+        }
+        
+        .btn-secondary:hover {
+            background: var(--mudp-primary);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: var(--mudp-danger);
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+        
+        .btn-success {
+            background: var(--mudp-success);
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #059669;
+        }
+        
+        .btn:active {
+            opacity: 0.8;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
 </head>
-<body>
+<body data-bs-theme="dark">
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('index') }}">MUDP Chat</a>
             <div class="navbar-nav">
                 <a class="nav-link" href="{{ url_for('index') }}">Chat</a>
+                <a class="nav-link" href="{{ url_for('nodes') }}">Nodes</a>
                 <a class="nav-link" href="{{ url_for('profiles') }}">Profiles</a>
+            </div>
+            <div class="navbar-nav ms-auto">
+                <button class="btn btn-outline-light btn-sm" id="themeToggle" title="Toggle Dark/Light Mode">
+                    <span id="themeIcon">🌞</span>
+                </button>
             </div>
         </div>
     </nav>
@@ -33,11 +479,61 @@
         {% block content %}{% endblock %}
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/socket.io-client@{{ socketio_client_version }}/dist/socket.io.min.js"></script>
     <script>
       console.log('[client] Using socket.io-client version from CDN:', '{{ socketio_client_version }}');
       console.log('[server] python-socketio={{ python_socketio_version }} engineio={{ python_engineio_version }}');
+      
+      // Theme toggle functionality
+      document.addEventListener('DOMContentLoaded', function() {
+          const themeToggle = document.getElementById('themeToggle');
+          const themeIcon = document.getElementById('themeIcon');
+          const body = document.body;
+          const html = document.documentElement;
+          
+          console.log('[THEME] Initializing theme toggle');
+          
+          // Load saved theme or default to dark
+          const savedTheme = localStorage.getItem('mudpchat-theme') || 'dark';
+          console.log('[THEME] Saved theme:', savedTheme);
+          setTheme(savedTheme);
+          
+          if (themeToggle) {
+              themeToggle.addEventListener('click', function(e) {
+                  e.preventDefault();
+                  const currentTheme = body.getAttribute('data-bs-theme') || 'dark';
+                  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                  console.log('[THEME] Toggling from', currentTheme, 'to', newTheme);
+                  setTheme(newTheme);
+                  localStorage.setItem('mudpchat-theme', newTheme);
+              });
+          } else {
+              console.error('[THEME] Theme toggle button not found!');
+          }
+          
+          function setTheme(theme) {
+              console.log('[THEME] Setting theme to:', theme);
+              body.setAttribute('data-bs-theme', theme);
+              html.setAttribute('data-bs-theme', theme);
+              
+              if (themeIcon) {
+                  themeIcon.textContent = theme === 'dark' ? '🌞' : '🌙';
+              }
+              
+              // Update navbar classes for better visibility
+              const navbar = document.querySelector('.navbar');
+              if (navbar) {
+                  if (theme === 'dark') {
+                      navbar.className = navbar.className.replace('navbar-light', 'navbar-dark');
+                  } else {
+                      navbar.className = navbar.className.replace('navbar-dark', 'navbar-light');
+                  }
+              }
+              
+              console.log('[THEME] Successfully switched to', theme, 'mode');
+          }
+      });
     </script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     {% block scripts %}{% endblock %}

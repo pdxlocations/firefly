@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+
+{% block title %}Nodes - MUDP Chat{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Seen Nodes</h1>
+            {% if current_profile %}
+                <div class="text-muted">
+                    Profile: <strong>{{ current_profile.long_name }}</strong> ({{ current_profile.short_name }})
+                </div>
+            {% endif %}
+        </div>
+
+        {% if not current_profile %}
+            <div class="alert alert-warning" role="alert">
+                <h5>No Profile Selected</h5>
+                <p>Please <a href="{{ url_for('index') }}" class="alert-link">select a profile</a> to view nodes that you've seen on the mesh network.</p>
+            </div>
+        {% else %}
+            <!-- Statistics Summary -->
+            {% if stats %}
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card bg-light">
+                        <div class="card-body">
+                            <h6 class="card-title">Node Statistics</h6>
+                            <p class="card-text">
+                                <strong>{{ stats.nodes }}</strong> nodes seen<br>
+                                <strong>{{ stats.messages }}</strong> messages received
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Nodes Table -->
+            {% if nodes %}
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Recently Seen Nodes ({{ nodes|length }})</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Node ID</th>
+                                    <th>Long Name</th>
+                                    <th>Short Name</th>
+                                    <th>Hardware</th>
+                                    <th>Role</th>
+                                    <th>First Seen</th>
+                                    <th>Last Seen</th>
+                                    <th>Packets</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for node in nodes %}
+                                <tr>
+                                    <td>
+                                        <code class="text-primary">{{ node.node_id or ('!%08x' % node.node_num) }}</code>
+                                    </td>
+                                    <td>
+                                        <strong>{{ node.long_name or "Unknown" }}</strong>
+                                        {% if node.raw_nodeinfo and node.raw_nodeinfo.changes %}
+                                        <br><small class="text-info"><i class="fas fa-edit"></i> Recently updated</small>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary">{{ node.short_name or "?" }}</span>
+                                    </td>
+                                    <td>
+                                        <span class="text-muted">{{ node.hw_model or "Unknown" }}</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-info">{{ node.role or "CLIENT" }}</span>
+                                    </td>
+                                    <td class="text-muted small">
+                                        {% if node.first_seen %}
+                                            <span title="{{ node.first_seen }}">
+                                                {% set first_parts = node.first_seen.split('T') %}
+                                                {{ first_parts[0] if first_parts|length > 0 else node.first_seen }}<br>
+                                                <small>{{ first_parts[1][:8] if first_parts|length > 1 else '' }}</small>
+                                            </span>
+                                        {% else %}
+                                            Unknown
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-muted small">
+                                        {% if node.last_seen %}
+                                            {% set last_parts = node.last_seen.split('T') %}
+                                            <span title="{{ node.last_seen }}">
+                                                {{ last_parts[0] if last_parts|length > 0 else node.last_seen }}<br>
+                                                <small>{{ last_parts[1][:8] if last_parts|length > 1 else '' }}</small>
+                                            </span>
+                                        {% else %}
+                                            Unknown
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-success">{{ node.packet_count }}</span>
+                                        {% if node.packet_count > 5 %}
+                                        <br><small class="text-success">Active</small>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="showNodeDetails({{ node.node_num }})">
+                                            Details
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="alert alert-info" role="alert">
+                <h5>No Nodes Seen Yet</h5>
+                <p>No nodes have been detected on the mesh network for this profile. Nodes will appear here as they broadcast their information.</p>
+                <hr>
+                <p class="mb-0">Make sure you're connected to the mesh network and that your profile is properly configured.</p>
+            </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+<!-- Node Details Modal -->
+<div class="modal fade" id="nodeDetailsModal" tabindex="-1" aria-labelledby="nodeDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="nodeDetailsModalLabel">Node Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="nodeDetailsContent">
+                <!-- Node details will be loaded here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showNodeDetails(nodeNum) {
+    fetch(`/api/nodes/${nodeNum}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert('Error: ' + data.error);
+                return;
+            }
+            
+            let content = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Basic Information</h6>
+                        <table class="table table-sm">
+                            <tr><td><strong>Node Number:</strong></td><td><code>${data.node_num}</code></td></tr>
+                            <tr><td><strong>Node ID:</strong></td><td><code>${data.node_id || 'Unknown'}</code></td></tr>
+                            <tr><td><strong>Long Name:</strong></td><td>${data.long_name || 'Unknown'}</td></tr>
+                            <tr><td><strong>Short Name:</strong></td><td>${data.short_name || 'Unknown'}</td></tr>
+                            <tr><td><strong>Hardware Model:</strong></td><td>${data.hw_model || 'Unknown'}</td></tr>
+                            <tr><td><strong>Role:</strong></td><td><span class="badge bg-info">${data.role || 'CLIENT'}</span></td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Network Information</h6>
+                        <table class="table table-sm">
+                            <tr><td><strong>First Seen:</strong></td><td>${formatDateTime(data.first_seen)}</td></tr>
+                            <tr><td><strong>Last Seen:</strong></td><td>${formatDateTime(data.last_seen)}</td></tr>
+                            <tr><td><strong>Packet Count:</strong></td><td><span class="badge bg-success">${data.packet_count}</span></td></tr>
+                            ${data.macaddr ? `<tr><td><strong>MAC Address:</strong></td><td><code>${data.macaddr}</code></td></tr>` : ''}
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            // Show change history if available
+            if (data.raw_nodeinfo && data.raw_nodeinfo.changes && data.raw_nodeinfo.changes.length > 0) {
+                content += `
+                    <hr>
+                    <h6>Recent Changes</h6>
+                    <div class="alert alert-info">
+                        <strong>Last Update:</strong> Node information was recently modified.<br>
+                        <ul class="mb-0 mt-2">
+                `;
+                
+                data.raw_nodeinfo.changes.forEach(change => {
+                    content += `<li><code>${change}</code></li>`;
+                });
+                
+                content += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            if (data.raw_nodeinfo && data.raw_nodeinfo.packet_info) {
+                content += `
+                    <hr>
+                    <h6>Last Packet Information</h6>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr><td><strong>Channel:</strong></td><td>${data.raw_nodeinfo.packet_info.channel || 'Unknown'}</td></tr>
+                                <tr><td><strong>Hop Limit:</strong></td><td>${data.raw_nodeinfo.packet_info.hop_limit || 'Unknown'}</td></tr>
+                                <tr><td><strong>Hop Start:</strong></td><td>${data.raw_nodeinfo.packet_info.hop_start || 'Unknown'}</td></tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                ${data.raw_nodeinfo.packet_info.rx_snr !== null ? `<tr><td><strong>RX SNR:</strong></td><td><span class="${data.raw_nodeinfo.packet_info.rx_snr > 0 ? 'text-success' : 'text-warning'}">${data.raw_nodeinfo.packet_info.rx_snr} dB</span></td></tr>` : ''}
+                                ${data.raw_nodeinfo.packet_info.rx_rssi !== null ? `<tr><td><strong>RX RSSI:</strong></td><td><span class="${data.raw_nodeinfo.packet_info.rx_rssi > -100 ? 'text-success' : 'text-warning'}">${data.raw_nodeinfo.packet_info.rx_rssi} dBm</span></td></tr>` : ''}
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            document.getElementById('nodeDetailsContent').innerHTML = content;
+            document.getElementById('nodeDetailsModalLabel').textContent = 
+                `Node Details - ${data.long_name || data.short_name || data.node_id || data.node_num}`;
+            
+            new bootstrap.Modal(document.getElementById('nodeDetailsModal')).show();
+        })
+        .catch(error => {
+            console.error('Error fetching node details:', error);
+            alert('Error fetching node details');
+        });
+}
+
+function formatDateTime(dateTimeStr) {
+    if (!dateTimeStr) return 'Unknown';
+    try {
+        const date = new Date(dateTimeStr);
+        return date.toLocaleString();
+    } catch (e) {
+        return dateTimeStr;
+    }
+}
+
+// Auto-refresh node list every 30 seconds if profile is selected
+{% if current_profile %}
+setInterval(() => {
+    location.reload();
+}, 30000);
+{% endif %}
+</script>
+{% endblock %}

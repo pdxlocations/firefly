@@ -10,21 +10,6 @@
                 <h5>Profile Selection</h5>
             </div>
             <div class="card-body">
-                {% if current_profile %}
-                    <div class="alert alert-info">
-                        <strong>Current Profile:</strong><br>
-                        Long: {{ current_profile.long_name }}<br>
-                        Short: <span class="text-monospace">{{ current_profile.short_name }}</span><br>
-                        Node ID: <span class="text-monospace">{{ current_profile.node_id }}</span><br>
-                        Channel: {{ current_profile.channel }}<br>
-                        Key: <span class="text-monospace">{{ current_profile.key }}</span>
-                    </div>
-                {% else %}
-                    <div class="alert alert-warning">
-                        No profile selected
-                    </div>
-                {% endif %}
-                
                 <select id="profileSelect" class="form-select mb-2">
                     <option value="">Select a profile...</option>
                     {% for profile_id, profile in profiles.items() %}
@@ -46,15 +31,60 @@
                 <h6>Connection Status</h6>
             </div>
             <div class="card-body">
-                <span id="connectionStatus" class="badge bg-secondary">Connecting...</span>
+                <div class="mb-2">
+                    <strong>WebSocket:</strong> <span id="connectionStatus" class="badge bg-secondary">Connecting...</span>
+                </div>
+                <div class="mb-2">
+                    <strong>MUDP Interface:</strong> <span id="interfaceStatus" class="badge bg-warning">Not Started</span>
+                </div>
                 <div class="mt-2">
                     <small class="text-muted">Multicast: 224.0.0.69 • Port: 4403</small>
                 </div>
             </div>
         </div>
+        
+        {% if current_profile %}
+        <div class="card mt-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">Network Nodes</h6>
+                <a href="{{ url_for('nodes') }}" class="btn btn-outline-primary btn-sm">View All</a>
+            </div>
+            <div class="card-body">
+                <div id="nodesOverview" class="text-center text-muted">
+                    <small>Loading...</small>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
     
     <div class="col-md-9">
+        <!-- Current Profile Banner -->
+        <div id="currentProfileBanner" class="card mb-3 border-primary" style="display: none;">
+            <div class="card-body bg-light py-2">
+                <div class="row align-items-center">
+                    <div class="col-md-9">
+                        <div class="d-flex flex-wrap align-items-center">
+                            <strong class="text-primary me-3" id="bannerProfileName">No Profile Selected</strong>
+                            <div class="d-flex flex-wrap gap-2 small text-muted">
+                                <span>Node: <code class="bg-white px-1 rounded" id="bannerNodeId">-</code></span>
+                                <span>•</span>
+                                <span>Channel: <strong id="bannerChannel">-</strong></span>
+                                <span>•</span>
+                                <span>Key: <code class="bg-white px-1 rounded" id="bannerKey">-</code></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 text-end">
+                        <div class="d-flex align-items-center justify-content-end">
+                            <small class="text-muted me-2">Status:</small>
+                            <span id="bannerInterfaceStatus" class="badge bg-warning">Not Connected</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Chat Messages</h5>
@@ -116,8 +146,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Load current profile
+    // Load current profile and ensure banner is updated
     loadCurrentProfile();
+    
+    // Load current interface status
+    loadInterfaceStatus();
+    
+    // Ensure banner stays updated (check every 30 seconds)
+    setInterval(refreshProfileBanner, 30000);
     
     // Set up event listeners first so the UI is interactive immediately
     document.getElementById('setProfileBtn').addEventListener('click', setProfile);
@@ -132,6 +168,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Now load existing messages (non-blocking)
     loadMessages();
+    
+    // Load nodes overview if profile is set
+    if ({{ 'true' if current_profile else 'false' }}) {
+        loadNodesOverview();
+    }
 });
 
 function initializeSocket() {
@@ -164,6 +205,22 @@ function initializeSocket() {
     socket.on('new_message', function(message) {
         addMessageToUI(message);
     });
+    
+    socket.on('node_update', function(data) {
+        console.log('[socket] node update:', data);
+        
+        // Show notification for new nodes or significant changes
+        if (data.is_new) {
+            showNodeNotification(`New node discovered: ${data.long_name} (${data.short_name})`, 'success');
+        } else if (data.changes && data.changes.length > 0) {
+            showNodeNotification(`Node updated: ${data.long_name} - ${data.changes.length} change(s)`, 'info');
+        }
+        
+        // Refresh nodes overview
+        if (currentProfile) {
+            loadNodesOverview();
+        }
+    });
 }
 
 function loadCurrentProfile() {
@@ -174,9 +231,128 @@ function loadCurrentProfile() {
             if (profile) {
                 document.getElementById('profileSelect').value = profile.id;
             }
+            // Update banner with profile info (status will sync from sidebar)
+            updateProfileBanner(profile);
         })
         .catch(error => console.error('Error loading current profile:', error));
 }
+
+function loadInterfaceStatus() {
+    // Load the current interface status from API
+    fetch('/api/current-profile')
+        .then(response => response.json())
+        .then(profile => {
+            if (profile && profile.id) {
+                // Profile is set - check interface status from API
+                const interfaceStatus = profile.interface_status;
+                
+                if (interfaceStatus === 'started') {
+                    updateInterfaceStatus('bg-success', 'Connected');
+                } else if (interfaceStatus === 'stopped' || interfaceStatus === 'failed') {
+                    updateInterfaceStatus('bg-danger', 'Failed to Start');
+                } else {
+                    updateInterfaceStatus('bg-warning', 'Not Started');
+                }
+                
+                // Update profile key info in sidebar
+                const profileKeyInfo = document.getElementById('profileKeyInfo');
+                const currentProfileName = document.getElementById('currentProfileName');
+                if (profileKeyInfo && currentProfileName) {
+                    if (interfaceStatus === 'started') {
+                        profileKeyInfo.style.display = 'block';
+                        currentProfileName.textContent = profile.long_name || 'Unknown';
+                    } else {
+                        profileKeyInfo.style.display = 'none';
+                    }
+                }
+                
+                console.log('[STATUS] Interface status loaded:', interfaceStatus, 'for profile', profile.long_name);
+            } else {
+                // No profile set - interface not started
+                updateInterfaceStatus('bg-warning', 'Not Started');
+                
+                // Hide profile key info
+                const profileKeyInfo = document.getElementById('profileKeyInfo');
+                if (profileKeyInfo) {
+                    profileKeyInfo.style.display = 'none';
+                }
+                
+                console.log('[STATUS] Interface status loaded: Not Started (no profile)');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading interface status:', error);
+            // Default to unknown status if we can't determine
+            updateInterfaceStatus('bg-secondary', 'Unknown');
+        });
+}
+
+function updateInterfaceStatus(status, statusText) {
+    // Update both sidebar and banner interface status simultaneously
+    const sidebarStatus = document.getElementById('interfaceStatus');
+    const bannerStatus = document.getElementById('bannerInterfaceStatus');
+    
+    const statusClass = `badge ${status}`;
+    
+    if (sidebarStatus) {
+        sidebarStatus.className = statusClass;
+        sidebarStatus.textContent = statusText;
+    }
+    
+    if (bannerStatus) {
+        bannerStatus.className = statusClass;
+        bannerStatus.textContent = statusText;
+    }
+    
+    console.log('[STATUS] Interface status updated:', statusText, status);
+}
+
+function updateProfileBanner(profile) {
+    const banner = document.getElementById('currentProfileBanner');
+    const profileName = document.getElementById('bannerProfileName');
+    const nodeId = document.getElementById('bannerNodeId');
+    const channel = document.getElementById('bannerChannel');
+    const key = document.getElementById('bannerKey');
+    const interfaceStatus = document.getElementById('bannerInterfaceStatus');
+    
+    if (profile) {
+        // Show and populate banner
+        banner.style.display = 'block';
+        profileName.textContent = profile.long_name || 'Unknown Profile';
+        nodeId.textContent = profile.node_id || 'Unknown';
+        channel.textContent = profile.channel || 'Unknown';
+        
+        // Show truncated key for security
+        const profileKey = profile.key || '';
+        if (profileKey.length > 8) {
+            key.textContent = profileKey.substring(0, 8) + '...';
+        } else {
+            key.textContent = profileKey || 'No Key';
+        }
+        
+        // Sync banner interface status with sidebar status (don't override existing status)
+        const sidebarInterfaceStatus = document.getElementById('interfaceStatus');
+        if (sidebarInterfaceStatus && sidebarInterfaceStatus.textContent) {
+            interfaceStatus.className = sidebarInterfaceStatus.className;
+            interfaceStatus.textContent = sidebarInterfaceStatus.textContent;
+        }
+        
+        console.log('[BANNER] Updated with profile:', profile.long_name);
+    } else {
+        // Hide banner when no profile
+        banner.style.display = 'none';
+        console.log('[BANNER] Hidden - no profile selected');
+    }
+}
+
+function refreshProfileBanner() {
+    // Refresh the banner with current profile to ensure it stays visible
+    // Don't override interface status - let it stay as set by setProfile
+    if (currentProfile) {
+        updateProfileBanner(currentProfile);
+    }
+}
+
 
 function loadMessages() {
     fetch('/api/messages')
@@ -195,6 +371,11 @@ function loadMessages() {
 
 function setProfile() {
     const profileId = document.getElementById('profileSelect').value;
+    const setBtn = document.getElementById('setProfileBtn');
+    
+    // Show loading state
+    setBtn.disabled = true;
+    setBtn.textContent = 'Setting Profile...';
     
     fetch('/api/current-profile', {
         method: 'POST',
@@ -203,18 +384,104 @@ function setProfile() {
         },
         body: JSON.stringify({ profile_id: profileId || null })
     })
-    .then(response => response.json())
+    .then(response => {
+        console.log('[PROFILE] Response status:', response.status);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
     .then(data => {
+        console.log('[PROFILE] Response data:', data);
         if (data.error) {
             alert('Error: ' + data.error);
         } else {
             currentProfile = data.profile || null;
-            location.reload(); // Reload to update the UI
+            
+            // Update profile banner
+            updateProfileBanner(currentProfile);
+            
+            // Clear and reload messages with profile-specific messages
+            clearMessagesDisplay();
+            if (currentProfile && data.messages && Array.isArray(data.messages)) {
+                console.log(`[PROFILE] Loading ${data.messages.length} messages for profile: ${currentProfile.long_name}`);
+                data.messages.forEach(addMessageToUI);
+            } else if (!currentProfile) {
+                console.log('[PROFILE] No profile selected - messages cleared');
+            } else {
+                console.log('[PROFILE] No messages returned for profile');
+            }
+            
+            // Update interface status in both sidebar and banner
+            const profileKeyInfo = document.getElementById('profileKeyInfo');
+            const currentProfileName = document.getElementById('currentProfileName');
+            
+            if (data.interface_status === 'started') {
+                updateInterfaceStatus('bg-success', 'Connected');
+                if (currentProfile) {
+                    profileKeyInfo.style.display = 'block';
+                    currentProfileName.textContent = currentProfile.long_name;
+                }
+            } else if (data.interface_status === 'failed') {
+                updateInterfaceStatus('bg-danger', 'Failed to Start');
+                profileKeyInfo.style.display = 'none';
+                if (data.warning) {
+                    alert('Warning: ' + data.warning);
+                }
+            } else {
+                updateInterfaceStatus('bg-warning', 'Not Started');
+                profileKeyInfo.style.display = 'none';
+            }
+            
+            // Update nodes overview based on profile selection
+            if (currentProfile) {
+                loadNodesOverview();
+            } else {
+                // Clear nodes overview when no profile selected
+                const nodesContainer = document.getElementById('nodesOverview');
+                if (nodesContainer) {
+                    nodesContainer.innerHTML = '<small class="text-muted">No profile selected</small>';
+                }
+            }
+            
+            console.log('[PROFILE] ✅ Profile set successfully!');
+            console.log('[PROFILE] Interface status updated:', data.interface_status);
+            console.log('[PROFILE] Banner updated for profile:', currentProfile?.long_name);
+            console.log('[PROFILE] Messages loaded:', data.messages ? data.messages.length : 0);
         }
     })
     .catch(error => {
         console.error('Error setting profile:', error);
-        alert('Error setting profile');
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            profileId: profileId
+        });
+        
+        // Check if the profile was actually set despite the error
+        fetch('/api/current-profile')
+            .then(response => response.json())
+            .then(profile => {
+                if (profile && profile.id === profileId) {
+                    console.log('[PROFILE] Profile was actually set despite error, updating UI');
+                    currentProfile = profile;
+                    updateProfileBanner(profile);
+                    // Don't show error popup if profile was set successfully
+                    console.warn('[PROFILE] Suppressing error popup since profile was set');
+                } else {
+                    // Profile wasn't set, show the error
+                    alert('Error setting profile: ' + error.message);
+                }
+            })
+            .catch(() => {
+                // If we can't check current profile, show the original error
+                alert('Error setting profile: ' + error.message);
+            });
+    })
+    .finally(() => {
+        // Reset button state
+        setBtn.disabled = false;
+        setBtn.textContent = 'Set Profile';
     });
 }
 
@@ -270,8 +537,100 @@ function addMessageToUI(message) {
 
 function clearMessages() {
     if (confirm('Are you sure you want to clear all messages? This only clears the display, not the server history.')) {
-        document.getElementById('messagesContainer').innerHTML = '';
+        clearMessagesDisplay();
     }
+}
+
+function clearMessagesDisplay() {
+    const container = document.getElementById('messagesContainer');
+    if (container) {
+        container.innerHTML = '';
+        console.log('[MESSAGES] Display cleared');
+    }
+}
+
+function loadNodesOverview() {
+    const container = document.getElementById('nodesOverview');
+    if (!container) return;
+    
+    fetch('/api/nodes')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                container.innerHTML = '<small class="text-danger">Error loading nodes</small>';
+                return;
+            }
+            
+            const nodes = data.nodes || [];
+            if (nodes.length === 0) {
+                container.innerHTML = '<small class="text-muted">No nodes seen yet</small>';
+                return;
+            }
+            
+            const recentNodes = nodes.slice(0, 3); // Show only first 3 nodes
+            let html = `<div class="text-start"><strong>${nodes.length}</strong> nodes seen</div>`;
+            
+            recentNodes.forEach(node => {
+                const name = node.long_name || node.short_name || node.node_id || `Node ${node.node_num}`;
+                const shortName = node.short_name || '?';
+                const timeAgo = getTimeAgo(node.last_seen);
+                html += `
+                    <div class="mt-1 p-1 bg-light rounded small">
+                        <div class="d-flex justify-content-between">
+                            <span><strong>${escapeHtml(name)}</strong> (${escapeHtml(shortName)})</span>
+                            <small class="text-muted">${timeAgo}</small>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            if (nodes.length > 3) {
+                html += `<div class="mt-2 text-center"><small class="text-muted">+${nodes.length - 3} more nodes</small></div>`;
+            }
+            
+            container.innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Error loading nodes overview:', error);
+            container.innerHTML = '<small class="text-danger">Error loading nodes</small>';
+        });
+}
+
+function getTimeAgo(dateStr) {
+    if (!dateStr) return 'Unknown';
+    try {
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
+        return `${Math.floor(diffMins / 1440)}d ago`;
+    } catch (e) {
+        return 'Unknown';
+    }
+}
+
+function showNodeNotification(message, type = 'info') {
+    // Create a temporary notification element
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 300px;';
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 5000);
 }
 
 function escapeHtml(unsafe) {

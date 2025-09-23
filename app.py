@@ -14,6 +14,7 @@ from pubsub import pub
 
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
 from mudp import UDPPacketStream, node, conn, send_text_message
+from database import Database
 
 
 MCAST_GRP = "224.0.0.69"
@@ -28,6 +29,9 @@ messages = []
 _DEDUP_CACHE = set()
 _DEDUP_QUEUE = deque(maxlen=500)
 
+# Initialize database
+db = Database()
+
 
 def _already_seen(key):
     """Return True if we've already processed a message with this key; otherwise record it and return False."""
@@ -41,11 +45,8 @@ def _already_seen(key):
     return False
 
 
-key = "1PG7OiApB1nwvP+rz05pAQ=="
-
-
-interface = UDPPacketStream(MCAST_GRP, MCAST_PORT, key=key)
-conn.setup_multicast(MCAST_GRP, MCAST_PORT)
+# Global interface - will be recreated when profile changes
+interface = None
 
 
 def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
@@ -115,22 +116,266 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
 
     # Push into in-memory log and notify connected clients
     try:
+        sender_num = getattr(packet, "from", None)
+        
+        # Look up node name from database if available
+        sender_display = str(sender_num) if sender_num else "Unknown"
+        if current_profile and sender_num:
+            try:
+                nodes = db.get_nodes_for_profile(current_profile["id"])
+                node = next((n for n in nodes if n["node_num"] == sender_num), None)
+                if node and node.get("long_name"):
+                    sender_display = node["long_name"]
+                    print(f"[MESSAGE] Using node name: {sender_display} for {sender_num}")
+                else:
+                    # Fallback to hex format if no name found
+                    sender_display = f"!{hex(sender_num)[2:].zfill(8)}"
+                    print(f"[MESSAGE] No node name found, using hex: {sender_display}")
+            except Exception as e:
+                print(f"[MESSAGE] Error looking up node name: {e}")
+                sender_display = f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else "Unknown"
+        
         message = {
             "id": str(uuid.uuid4()),
-            "sender": str(getattr(packet, "from", "Unknown")),
-            "sender_display": str(getattr(packet, "from", "Unknown")),
+            "sender": str(sender_num) if sender_num else "Unknown",
+            "sender_display": sender_display,
             "content": msg,
             "timestamp": datetime.now().isoformat(),
             "sender_ip": (addr[0] if isinstance(addr, tuple) and len(addr) >= 1 else "mesh"),
         }
         messages.append(message)
+        
+        # Store message in database if profile is set
+        if current_profile:
+            db.store_message(
+                profile_id=current_profile["id"],
+                message_id=message["id"],
+                packet_id=pkt_id,
+                sender_num=getattr(packet, "from", None),
+                sender_display=message["sender_display"],
+                content=msg,
+                sender_ip=message["sender_ip"],
+                direction="received",
+                channel=packet.channel,
+                hop_limit=packet.hop_limit,
+                hop_start=packet.hop_start,
+                rx_snr=packet.rx_snr,
+                rx_rssi=packet.rx_rssi
+            )
+        
         socketio.emit("new_message", message)
     except Exception as e:
         print(f"Failed to emit incoming message: {e}")
 
 
+def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
+    """Handle NODEINFO_APP packets and store/update node information"""
+    print(f"\n[NODEINFO_DEBUG] on_nodeinfo called with packet from {getattr(packet, 'from', None)}")
+    
+    if not current_profile:
+        print(f"[NODEINFO_DEBUG] No current profile set, skipping")
+        return  # Skip if no profile is selected
+    
+    print(f"[NODEINFO_DEBUG] Current profile: {current_profile.get('long_name', 'unknown')} ({current_profile.get('id', 'unknown')})")
+        
+    if not packet.HasField("decoded") or packet.decoded.portnum != portnums_pb2.PortNum.NODEINFO_APP:
+        print(f"[NODEINFO_DEBUG] Not a NODEINFO packet: decoded={packet.HasField('decoded')}, portnum={packet.decoded.portnum if packet.HasField('decoded') else 'N/A'}")
+        return
+        
+    sender_num = getattr(packet, "from", None)
+    if not sender_num:
+        print(f"[NODEINFO_DEBUG] No sender number")
+        return
+        
+    pkt_id = getattr(packet, "id", 0) or 0
+    if pkt_id and _already_seen(("nodeinfo", pkt_id)):
+        print(f"[NODEINFO_DEBUG] Already processed packet {pkt_id}")
+        return
+    
+    print(f"[NODEINFO_DEBUG] Processing NODEINFO from {sender_num}, packet ID {pkt_id}")
+        
+    try:
+        # Parse the nodeinfo payload - try different approaches
+        print(f"[NODEINFO_DEBUG] Payload length: {len(packet.decoded.payload)} bytes")
+        print(f"[NODEINFO_DEBUG] Payload (first 100 chars): {packet.decoded.payload[:100]}")
+        
+        # First try to parse as User protobuf
+        try:
+            from meshtastic.protobuf import mesh_pb2
+            user = mesh_pb2.User()
+            user.ParseFromString(packet.decoded.payload)
+            
+            node_id = getattr(user, "id", "")
+            long_name = getattr(user, "long_name", "")
+            short_name = getattr(user, "short_name", "")
+            macaddr = getattr(user, "macaddr", b"")
+            hw_model_num = getattr(user, "hw_model", 0)
+            role_num = getattr(user, "role", 0)
+            public_key = getattr(user, "public_key", b"")
+            
+            print(f"[NODEINFO_DEBUG] Successfully parsed as User protobuf")
+            
+        except Exception as proto_error:
+            print(f"[NODEINFO_DEBUG] Failed to parse as User protobuf: {proto_error}")
+            
+            # Try to parse as plain text (like your log shows)
+            try:
+                payload_str = packet.decoded.payload.decode('utf-8')
+                print(f"[NODEINFO_DEBUG] Payload as string: {payload_str}")
+                
+                # Parse the text format from your logs
+                # Expected format: id: "!da621930" long_name: "Somebody Once Told Me" short_name: "SMB" macaddr: "..." hw_model: HELTEC_V3
+                import re
+                
+                node_id_match = re.search(r'id: "([^"]+)"', payload_str)
+                long_name_match = re.search(r'long_name: "([^"]+)"', payload_str)
+                short_name_match = re.search(r'short_name: "([^"]+)"', payload_str)
+                hw_model_match = re.search(r'hw_model: ([A-Z_0-9]+)', payload_str)
+                
+                node_id = node_id_match.group(1) if node_id_match else f"!{hex(sender_num)[2:].zfill(8)}"
+                long_name = long_name_match.group(1) if long_name_match else f"Node {sender_num}"
+                short_name = short_name_match.group(1) if short_name_match else f"N{str(sender_num)[-4:]}"
+                hw_model_num = 0
+                role_num = 0
+                macaddr = b""
+                public_key = b""
+                
+                # Try to map hardware model string to number if possible
+                hw_model = hw_model_match.group(1) if hw_model_match else "UNKNOWN"
+                
+                print(f"[NODEINFO_DEBUG] Successfully parsed as text: id={node_id}, name={long_name}")
+                
+            except Exception as text_error:
+                print(f"[NODEINFO_DEBUG] Failed to parse as text: {text_error}")
+                
+                # Last resort - create basic info from sender
+                node_id = f"!{hex(sender_num)[2:].zfill(8)}"
+                long_name = f"Node {sender_num}"
+                short_name = f"N{str(sender_num)[-4:]}"
+                hw_model_num = 0
+                role_num = 0
+                macaddr = b""
+                public_key = b""
+                hw_model = "UNKNOWN"
+                
+                print(f"[NODEINFO_DEBUG] Using fallback parsing: id={node_id}, name={long_name}")
+        
+        # Convert enums to strings (hw_model might already be set for text parsing)
+        if 'hw_model' not in locals():
+            try:
+                from meshtastic.protobuf import config_pb2
+                hw_model = config_pb2.Config.DeviceConfig.HwModel.Name(hw_model_num) if hw_model_num else "UNSET"
+            except:
+                hw_model = str(hw_model_num)
+            
+        try:
+            from meshtastic.protobuf import config_pb2
+            role = config_pb2.Config.DeviceConfig.Role.Name(role_num) if role_num else "CLIENT"
+        except:
+            role = str(role_num)
+        
+        # Get existing node data to check for changes
+        existing_nodes = db.get_nodes_for_profile(current_profile["id"])
+        existing_node = next((n for n in existing_nodes if n["node_num"] == sender_num), None)
+        
+        # Track what has changed
+        changes = []
+        is_new_node = existing_node is None
+        
+        if existing_node:
+            # Compare fields and track changes
+            if existing_node.get("node_id") != node_id:
+                changes.append(f"node_id: '{existing_node.get('node_id')}' -> '{node_id}'")
+            if existing_node.get("long_name") != long_name:
+                changes.append(f"long_name: '{existing_node.get('long_name')}' -> '{long_name}'")
+            if existing_node.get("short_name") != short_name:
+                changes.append(f"short_name: '{existing_node.get('short_name')}' -> '{short_name}'")
+            if existing_node.get("hw_model") != hw_model:
+                changes.append(f"hw_model: '{existing_node.get('hw_model')}' -> '{hw_model}'")
+            if existing_node.get("role") != role:
+                changes.append(f"role: '{existing_node.get('role')}' -> '{role}'")
+                
+            # Compare MAC address if both exist
+            existing_mac = existing_node.get("macaddr")
+            new_mac = ':'.join(f'{b:02x}' for b in macaddr) if macaddr else None
+            if existing_mac != new_mac and new_mac:  # Only track if new MAC is not empty
+                changes.append(f"macaddr: '{existing_mac}' -> '{new_mac}'")
+        
+        # Log the nodeinfo with change information
+        if is_new_node:
+            print(f"\n[NODEINFO] NEW NODE {sender_num}: {long_name} ({short_name}) - {hw_model}")
+        elif changes:
+            print(f"\n[NODEINFO] UPDATED NODE {sender_num}: {long_name} ({short_name}) - {hw_model}")
+            print(f"[CHANGES] {', '.join(changes)}")
+        else:
+            print(f"\n[NODEINFO] SEEN NODE {sender_num}: {long_name} ({short_name}) - {hw_model} (no changes)")
+        
+        # Store raw nodeinfo for debugging/future use
+        raw_nodeinfo = json.dumps({
+            "id": node_id,
+            "long_name": long_name,
+            "short_name": short_name,
+            "hw_model": hw_model,
+            "hw_model_num": hw_model_num,
+            "role": role,
+            "role_num": role_num,
+            "packet_info": {
+                "channel": packet.channel,
+                "hop_limit": packet.hop_limit,
+                "hop_start": packet.hop_start,
+                "rx_snr": packet.rx_snr,
+                "rx_rssi": packet.rx_rssi
+            },
+            "changes": changes,
+            "is_new": is_new_node
+        })
+        
+        # Store/update node in database
+        success = db.store_node(
+            profile_id=current_profile["id"],
+            node_num=sender_num,
+            node_id=node_id,
+            long_name=long_name,
+            short_name=short_name,
+            macaddr=macaddr if macaddr else None,
+            hw_model=hw_model,
+            role=role,
+            public_key=public_key if public_key else None,
+            raw_nodeinfo=raw_nodeinfo
+        )
+        
+        if not success:
+            print(f"[ERROR] Failed to store node {sender_num} in database")
+        else:
+            print(f"[NODEINFO_DEBUG] Successfully stored node {sender_num} ({long_name}) for profile {current_profile.get('id')}")
+        
+        # Notify connected clients about node update
+        try:
+            socketio.emit("node_update", {
+                "node_num": sender_num,
+                "node_id": node_id,
+                "long_name": long_name,
+                "short_name": short_name,
+                "hw_model": hw_model,
+                "role": role,
+                "is_new": is_new_node,
+                "changes": changes,
+                "packet_info": {
+                    "rx_snr": packet.rx_snr,
+                    "rx_rssi": packet.rx_rssi,
+                    "hop_limit": packet.hop_limit
+                }
+            })
+        except Exception as e:
+            print(f"Failed to emit node update: {e}")
+            
+    except Exception as e:
+        print(f"Error processing nodeinfo: {e}")
+
+
 pub.subscribe(on_recieve, "mesh.rx.packet")
 pub.subscribe(on_text_message, "mesh.rx.port.1")
+pub.subscribe(on_nodeinfo, "mesh.rx.port.4")  # NODEINFO_APP
 
 
 app = Flask(__name__)
@@ -148,87 +393,124 @@ def inject_versions():
 
 
 class ProfileManager:
-    def __init__(self):
+    def __init__(self, database):
+        self.db = database
         self.profiles_file = PROFILES_FILE
-        self.profiles = self.load_profiles()
-
-    def load_profiles(self):
-        """Load profiles from JSON file"""
-        if os.path.exists(self.profiles_file):
-            try:
-                with open(self.profiles_file, "r") as f:
-
-                    return json.load(f)
-            except:
-                return {}
-        return {}
-
-    def save_profiles(self):
-        """Save profiles to JSON file"""
-        with open(self.profiles_file, "w") as f:
-            json.dump(self.profiles, f, indent=2)
-
-    def update_profile(self, profile_id, node_id, long_name, short_name, channel, key):
-        """Update an existing profile"""
-        if profile_id in self.profiles:
-            self.profiles[profile_id].update(
-                {
-                    "node_id": node_id,
-                    "long_name": long_name,
-                    "short_name": short_name,
-                    "channel": channel,
-                    "key": key,
-                    "updated_at": datetime.now().isoformat(),
-                }
-            )
-            self.save_profiles()
-            return True
-        return False
-
-    def delete_profile(self, profile_id):
-        """Delete a profile"""
-        if profile_id in self.profiles:
-            del self.profiles[profile_id]
-            self.save_profiles()
-            return True
-        return False
-
-    def get_profile(self, profile_id):
-        """Get a specific profile"""
-        return self.profiles.get(profile_id)
+        # Note: Migration is handled by startup script, not automatically here
 
     def get_all_profiles(self):
         """Get all profiles"""
-        return self.profiles
+        return self.db.get_all_profiles()
+
+    def get_profile(self, profile_id):
+        """Get a specific profile"""
+        return self.db.get_profile(profile_id)
+
+    def create_profile(self, profile_id, node_id, long_name, short_name, channel, key):
+        """Create a new profile"""
+        return self.db.create_profile(profile_id, node_id, long_name, short_name, channel, key)
+
+    def update_profile(self, profile_id, node_id, long_name, short_name, channel, key):
+        """Update an existing profile"""
+        return self.db.update_profile(profile_id, node_id, long_name, short_name, channel, key)
+
+    def delete_profile(self, profile_id):
+        """Delete a profile"""
+        return self.db.delete_profile(profile_id)
+
+
+def create_interface_for_profile(profile):
+    """Create a new MUDP interface with the profile's key"""
+    global interface
+    
+    if not profile:
+        print("[INTERFACE] No profile provided, cannot create interface")
+        return None
+        
+    profile_key = profile.get("key", "")
+    if not profile_key:
+        print(f"[INTERFACE] Profile {profile.get('id', 'unknown')} has no key")
+        return None
+    
+    try:
+        # Stop existing interface if running
+        if interface:
+            try:
+                interface.stop()
+                print("[INTERFACE] Stopped existing interface")
+            except:
+                pass
+        
+        # Create new interface with profile's key
+        interface = UDPPacketStream(MCAST_GRP, MCAST_PORT, key=profile_key)
+        conn.setup_multicast(MCAST_GRP, MCAST_PORT)
+        
+        print(f"[INTERFACE] Created interface for profile {profile.get('long_name', 'unknown')} with key {profile_key[:8]}...")
+        return interface
+        
+    except Exception as e:
+        print(f"[INTERFACE] Error creating interface: {e}")
+        return None
 
 
 class UDPChatServer:
     def __init__(self):
         self.running = False
+        self.current_profile_id = None
 
-    def start(self):
-        """Start the mudp interface receiver"""
+    def start(self, profile=None):
+        """Start the mudp interface receiver with profile-specific key"""
+        global interface
+        
+        if not profile:
+            print("[UDP] Cannot start without a profile (need encryption key)")
+            return False
+            
+        # Create interface for this profile
+        interface = create_interface_for_profile(profile)
+        if not interface:
+            return False
+            
         try:
             interface.start()
             self.running = True
-            print(f"Joined multicast group {MCAST_GRP} on port {MCAST_PORT} via mudp")
+            self.current_profile_id = profile.get("id")
+            print(f"[UDP] Started interface for profile {profile.get('long_name', 'unknown')}")
+            print(f"[UDP] Listening on {MCAST_GRP}:{MCAST_PORT} with profile key")
             return True
         except Exception as e:
-            print(f"Failed to start mudp interface: {e}")
+            print(f"[UDP] Failed to start mudp interface: {e}")
             return False
 
     def stop(self):
         """Stop the mudp interface"""
+        global interface
         self.running = False
         try:
-            interface.stop()
-        except Exception:
-            pass
+            if interface:
+                interface.stop()
+                print("[UDP] Interface stopped")
+        except Exception as e:
+            print(f"[UDP] Error stopping interface: {e}")
+            
+    def restart_with_profile(self, profile):
+        """Restart the interface with a new profile"""
+        print(f"[UDP] Restarting interface for profile {profile.get('long_name', 'unknown')}")
+        self.stop()
+        return self.start(profile)
 
     def send_message(self, message_content, sender_profile):
         """Send a text message via mudp"""
         if not sender_profile:
             return False
+            
+        # Ensure interface is running for current profile
+        if not self.running or self.current_profile_id != sender_profile.get("id"):
+            print(f"[UDP] Interface not running for current profile, restarting...")
+            if not self.restart_with_profile(sender_profile):
+                print(f"[UDP] Failed to restart interface for profile")
+                return False
+                
         try:
             send_text_message(message_content)
 
@@ -242,6 +524,24 @@ class UDPChatServer:
                 "sender_ip": "self",
             }
             messages.append(message)
+            
+            # Store sent message in database
+            if current_profile:
+                try:
+                    my_node_num = _my_node_num()
+                    db.store_message(
+                        profile_id=current_profile["id"],
+                        message_id=message["id"],
+                        packet_id=None,  # We don't have packet ID for sent messages yet
+                        sender_num=my_node_num,
+                        sender_display=message["sender_display"],
+                        content=message_content,
+                        sender_ip="self",
+                        direction="sent"
+                    )
+                except Exception as e:
+                    print(f"Failed to store sent message in database: {e}")
+            
             try:
                 socketio.emit("new_message", message)
             except Exception:
@@ -253,7 +553,7 @@ class UDPChatServer:
 
 
 # Initialize managers
-profile_manager = ProfileManager()
+profile_manager = ProfileManager(db)
 udp_server = UDPChatServer()
 
 
@@ -269,6 +569,19 @@ def profiles():
     """Profile management page"""
     profiles = profile_manager.get_all_profiles()
     return render_template("profiles.html", profiles=profiles)
+
+
+@app.route("/nodes")
+def nodes():
+    """Nodes page - display seen nodes"""
+    if not current_profile:
+        # Show empty page if no profile selected
+        return render_template("nodes.html", nodes=[], current_profile=None, stats={})
+    
+    nodes = db.get_nodes_for_profile(current_profile["id"])
+    stats = db.get_stats(current_profile["id"])
+    
+    return render_template("nodes.html", nodes=nodes, current_profile=current_profile, stats=stats)
 
 
 @app.route("/api/profiles", methods=["GET"])
@@ -288,18 +601,15 @@ def create_profile():
 
     # Create and store the profile
     profile_id = str(uuid.uuid4())
-    profile_manager.profiles[profile_id] = {
-        "id": profile_id,
-        "node_id": data["node_id"],
-        "long_name": data["long_name"],
-        "short_name": data["short_name"],
-        "channel": data["channel"],
-        "key": data["key"],
-        "created_at": datetime.now().isoformat(),
-    }
-    profile_manager.save_profiles()
-
-    return jsonify({"profile_id": profile_id, "message": "Profile created successfully"})
+    success = profile_manager.create_profile(
+        profile_id, data["node_id"], data["long_name"], 
+        data["short_name"], data["channel"], data["key"]
+    )
+    
+    if success:
+        return jsonify({"profile_id": profile_id, "message": "Profile created successfully"})
+    else:
+        return jsonify({"error": "Failed to create profile"}), 500
 
 
 @app.route("/api/profiles/<profile_id>", methods=["PUT"])
@@ -339,41 +649,137 @@ def delete_profile(profile_id):
 
 @app.route("/api/current-profile", methods=["GET"])
 def get_current_profile():
-    """Get the current active profile"""
-    return jsonify(current_profile)
+    """Get the current active profile with interface status"""
+    if current_profile:
+        # Determine interface status based on udp_server state
+        if udp_server.running and udp_server.current_profile_id == current_profile.get("id"):
+            interface_status = "started"
+        else:
+            interface_status = "stopped"
+            
+        # Return profile with interface status
+        response_data = dict(current_profile)
+        response_data["interface_status"] = interface_status
+        return jsonify(response_data)
+    else:
+        return jsonify(None)
 
 
 @app.route("/api/current-profile", methods=["POST"])
 def set_current_profile():
-    """Set the current active profile"""
+    """Set the current active profile and restart interface with new key"""
     global current_profile
 
     data = request.get_json()
     profile_id = data.get("profile_id")
 
     if not profile_id:
+        # Unset profile and stop interface
         current_profile = None
-        return jsonify({"message": "Profile unset"})
+        udp_server.stop()
+        print("[PROFILE] Profile unset, interface stopped")
+        return jsonify({
+            "message": "Profile unset", 
+            "profile": None,
+            "messages": []  # Clear messages when no profile selected
+        })
 
     profile = profile_manager.get_profile(profile_id)
     print(f"[API] set_current_profile -> requested id={profile_id} exists={bool(profile)}")
+    
     if profile:
+        # Set current profile
         current_profile = profile
+        
+        # Update node attributes
         node.channel = profile.get("channel", "")
         node.node_id = profile.get("node_id", "")
         node.long_name = profile.get("long_name", "")
         node.short_name = profile.get("short_name", "")
         node.key = profile.get("key", "")
-        print(f"[PROFILE] Loaded node attrs from profile {profile.get('id', 'unknown')}")
-        return jsonify({"message": "Profile set successfully", "profile": current_profile})
+        
+        print(f"[PROFILE] Loaded node attrs from profile {profile.get('long_name', 'unknown')}")
+        
+        # Restart UDP interface with new profile key
+        print(f"[PROFILE] Restarting interface with key from profile {profile.get('long_name', 'unknown')}")
+        interface_started = udp_server.restart_with_profile(profile)
+        
+        # Get messages for the newly selected profile
+        profile_messages = db.get_messages_for_profile(current_profile["id"])
+        
+        if interface_started:
+            print(f"[PROFILE] Interface successfully started with profile key")
+            return jsonify({
+                "message": "Profile set successfully and interface restarted", 
+                "profile": current_profile,
+                "interface_status": "started",
+                "messages": profile_messages
+            })
+        else:
+            print(f"[PROFILE] Warning: Profile set but interface failed to start")
+            return jsonify({
+                "message": "Profile set but interface failed to start", 
+                "profile": current_profile,
+                "interface_status": "failed",
+                "warning": "You may not receive messages until interface is fixed",
+                "messages": profile_messages
+            })
     else:
         return jsonify({"error": "Profile not found"}), 404
 
 
 @app.route("/api/messages", methods=["GET"])
 def get_messages():
-    """Get all messages"""
-    return jsonify(messages)
+    """Get messages for current profile"""
+    if not current_profile:
+        # Return in-memory messages if no profile is set (backward compatibility)
+        return jsonify(messages)
+    
+    # Get messages from database for current profile
+    db_messages = db.get_messages_for_profile(current_profile["id"])
+    return jsonify(db_messages)
+
+
+@app.route("/api/nodes", methods=["GET"])
+def get_nodes():
+    """Get all nodes seen by current profile"""
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+    
+    nodes = db.get_nodes_for_profile(current_profile["id"])
+    return jsonify({"nodes": nodes, "count": len(nodes)})
+
+
+@app.route("/api/nodes/<int:node_num>", methods=["GET"])
+def get_node_details(node_num):
+    """Get detailed information about a specific node"""
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+    
+    nodes = db.get_nodes_for_profile(current_profile["id"])
+    node = next((n for n in nodes if n["node_num"] == node_num), None)
+    
+    if not node:
+        return jsonify({"error": "Node not found"}), 404
+        
+    return jsonify(node)
+
+
+@app.route("/api/stats", methods=["GET"])
+def get_stats():
+    """Get database statistics"""
+    if current_profile:
+        profile_stats = db.get_stats(current_profile["id"])
+        global_stats = db.get_stats()
+        return jsonify({
+            "profile": profile_stats,
+            "global": global_stats
+        })
+    else:
+        global_stats = db.get_stats()
+        return jsonify({
+            "global": global_stats
+        })
 
 
 @app.route("/api/send-message", methods=["POST"])
@@ -402,7 +808,13 @@ def send_message():
 
 @app.route("/api/health")
 def health():
-    return jsonify({"status": "ok", "profiles": len(profile_manager.get_all_profiles()), "messages": len(messages)})
+    global_stats = db.get_stats()
+    return jsonify({
+        "status": "ok", 
+        "profiles": global_stats["profiles"],
+        "messages": len(messages),  # In-memory messages count
+        "database": global_stats
+    })
 
 
 @app.after_request
@@ -428,10 +840,8 @@ def handle_disconnect():
 
 if __name__ == "__main__":
     print("[STARTUP] Using mudp UDPPacketStream for UDP multicast I/O")
-    # Start UDP server
-    if udp_server.start():
-        app.config["TEMPLATES_AUTO_RELOAD"] = True
-        print(f"Starting Flask-SocketIO server on http://localhost:5007 (mudp {MCAST_GRP}:{MCAST_PORT}) ...")
-        socketio.run(app, host="0.0.0.0", port=5011, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
-    else:
-        print("Failed to start UDP server")
+    print("[STARTUP] Interface will start when a profile is selected")
+    
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    print(f"Starting Flask-SocketIO server on http://localhost:5011 (interface starts with profile selection)...")
+    socketio.run(app, host="0.0.0.0", port=5011, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)

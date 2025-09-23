@@ -5,7 +5,7 @@ Simple runner script for the MUDP Chat Application
 
 import sys
 
-SERVER_PORT = 5011
+SERVER_PORT = 5012
 
 
 def check_python_version():
@@ -60,15 +60,9 @@ def main():
         # Import and run the app
         from app import app, socketio, udp_server
 
-        # Start UDP server
-        if udp_server.start():
-            print("MUDP Chat Server started successfully")
-            socketio.run(
-                app, host="0.0.0.0", port=SERVER_PORT, debug=True, use_reloader=True, allow_unsafe_werkzeug=True
-            )
-        else:
-            print("Failed to start UDP server")
-            sys.exit(1)
+        # Note: UDP server will start when a profile is selected
+        print("MUDP Chat Server ready (interface starts with profile selection)")
+        socketio.run(app, host="0.0.0.0", port=SERVER_PORT, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)
 
     except KeyboardInterrupt:
         print("\nShutting down gracefully...")

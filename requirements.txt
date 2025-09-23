@@ -4,5 +4,6 @@ python-socketio==5.9.0
 python-engineio==4.7.1
 eventlet==0.33.3
 meshtastic==2.7.1
-cryptography==45.0.6
+cryptography==43.0.3
 mudp==1.0.0a7
+Pypubsub==4.0.3

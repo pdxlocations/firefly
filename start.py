@@ -15,21 +15,9 @@ def print_banner():
     print("=" * 50)
 
 def initialize_database():
-    """Initialize database and migrate existing profiles"""
+    """Initialize database"""
     print("\n📊 Initializing Database...")
     db = Database()
-    
-    # Attempt migration from JSON (will only migrate if database is empty)
-    profiles_file = "profiles.json"
-    if os.path.exists(profiles_file):
-        print(f"Found existing {profiles_file}...")
-        migrated = db.migrate_profiles_from_json(profiles_file)
-        if migrated:
-            print("✓ Profiles migrated from JSON to database")
-        else:
-            print("✓ Database already contains profiles, no migration needed")
-    else:
-        print("No JSON profiles file found, using database only")
     
     # Show database stats
     stats = db.get_stats()

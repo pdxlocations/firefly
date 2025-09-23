@@ -115,7 +115,6 @@
                 <li>Select or create a profile to start chatting</li>
                 <li>Messages are broadcast via UDP to the local network on port 4403</li>
                 <li>Anyone running this app on the same network can receive and send messages</li>
-                <li>Messages are stored only during the current session</li>
             </ul>
         </div>
     </div>
@@ -204,6 +203,24 @@ function initializeSocket() {
 
     socket.on('new_message', function(message) {
         addMessageToUI(message);
+    });
+    
+    // Handle profile switch notifications
+    socket.on('profile_switched', function(data) {
+        console.log('[socket] profile_switched:', data);
+        if (data.loaded_messages > 0) {
+            showNotification(
+                `Switched to ${data.profile_name} (${data.profile_channel}). Loaded ${data.loaded_messages} missed message(s) from channel ${data.channel_number}.`,
+                'success',
+                5000
+            );
+        } else {
+            showNotification(
+                `Switched to ${data.profile_name} (${data.profile_channel}). No missed messages.`,
+                'info',
+                3000
+            );
+        }
     });
     
     socket.on('node_update', function(data) {
@@ -631,6 +648,26 @@ function showNodeNotification(message, type = 'info') {
             notification.remove();
         }
     }, 5000);
+}
+
+function showNotification(message, type = 'info', duration = 4000) {
+    // Create a temporary notification element
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-remove after specified duration
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, duration);
 }
 
 function escapeHtml(unsafe) {

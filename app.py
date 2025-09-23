@@ -15,6 +15,7 @@ from pubsub import pub
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
 from mudp import UDPPacketStream, node, conn, send_text_message
 from database import Database
+from encryption import generate_hash
 
 
 MCAST_GRP = "224.0.0.69"
@@ -31,6 +32,22 @@ _DEDUP_QUEUE = deque(maxlen=500)
 
 # Initialize database
 db = Database()
+
+
+def _current_profile_channel_num():
+    """Compute the expected channel number for the current profile using name+key hash.
+    Returns an int channel number or None if unavailable.
+    """
+    try:
+        if not current_profile:
+            return None
+        ch_name = current_profile.get("channel")
+        key = current_profile.get("key")
+        if not ch_name or not key:
+            return None
+        return generate_hash(ch_name, key)
+    except Exception:
+        return None
 
 
 def _already_seen(key):
@@ -112,7 +129,8 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
     if _already_seen(("id", pkt_id)):
         return
 
-    print(f"\n[RECV] From: {getattr(packet, 'from', None)} Message: {msg}")
+    print(f"[RECV] From: {getattr(packet, 'from', None)} Channel: {getattr(packet, 'channel', None)} Message: {msg}")
+
 
     # Push into in-memory log and notify connected clients
     try:
@@ -145,10 +163,13 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
         }
         messages.append(message)
         
-        # Store message in database if profile is set
-        if current_profile:
+        # Store message in database by channel (accessible to any profile using that channel)
+        message_channel = getattr(packet, "channel", None)
+        if message_channel is not None:
+            print(f"[MESSAGE] Storing message on channel {message_channel}: {msg[:50]}...")
+            
+            # Store message once per channel (not per profile)
             db.store_message(
-                profile_id=current_profile["id"],
                 message_id=message["id"],
                 packet_id=pkt_id,
                 sender_num=getattr(packet, "from", None),
@@ -156,14 +177,37 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
                 content=msg,
                 sender_ip=message["sender_ip"],
                 direction="received",
-                channel=packet.channel,
+                channel=message_channel,
                 hop_limit=packet.hop_limit,
                 hop_start=packet.hop_start,
                 rx_snr=packet.rx_snr,
                 rx_rssi=packet.rx_rssi
             )
+        else:
+            # If no channel info, skip storage (can't determine channel)
+            print(f"[MESSAGE] No channel info - skipping database storage for: {msg[:50]}...")
         
-        socketio.emit("new_message", message)
+        # Only emit to WebSocket clients if message matches current profile's channel
+        should_display = False
+        if current_profile and message_channel is not None:
+            try:
+                current_profile_channel = _current_profile_channel_num()
+                if current_profile_channel == message_channel:
+                    should_display = True
+                    print(f"[MESSAGE] Emitting to UI - matches current profile channel {current_profile_channel}")
+                else:
+                    print(f"[MESSAGE] NOT emitting to UI - channel {message_channel} != profile channel {current_profile_channel}")
+            except Exception as e:
+                print(f"[MESSAGE] Error checking profile channel: {e}")
+        elif message_channel is None:
+            # Backward compatibility: if no channel info, show for current profile
+            should_display = current_profile is not None
+            print(f"[MESSAGE] No channel info, emitting based on profile existence: {should_display}")
+        else:
+            print(f"[MESSAGE] No current profile set, not emitting")
+        
+        if should_display:
+            socketio.emit("new_message", message)
     except Exception as e:
         print(f"Failed to emit incoming message: {e}")
 
@@ -172,11 +216,8 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
     """Handle NODEINFO_APP packets and store/update node information"""
     print(f"\n[NODEINFO_DEBUG] on_nodeinfo called with packet from {getattr(packet, 'from', None)}")
     
-    if not current_profile:
-        print(f"[NODEINFO_DEBUG] No current profile set, skipping")
-        return  # Skip if no profile is selected
-    
-    print(f"[NODEINFO_DEBUG] Current profile: {current_profile.get('long_name', 'unknown')} ({current_profile.get('id', 'unknown')})")
+    # We'll process nodeinfo for all matching profiles, not just current one
+    print(f"[NODEINFO_DEBUG] Processing nodeinfo for channel {getattr(packet, 'channel', None)}")
         
     if not packet.HasField("decoded") or packet.decoded.portnum != portnums_pb2.PortNum.NODEINFO_APP:
         print(f"[NODEINFO_DEBUG] Not a NODEINFO packet: decoded={packet.HasField('decoded')}, portnum={packet.decoded.portnum if packet.HasField('decoded') else 'N/A'}")
@@ -274,100 +315,158 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
         except:
             role = str(role_num)
         
-        # Get existing node data to check for changes
-        existing_nodes = db.get_nodes_for_profile(current_profile["id"])
-        existing_node = next((n for n in existing_nodes if n["node_num"] == sender_num), None)
+        # Find all profiles that match this channel
+        nodeinfo_channel = getattr(packet, "channel", None)
+        matching_profiles = []
         
-        # Track what has changed
-        changes = []
-        is_new_node = existing_node is None
-        
-        if existing_node:
-            # Compare fields and track changes
-            if existing_node.get("node_id") != node_id:
-                changes.append(f"node_id: '{existing_node.get('node_id')}' -> '{node_id}'")
-            if existing_node.get("long_name") != long_name:
-                changes.append(f"long_name: '{existing_node.get('long_name')}' -> '{long_name}'")
-            if existing_node.get("short_name") != short_name:
-                changes.append(f"short_name: '{existing_node.get('short_name')}' -> '{short_name}'")
-            if existing_node.get("hw_model") != hw_model:
-                changes.append(f"hw_model: '{existing_node.get('hw_model')}' -> '{hw_model}'")
-            if existing_node.get("role") != role:
-                changes.append(f"role: '{existing_node.get('role')}' -> '{role}'")
-                
-            # Compare MAC address if both exist
-            existing_mac = existing_node.get("macaddr")
-            new_mac = ':'.join(f'{b:02x}' for b in macaddr) if macaddr else None
-            if existing_mac != new_mac and new_mac:  # Only track if new MAC is not empty
-                changes.append(f"macaddr: '{existing_mac}' -> '{new_mac}'")
-        
-        # Log the nodeinfo with change information
-        if is_new_node:
-            print(f"\n[NODEINFO] NEW NODE {sender_num}: {long_name} ({short_name}) - {hw_model}")
-        elif changes:
-            print(f"\n[NODEINFO] UPDATED NODE {sender_num}: {long_name} ({short_name}) - {hw_model}")
-            print(f"[CHANGES] {', '.join(changes)}")
+        if nodeinfo_channel is not None:
+            # Get all profiles and find ones that match this channel
+            all_profiles = db.get_all_profiles()
+            
+            for profile_id, profile in all_profiles.items():
+                try:
+                    profile_channel = generate_hash(profile["channel"], profile["key"])
+                    if profile_channel == nodeinfo_channel:
+                        matching_profiles.append(profile_id)
+                except Exception:
+                    pass  # Skip profiles with invalid channel/key
         else:
-            print(f"\n[NODEINFO] SEEN NODE {sender_num}: {long_name} ({short_name}) - {hw_model} (no changes)")
+            # If no channel info, only store for current profile (backward compatibility)
+            if current_profile:
+                matching_profiles = [current_profile["id"]]
         
-        # Store raw nodeinfo for debugging/future use
-        raw_nodeinfo = json.dumps({
-            "id": node_id,
-            "long_name": long_name,
-            "short_name": short_name,
-            "hw_model": hw_model,
-            "hw_model_num": hw_model_num,
-            "role": role,
-            "role_num": role_num,
-            "packet_info": {
-                "channel": packet.channel,
-                "hop_limit": packet.hop_limit,
-                "hop_start": packet.hop_start,
-                "rx_snr": packet.rx_snr,
-                "rx_rssi": packet.rx_rssi
-            },
-            "changes": changes,
-            "is_new": is_new_node
-        })
+        print(f"[NODEINFO_DEBUG] Channel {nodeinfo_channel} matches {len(matching_profiles)} profiles: {matching_profiles}")
         
-        # Store/update node in database
-        success = db.store_node(
-            profile_id=current_profile["id"],
-            node_num=sender_num,
-            node_id=node_id,
-            long_name=long_name,
-            short_name=short_name,
-            macaddr=macaddr if macaddr else None,
-            hw_model=hw_model,
-            role=role,
-            public_key=public_key if public_key else None,
-            raw_nodeinfo=raw_nodeinfo
-        )
+        if not matching_profiles:
+            print(f"[NODEINFO_DEBUG] No matching profiles found for channel {nodeinfo_channel}, skipping")
+            return
         
-        if not success:
-            print(f"[ERROR] Failed to store node {sender_num} in database")
-        else:
-            print(f"[NODEINFO_DEBUG] Successfully stored node {sender_num} ({long_name}) for profile {current_profile.get('id')}")
+        # Store node for each matching profile
+        stored_count = 0
+        all_changes = []
+        is_new_anywhere = False
         
-        # Notify connected clients about node update
-        try:
-            socketio.emit("node_update", {
-                "node_num": sender_num,
-                "node_id": node_id,
+        for profile_id in matching_profiles:
+            # Get existing node data for this profile to check for changes
+            existing_nodes = db.get_nodes_for_profile(profile_id)
+            existing_node = next((n for n in existing_nodes if n["node_num"] == sender_num), None)
+            
+            # Track what has changed for this profile
+            profile_changes = []
+            is_new_node = existing_node is None
+            
+            if is_new_node:
+                is_new_anywhere = True
+            elif existing_node:
+                # Compare fields and track changes
+                if existing_node.get("node_id") != node_id:
+                    profile_changes.append(f"node_id: '{existing_node.get('node_id')}' -> '{node_id}'")
+                if existing_node.get("long_name") != long_name:
+                    profile_changes.append(f"long_name: '{existing_node.get('long_name')}' -> '{long_name}'")
+                if existing_node.get("short_name") != short_name:
+                    profile_changes.append(f"short_name: '{existing_node.get('short_name')}' -> '{short_name}'")
+                if existing_node.get("hw_model") != hw_model:
+                    profile_changes.append(f"hw_model: '{existing_node.get('hw_model')}' -> '{hw_model}'")
+                if existing_node.get("role") != role:
+                    profile_changes.append(f"role: '{existing_node.get('role')}' -> '{role}'")
+                    
+                # Compare MAC address if both exist
+                existing_mac = existing_node.get("macaddr")
+                new_mac = ':'.join(f'{b:02x}' for b in macaddr) if macaddr else None
+                if existing_mac != new_mac and new_mac:  # Only track if new MAC is not empty
+                    profile_changes.append(f"macaddr: '{existing_mac}' -> '{new_mac}'")
+            
+            if profile_changes:
+                all_changes.extend(profile_changes)
+            
+            # Store/update node in database for this profile
+            raw_nodeinfo = json.dumps({
+                "id": node_id,
                 "long_name": long_name,
                 "short_name": short_name,
                 "hw_model": hw_model,
+                "hw_model_num": hw_model_num,
                 "role": role,
-                "is_new": is_new_node,
-                "changes": changes,
+                "role_num": role_num,
                 "packet_info": {
+                    "channel": packet.channel,
+                    "hop_limit": packet.hop_limit,
+                    "hop_start": packet.hop_start,
                     "rx_snr": packet.rx_snr,
-                    "rx_rssi": packet.rx_rssi,
-                    "hop_limit": packet.hop_limit
-                }
+                    "rx_rssi": packet.rx_rssi
+                },
+                "changes": profile_changes,
+                "is_new": is_new_node,
+                "profile_id": profile_id
             })
-        except Exception as e:
-            print(f"Failed to emit node update: {e}")
+            
+            success = db.store_node(
+                profile_id=profile_id,
+                node_num=sender_num,
+                node_id=node_id,
+                long_name=long_name,
+                short_name=short_name,
+                macaddr=macaddr if macaddr else None,
+                hw_model=hw_model,
+                role=role,
+                public_key=public_key if public_key else None,
+                raw_nodeinfo=raw_nodeinfo
+            )
+            
+            if success:
+                stored_count += 1
+                print(f"[NODEINFO_DEBUG] Successfully stored node {sender_num} for profile {profile_id}")
+            else:
+                print(f"[ERROR] Failed to store node {sender_num} for profile {profile_id}")
+        
+        # Log the nodeinfo with change information
+        if is_new_anywhere:
+            print(f"\n[NODEINFO] NEW NODE {sender_num}: {long_name} ({short_name}) - {hw_model} (stored for {stored_count} profiles)")
+        elif all_changes:
+            print(f"\n[NODEINFO] UPDATED NODE {sender_num}: {long_name} ({short_name}) - {hw_model} (stored for {stored_count} profiles)")
+            print(f"[CHANGES] {', '.join(set(all_changes))}")
+        else:
+            print(f"\n[NODEINFO] SEEN NODE {sender_num}: {long_name} ({short_name}) - {hw_model} (stored for {stored_count} profiles, no changes)")
+        
+        # Notify connected clients about node update - only if it matches current profile's channel
+        should_emit_node_update = False
+        if current_profile and nodeinfo_channel is not None:
+            try:
+                current_profile_channel = _current_profile_channel_num()
+                if current_profile_channel == nodeinfo_channel:
+                    should_emit_node_update = True
+                    print(f"[NODEINFO] Emitting node update to UI - matches current profile channel {current_profile_channel}")
+                else:
+                    print(f"[NODEINFO] NOT emitting node update to UI - channel {nodeinfo_channel} != profile channel {current_profile_channel}")
+            except Exception as e:
+                print(f"[NODEINFO] Error checking profile channel: {e}")
+        elif nodeinfo_channel is None:
+            # Backward compatibility: if no channel info, show for current profile
+            should_emit_node_update = current_profile is not None
+            print(f"[NODEINFO] No channel info, emitting based on profile existence: {should_emit_node_update}")
+        else:
+            print(f"[NODEINFO] No current profile set, not emitting node update")
+            
+        if should_emit_node_update:
+            try:
+                socketio.emit("node_update", {
+                    "node_num": sender_num,
+                    "node_id": node_id,
+                    "long_name": long_name,
+                    "short_name": short_name,
+                    "hw_model": hw_model,
+                    "role": role,
+                    "is_new": is_new_anywhere,
+                    "changes": list(set(all_changes)),
+                    "packet_info": {
+                        "rx_snr": packet.rx_snr,
+                        "rx_rssi": packet.rx_rssi,
+                        "hop_limit": packet.hop_limit
+                    },
+                    "stored_profiles": stored_count
+                })
+            except Exception as e:
+                print(f"Failed to emit node update: {e}")
             
     except Exception as e:
         print(f"Error processing nodeinfo: {e}")
@@ -525,20 +624,31 @@ class UDPChatServer:
             }
             messages.append(message)
             
-            # Store sent message in database
+            # Store sent message in database by channel (accessible to any profile using that channel)
             if current_profile:
                 try:
                     my_node_num = _my_node_num()
-                    db.store_message(
-                        profile_id=current_profile["id"],
-                        message_id=message["id"],
-                        packet_id=None,  # We don't have packet ID for sent messages yet
-                        sender_num=my_node_num,
-                        sender_display=message["sender_display"],
-                        content=message_content,
-                        sender_ip="self",
-                        direction="sent"
-                    )
+                    current_channel = _current_profile_channel_num()
+                    
+                    if current_channel is not None:
+                        print(f"[SEND] Storing sent message on channel {current_channel}: {message_content[:50]}...")
+                        db.store_message(
+                            message_id=message["id"],
+                            packet_id=None,  # We don't have packet ID for sent messages
+                            sender_num=my_node_num,
+                            sender_display=message["sender_display"],
+                            content=message_content,
+                            sender_ip="self",
+                            direction="sent",
+                            channel=current_channel,
+                            hop_limit=None,
+                            hop_start=None,
+                            rx_snr=None,
+                            rx_rssi=None
+                        )
+                        print(f"[SEND] Sent message stored successfully on channel {current_channel}")
+                    else:
+                        print(f"[SEND] Cannot determine channel for current profile - message not stored in database")
                 except Exception as e:
                     print(f"Failed to store sent message in database: {e}")
             
@@ -573,12 +683,20 @@ def profiles():
 
 @app.route("/nodes")
 def nodes():
-    """Nodes page - display seen nodes"""
+    """Nodes page - display seen nodes for current profile's channel"""
     if not current_profile:
         # Show empty page if no profile selected
         return render_template("nodes.html", nodes=[], current_profile=None, stats={})
     
-    nodes = db.get_nodes_for_profile(current_profile["id"])
+    # Get expected channel for current profile
+    expected_channel = _current_profile_channel_num()
+    if expected_channel is not None:
+        # Show only nodes seen on this profile's channel
+        nodes = db.get_nodes_for_profile_channel(current_profile["id"], expected_channel)
+    else:
+        # Fallback to all nodes if channel can't be determined
+        nodes = db.get_nodes_for_profile(current_profile["id"])
+    
     stats = db.get_stats(current_profile["id"])
     
     return render_template("nodes.html", nodes=nodes, current_profile=current_profile, stats=stats)
@@ -704,8 +822,40 @@ def set_current_profile():
         print(f"[PROFILE] Restarting interface with key from profile {profile.get('long_name', 'unknown')}")
         interface_started = udp_server.restart_with_profile(profile)
         
-        # Get messages for the newly selected profile
-        profile_messages = db.get_messages_for_profile(current_profile["id"])
+        # Get messages for the newly selected profile's channel
+        expected_channel = _current_profile_channel_num()
+        if expected_channel is not None:
+            # Get all messages for display (from channel, accessible to any profile using that channel)
+            profile_messages = db.get_messages_for_channel(expected_channel)
+            # Get count of unread messages for notification (truly missed messages)
+            unread_messages = db.get_unread_messages_for_channel(current_profile["id"], expected_channel)
+            unread_count = len(unread_messages)
+            print(f"[PROFILE] Loaded {len(profile_messages)} total messages, {unread_count} unread for channel {expected_channel}")
+        else:
+            profile_messages = []
+            unread_count = 0  # Can't determine messages without channel
+            print(f"[PROFILE] No channel determined - no messages loaded")
+        
+        # Send notification about profile switch via WebSocket
+        try:
+            socketio.emit("profile_switched", {
+                "profile_name": profile.get("long_name", "Unknown"),
+                "profile_channel": profile.get("channel", "Unknown"), 
+                "loaded_messages": unread_count,  # Only count truly unread messages
+                "channel_number": expected_channel
+            })
+            
+            if unread_count > 0:
+                print(f"[PROFILE] Notified client about {unread_count} missed messages")
+            else:
+                print(f"[PROFILE] No unread messages to notify about (user is caught up)")
+                
+            # Update last seen for this profile+channel combination (mark as read)
+            if expected_channel is not None:
+                db.update_profile_last_seen(current_profile["id"], expected_channel)
+            
+        except Exception as e:
+            print(f"[PROFILE] Error sending profile notification: {e}")
         
         if interface_started:
             print(f"[PROFILE] Interface successfully started with profile key")
@@ -730,23 +880,42 @@ def set_current_profile():
 
 @app.route("/api/messages", methods=["GET"])
 def get_messages():
-    """Get messages for current profile"""
+    """Get messages for current profile's channel"""
     if not current_profile:
         # Return in-memory messages if no profile is set (backward compatibility)
         return jsonify(messages)
     
-    # Get messages from database for current profile
-    db_messages = db.get_messages_for_profile(current_profile["id"])
+    # Get expected channel for current profile
+    expected_channel = _current_profile_channel_num()
+    if expected_channel is not None:
+        # Get messages for this channel (accessible to any profile using that channel)
+        db_messages = db.get_messages_for_channel(expected_channel)
+        
+        # Update last seen for this profile+channel combination when user views messages
+        if current_profile and db_messages:
+            db.update_profile_last_seen(current_profile["id"], expected_channel)
+    else:
+        # No channel determined - no messages
+        db_messages = []
+    
     return jsonify(db_messages)
 
 
 @app.route("/api/nodes", methods=["GET"])
 def get_nodes():
-    """Get all nodes seen by current profile"""
+    """Get nodes seen by current profile on the profile's channel"""
     if not current_profile:
         return jsonify({"error": "No profile selected"}), 400
     
-    nodes = db.get_nodes_for_profile(current_profile["id"])
+    # Get expected channel for current profile
+    expected_channel = _current_profile_channel_num()
+    if expected_channel is not None:
+        # Get nodes filtered by channel
+        nodes = db.get_nodes_for_profile_channel(current_profile["id"], expected_channel)
+    else:
+        # Fallback to all nodes if channel can't be determined
+        nodes = db.get_nodes_for_profile(current_profile["id"])
+    
     return jsonify({"nodes": nodes, "count": len(nodes)})
 
 

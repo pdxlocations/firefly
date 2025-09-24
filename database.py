@@ -31,11 +31,11 @@ class Database:
                 )
             """)
             
-            # Nodes table - stores nodeinfo for nodes seen by each profile
+            # Nodes table - stores nodeinfo by channel (shared across profiles using same channel)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS nodes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    profile_id TEXT NOT NULL,
+                    channel INTEGER NOT NULL,  -- Channel number from generate_hash()
                     node_id TEXT NOT NULL,
                     node_num INTEGER NOT NULL,
                     long_name TEXT,
@@ -48,8 +48,7 @@ class Database:
                     last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     packet_count INTEGER DEFAULT 1,
                     raw_nodeinfo TEXT,  -- JSON blob of the full nodeinfo payload
-                    FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE,
-                    UNIQUE(profile_id, node_num)
+                    UNIQUE(channel, node_num)  -- Unique per channel, not per profile
                 )
             """)
             
@@ -85,8 +84,9 @@ class Database:
             """)
             
             # Create indexes for better performance
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_profile_id ON nodes (profile_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_channel ON nodes (channel)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes (last_seen DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_channel_last_seen ON nodes (channel, last_seen DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages (channel)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages (timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_timestamp ON messages (channel, timestamp DESC)")
@@ -281,15 +281,63 @@ class Database:
             print(f"Error storing node: {e}")
             return False
 
-    def get_nodes_for_profile(self, profile_id: str) -> List[Dict]:
-        """Get all nodes seen by a specific profile"""
+    # === CHANNEL-BASED NODE METHODS (NEW) ===
+    
+    def store_node_for_channel(self, channel: int, node_num: int, node_id: str, 
+                              long_name: str = None, short_name: str = None, 
+                              macaddr: bytes = None, hw_model: str = None, 
+                              role: str = None, public_key: bytes = None, 
+                              raw_nodeinfo: str = None) -> bool:
+        """Store or update a node for a specific channel (accessible to all profiles using that channel)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Check if node exists for this channel
+                cursor = conn.execute("""
+                    SELECT id, packet_count FROM nodes WHERE channel = ? AND node_num = ?
+                """, (channel, node_num))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Update existing node
+                    conn.execute("""
+                        UPDATE nodes SET 
+                            node_id = COALESCE(?, node_id),
+                            long_name = COALESCE(?, long_name),
+                            short_name = COALESCE(?, short_name),
+                            macaddr = COALESCE(?, macaddr),
+                            hw_model = COALESCE(?, hw_model),
+                            role = COALESCE(?, role),
+                            public_key = COALESCE(?, public_key),
+                            last_seen = CURRENT_TIMESTAMP,
+                            packet_count = packet_count + 1,
+                            raw_nodeinfo = COALESCE(?, raw_nodeinfo)
+                        WHERE id = ?
+                    """, (node_id, long_name, short_name, macaddr, hw_model, 
+                         role, public_key, raw_nodeinfo, existing[0]))
+                else:
+                    # Insert new node
+                    conn.execute("""
+                        INSERT INTO nodes 
+                        (channel, node_num, node_id, long_name, short_name, 
+                         macaddr, hw_model, role, public_key, raw_nodeinfo)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (channel, node_num, node_id, long_name, short_name, 
+                         macaddr, hw_model, role, public_key, raw_nodeinfo))
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"Error storing node for channel: {e}")
+            return False
+    
+    def get_nodes_for_channel(self, channel: int) -> List[Dict]:
+        """Get all nodes seen on a specific channel (accessible to all profiles using that channel)"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT node_num, node_id, long_name, short_name, macaddr, 
                        hw_model, role, first_seen, last_seen, packet_count, raw_nodeinfo
-                FROM nodes WHERE profile_id = ? ORDER BY last_seen DESC
-            """, (profile_id,))
+                FROM nodes WHERE channel = ? ORDER BY last_seen DESC
+            """, (channel,))
             
             nodes = []
             for row in cursor:
@@ -322,6 +370,48 @@ class Database:
                         
                 nodes.append(node_data)
             return nodes
+    
+    def get_nodes_for_profile_channel(self, profile_id: str) -> List[Dict]:
+        """Get nodes for a profile based on its channel (convenience method)"""
+        from encryption import generate_hash
+        
+        # Get the profile's channel
+        profile = self.get_profile(profile_id)
+        if not profile:
+            return []
+        
+        # Calculate channel number
+        channel = generate_hash(profile['channel'], profile['key'])
+        
+        # Get nodes for that channel
+        return self.get_nodes_for_channel(channel)
+    
+    # === LEGACY PROFILE-BASED NODE METHODS (DEPRECATED) ===
+    
+    def store_node(self, profile_id: str, node_num: int, node_id: str, 
+                   long_name: str = None, short_name: str = None, 
+                   macaddr: bytes = None, hw_model: str = None, 
+                   role: str = None, public_key: bytes = None, 
+                   raw_nodeinfo: str = None) -> bool:
+        """DEPRECATED: Store node by profile - use store_node_for_channel() instead"""
+        print(f"[DEPRECATED] store_node() called - use store_node_for_channel() instead")
+        
+        # Get profile to determine channel
+        from encryption import generate_hash
+        profile = self.get_profile(profile_id)
+        if not profile:
+            return False
+        
+        # Calculate channel and delegate to new method
+        channel = generate_hash(profile['channel'], profile['key'])
+        return self.store_node_for_channel(channel, node_num, node_id, long_name, 
+                                          short_name, macaddr, hw_model, role, 
+                                          public_key, raw_nodeinfo)
+    
+    def get_nodes_for_profile(self, profile_id: str) -> List[Dict]:
+        """DEPRECATED: Get nodes by profile - use get_nodes_for_profile_channel() instead"""
+        print(f"[DEPRECATED] get_nodes_for_profile() called - use get_nodes_for_profile_channel() instead")
+        return self.get_nodes_for_profile_channel(profile_id)
 
     def store_message(self, message_id: str, packet_id: int = None,
                      sender_num: int = None, sender_display: str = None,
@@ -356,7 +446,7 @@ class Database:
         """Get database statistics"""
         with sqlite3.connect(self.db_path) as conn:
             if profile_id:
-                # Get the profile's channel to count messages for that channel
+                # Get the profile's channel to count nodes and messages for that channel
                 profile_cursor = conn.execute("""
                     SELECT channel, key FROM profiles WHERE id = ?
                 """, (profile_id,))
@@ -368,15 +458,13 @@ class Database:
                     
                     cursor = conn.execute("""
                         SELECT 
-                            (SELECT COUNT(*) FROM nodes WHERE profile_id = ?) as node_count,
+                            (SELECT COUNT(*) FROM nodes WHERE channel = ?) as node_count,
                             (SELECT COUNT(*) FROM messages WHERE channel = ?) as message_count
-                    """, (profile_id, channel))
+                    """, (channel, channel))
                 else:
                     cursor = conn.execute("""
-                        SELECT 
-                            (SELECT COUNT(*) FROM nodes WHERE profile_id = ?) as node_count,
-                            0 as message_count
-                    """, (profile_id,))
+                        SELECT 0 as node_count, 0 as message_count
+                    """)
             else:
                 cursor = conn.execute("""
                     SELECT 

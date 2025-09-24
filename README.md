@@ -1,6 +1,8 @@
 # Firefly
 
-![Firefly Logo Dark](static/images/firefly-logo-dark.png)
+<p align="center">
+  <img src="static/images/firefly-logo-dark.png" alt="Firefly Logo Dark" width="50%">
+</p>
 
 A real-time web-based chat application for Meshtastic mesh networks. Features node discovery, profile management, and persistent message storage with an intuitive web interface.
 

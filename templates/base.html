@@ -414,58 +414,34 @@
             display: none;
         }
         
-        /* Theme toggle button styling */
-        [data-bs-theme="dark"] .navbar .btn-outline-light {
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            color: #ffffff !important;
-        }
-        
-        [data-bs-theme="dark"] .navbar .btn-outline-light:hover {
-            background: rgba(255, 255, 255, 0.2);
-            border-color: rgba(255, 255, 255, 0.6);
-        }
-        
-        [data-bs-theme="light"] .navbar .btn-outline-light {
-            border: 2px solid rgba(31, 41, 55, 0.3);
-            background: rgba(31, 41, 55, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            color: #1f2937 !important;
-        }
-        
-        [data-bs-theme="light"] .navbar .btn-outline-light:hover {
-            background: rgba(31, 41, 55, 0.2);
-            border-color: rgba(31, 41, 55, 0.6);
-        }
-        
-        /* Enhanced theme toggle button */
+        /* Theme toggle button styling - clean emoji only */
         #themeToggle {
             min-width: 44px;
             height: 44px;
-            border-radius: 12px !important;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            backdrop-filter: none !important;
+            transition: opacity 0.2s ease;
             display: flex;
             align-items: center;
             justify-content: center;
+            font-size: 1.2rem;
         }
         
-        [data-bs-theme="dark"] #themeToggle:hover {
-            background: rgba(255, 255, 255, 0.2);
+        #themeToggle:hover {
+            opacity: 0.8;
+            background: transparent !important;
         }
         
-        [data-bs-theme="dark"] #themeToggle:active {
-            background: rgba(255, 255, 255, 0.3);
+        #themeToggle:active {
+            opacity: 0.6;
+            background: transparent !important;
         }
         
-        [data-bs-theme="light"] #themeToggle:hover {
-            background: rgba(31, 41, 55, 0.2);
-        }
-        
-        [data-bs-theme="light"] #themeToggle:active {
-            background: rgba(31, 41, 55, 0.3);
+        #themeToggle:focus {
+            box-shadow: none !important;
+            background: transparent !important;
         }
         
         /* Enhanced button styling */
@@ -548,7 +524,7 @@
                 </div>
                 <div class="navbar-nav ms-auto">
                     <button class="btn btn-outline-light btn-sm" id="themeToggle" title="Toggle Dark/Light Mode">
-                        <span id="themeIcon">🌞</span>
+                        <span id="themeIcon">☀️</span>
                     </button>
                 </div>
             </div>
@@ -609,7 +585,7 @@
               html.setAttribute('data-bs-theme', theme);
               
               if (themeIcon) {
-                  themeIcon.textContent = theme === 'dark' ? '🌞' : '🌙';
+                  themeIcon.textContent = theme === 'dark' ? '☀️' : '🌙';
               }
               
               // Update logo visibility based on theme

@@ -360,9 +360,24 @@ class Database:
             
             nodes = []
             for row in cursor:
+                # Ensure node_id is properly formatted as hex
+                node_id = row['node_id']
+                if not node_id and row['node_num']:
+                    # Fallback: create hex node_id from node_num
+                    node_id = f"!{hex(row['node_num'])[2:].zfill(8)}"
+                elif node_id and not node_id.startswith('!'):
+                    # Fix malformed node_id that might be decimal
+                    try:
+                        # If it's a decimal number, convert to hex format
+                        decimal_val = int(node_id)
+                        node_id = f"!{hex(decimal_val)[2:].zfill(8)}"
+                    except ValueError:
+                        # If it's not a number, keep as is
+                        pass
+                
                 node_data = {
                     'node_num': row['node_num'],
-                    'node_id': row['node_id'],
+                    'node_id': node_id,
                     'long_name': row['long_name'],
                     'short_name': row['short_name'],
                     'hw_model': row['hw_model'],
@@ -569,8 +584,23 @@ class Database:
             
             nodes = []
             for row in cursor:
+                # Ensure node_id is properly formatted as hex
+                node_id = row['node_id']
+                if not node_id and row['node_num']:
+                    # Fallback: create hex node_id from node_num
+                    node_id = f"!{hex(row['node_num'])[2:].zfill(8)}"
+                elif node_id and not node_id.startswith('!'):
+                    # Fix malformed node_id that might be decimal
+                    try:
+                        # If it's a decimal number, convert to hex format
+                        decimal_val = int(node_id)
+                        node_id = f"!{hex(decimal_val)[2:].zfill(8)}"
+                    except ValueError:
+                        # If it's not a number, keep as is
+                        pass
+                
                 node_data = {
-                    'node_id': row['node_id'],
+                    'node_id': node_id,
                     'node_num': row['node_num'],
                     'long_name': row['long_name'],
                     'short_name': row['short_name'],

@@ -376,11 +376,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Load current profile and ensure banner is updated
-    loadCurrentProfile();
-    
-    // Load current interface status
-    loadInterfaceStatus();
+    // Load current profile and interface status together
+    loadCurrentProfileAndStatus();
     
     // Ensure banner stays updated (check every 30 seconds)
     setInterval(refreshProfileBanner, 30000);
@@ -509,11 +506,13 @@ function initializeSocket() {
     });
 }
 
-function loadCurrentProfile() {
+function loadCurrentProfileAndStatus() {
+    // Load both profile and status in a single API call to prevent race conditions
     fetch('/api/current-profile')
         .then(response => response.json())
         .then(profile => {
             currentProfile = profile;
+            
             if (profile) {
                 // Sync both mobile and desktop selectors
                 const mobileSelect = document.getElementById('profileSelect');
@@ -532,11 +531,39 @@ function loadCurrentProfile() {
                         console.log('[socket] joined channel room on profile load:', currentChannelRoom);
                     }
                 }
+                
+                // Update interface status based on profile
+                const interfaceStatus = profile.interface_status;
+                if (interfaceStatus === 'started') {
+                    updateInterfaceStatus('bg-success', 'Connected');
+                } else if (interfaceStatus === 'failed') {
+                    updateInterfaceStatus('bg-danger', 'Failed to Start');
+                } else if (interfaceStatus === 'stopped') {
+                    updateInterfaceStatus('bg-secondary', 'Stopped');
+                } else {
+                    updateInterfaceStatus('bg-warning', 'Not Started');
+                }
+                
+                console.log('[STATUS] Interface status loaded:', interfaceStatus, 'for profile', profile.long_name);
+            } else {
+                // No profile set - interface not started
+                updateInterfaceStatus('bg-warning', 'Not Started');
+                console.log('[STATUS] Interface status loaded: Not Started (no profile)');
             }
-            // Update banner with profile info (status will sync from sidebar)
+            
+            // Update banner with profile info
             updateProfileBanner(profile);
         })
-        .catch(error => console.error('Error loading current profile:', error));
+        .catch(error => {
+            console.error('Error loading profile and status:', error);
+            // Default to unknown status if we can't determine
+            updateInterfaceStatus('bg-secondary', 'Unknown');
+        });
+}
+
+// Keep original function for backward compatibility
+function loadCurrentProfile() {
+    loadCurrentProfileAndStatus();
 }
 
 function loadInterfaceStatus() {
@@ -578,9 +605,10 @@ function loadInterfaceStatus() {
 }
 
 function updateInterfaceStatus(status, statusText) {
-    // Update both sidebar and banner interface status simultaneously
+    // Update all interface status badges: sidebar, mobile banner, and desktop banner
     const sidebarStatus = document.getElementById('interfaceStatus');
     const bannerStatus = document.getElementById('bannerInterfaceStatus');
+    const bannerStatusDesktop = document.getElementById('bannerInterfaceStatusDesktop');
     
     const statusClass = `badge ${status}`;
     
@@ -592,6 +620,11 @@ function updateInterfaceStatus(status, statusText) {
     if (bannerStatus) {
         bannerStatus.className = statusClass;
         bannerStatus.textContent = statusText;
+    }
+    
+    if (bannerStatusDesktop) {
+        bannerStatusDesktop.className = statusClass;
+        bannerStatusDesktop.textContent = statusText;
     }
     
     console.log('[STATUS] Interface status updated:', statusText, status);
@@ -638,21 +671,8 @@ function updateProfileBanner(profile) {
         if (channelDesktop) channelDesktop.textContent = profileChannel;
         if (keyDesktop) keyDesktop.textContent = truncatedKey;
         
-        // Sync interface status with sidebar status
-        const sidebarInterfaceStatus = document.getElementById('interfaceStatus');
-        if (sidebarInterfaceStatus && sidebarInterfaceStatus.textContent) {
-            const statusClass = sidebarInterfaceStatus.className;
-            const statusText = sidebarInterfaceStatus.textContent;
-            
-            if (interfaceStatus) {
-                interfaceStatus.className = statusClass;
-                interfaceStatus.textContent = statusText;
-            }
-            if (interfaceStatusDesktop) {
-                interfaceStatusDesktop.className = statusClass;
-                interfaceStatusDesktop.textContent = statusText;
-            }
-        }
+        // Note: Interface status is now updated by updateInterfaceStatus() function
+        // to prevent race conditions and ensure all badges stay in sync
         
         console.log('[BANNER] Updated with profile:', profile.long_name);
     } else {
@@ -664,7 +684,7 @@ function updateProfileBanner(profile) {
 
 function refreshProfileBanner() {
     // Refresh the banner with current profile to ensure it stays visible
-    // Don't override interface status - let it stay as set by setProfile
+    // Status badges are managed by updateInterfaceStatus() to prevent conflicts
     if (currentProfile) {
         updateProfileBanner(currentProfile);
     }

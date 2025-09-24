@@ -590,7 +590,8 @@ class UDPChatServer:
             interface.start()
             self.running = True
             self.current_profile_id = profile.get("id")
-            print(f"[UDP] Started interface for profile {profile.get('long_name', 'unknown')}")
+            self.current_channel_hash = generate_hash(profile.get("channel", ""), profile.get("key", ""))
+            print(f"[UDP] Started interface for profile {profile.get('long_name', 'unknown')} on channel {self.current_channel_hash}")
             print(f"[UDP] Listening on {MCAST_GRP}:{MCAST_PORT} with profile key")
             return True
         except Exception as e:
@@ -601,6 +602,8 @@ class UDPChatServer:
         """Stop the mudp interface"""
         global interface
         self.running = False
+        self.current_profile_id = None
+        self.current_channel_hash = None
         try:
             if interface:
                 interface.stop()
@@ -637,12 +640,20 @@ class UDPChatServer:
         if not sender_profile:
             return False
 
-        # Ensure interface is running for current profile
-        if not self.running or self.current_profile_id != sender_profile.get("id"):
-            print(f"[UDP] Interface not running for current profile, restarting...")
+        # Calculate channel hash for sender's profile
+        sender_channel_hash = generate_hash(sender_profile.get("channel", ""), sender_profile.get("key", ""))
+        
+        print(f"[SEND] Debug: Profile '{sender_profile.get('long_name', 'Unknown')}' wants channel {sender_channel_hash}")
+        print(f"[SEND] Debug: UDP server running={self.running}, current_channel={self.current_channel_hash}")
+        
+        # Ensure interface is running for the same channel (not necessarily same profile)
+        if not self.running or self.current_channel_hash != sender_channel_hash:
+            print(f"[UDP] Interface not running for current channel ({sender_channel_hash}), restarting...")
             if not self.restart_with_profile(sender_profile):
                 print(f"[UDP] Failed to restart interface for profile")
                 return False
+        else:
+            print(f"[UDP] Reusing existing interface for channel {sender_channel_hash}")
 
         try:
             # Configure global node with sender profile before sending (required by mudp library)
@@ -839,8 +850,9 @@ def get_current_profile():
     """Get the current active profile with interface status and channel number"""
     current_profile = _get_session_profile()
     if current_profile:
-        # Determine interface status based on udp_server state
-        if udp_server.running and udp_server.current_profile_id == current_profile.get("id"):
+        # Determine interface status based on udp_server state and channel compatibility
+        profile_channel_hash = generate_hash(current_profile.get("channel", ""), current_profile.get("key", ""))
+        if udp_server.running and udp_server.current_channel_hash == profile_channel_hash:
             interface_status = "started"
         else:
             interface_status = "stopped"

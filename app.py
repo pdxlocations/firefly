@@ -625,15 +625,16 @@ class UDPChatServer:
 
             # Mirror to local UI
             my_node_num = _my_node_num()
+            sender_node_id = (
+                f"!{hex(my_node_num)[2:].zfill(8)}" if my_node_num else sender_profile.get("node_id", "Unknown")
+            )
             message = {
                 "id": str(uuid.uuid4()),
-                "sender": (
-                    f"!{hex(my_node_num)[2:].zfill(8)}" if my_node_num else sender_profile.get("node_id", "Unknown")
-                ),
+                "sender": sender_node_id,
                 "sender_display": sender_profile.get("long_name", "Unknown"),
                 "content": message_content,
                 "timestamp": datetime.now().isoformat(),
-                "sender_ip": "self",
+                "sender_ip": "self",  # Keep for backward compatibility but use sender for identity
             }
             messages.append(message)
 

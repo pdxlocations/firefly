@@ -967,7 +967,8 @@ function addMessageToUI(message) {
             console.warn('[TIMESTAMP] Error parsing timestamp:', message.timestamp, e);
         }
     }
-    const isOwnMessage = message.sender_ip === 'self';
+    // Determine if message is from current user based on profile node ID
+    const isOwnMessage = currentProfile && message.sender === currentProfile.node_id;
     
     messageEl.innerHTML = `
         <div class="d-flex justify-content-between align-items-start">

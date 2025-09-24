@@ -10,6 +10,7 @@ ENV FIREFLY_PORT=5011
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
@@ -34,8 +35,9 @@ RUN mkdir -p /app/data && chown -R app:app /app
 # Switch to non-root user
 USER app
 
-# Expose port
+# Expose ports
 EXPOSE 5011
+EXPOSE 4403/udp
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

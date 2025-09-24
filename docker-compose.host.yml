@@ -8,12 +8,11 @@ services:
     build: .
     
     container_name: firefly-app
-    ports:
-      - "${FIREFLY_WEB_PORT:-5011}:5011"
-      - "${FIREFLY_UDP_PORT:-4403}:4403/udp"
+    # Use host networking for full multicast compatibility
+    network_mode: host
     environment:
       - FIREFLY_HOST=0.0.0.0
-      - FIREFLY_PORT=5011
+      - FIREFLY_PORT=${FIREFLY_WEB_PORT:-5011}
       - FIREFLY_DATABASE_FILE=/app/data/mudpchat.db
       - FIREFLY_NAME=${FIREFLY_NAME:-Firefly}
       - FIREFLY_SECRET_KEY=${FIREFLY_SECRET_KEY:-dev-secret-key-change-in-production}
@@ -26,23 +25,14 @@ services:
       # Optional: mount your own config or profiles (uncomment if you have them)
       # - ./profiles:/app/profiles:ro
       # - ./config.yaml:/app/config.yaml:ro
-    # Use host networking for proper UDP multicast support
-    # Comment out the next line and uncomment network_mode for multicast
-    networks:
-      - firefly-network
-    # network_mode: host  # Uncomment this line if multicast still doesn't work
     restart: unless-stopped
     # Healthcheck to ensure service is running
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5011/"]
+      test: ["CMD", "curl", "-f", "http://localhost:${FIREFLY_WEB_PORT:-5011}/"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-
-networks:
-  firefly-network:
-    driver: bridge
 
 volumes:
   firefly_data:

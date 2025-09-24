@@ -20,6 +20,11 @@ This guide will help you run Firefly using Docker and Docker Compose, based on t
    ```bash
    docker-compose up --build
    ```
+   
+   **If UDP multicast doesn't work** (messages not sending/receiving):
+   ```bash
+   docker-compose -f docker-compose.host.yml up --build
+   ```
 
 4. **Access the application**:
    - Open your browser to http://localhost:5011
@@ -74,13 +79,31 @@ docker run --rm -v firefly_data:/data -v $(pwd):/backup alpine tar xzf /backup/f
 ## Network Configuration
 
 ### UDP Communication
-Firefly communicates with Meshtastic devices via UDP. Make sure:
+Firefly communicates with Meshtastic devices via UDP multicast. This can be challenging in Docker:
+
+#### Docker Networking Options
+
+**Option 1: Bridge Network with Port Mapping (Default)**
+```bash
+docker-compose up --build
+```
+- Uses custom bridge network
+- Maps UDP port 4403 to host
+- May have multicast limitations
+
+**Option 2: Host Network (Recommended for UDP multicast)**
+```bash
+docker-compose -f docker-compose.host.yml up --build
+```
+- Uses host networking directly
+- Full multicast support
+- Best for Meshtastic communication
+
+#### Requirements
 1. UDP port 4403 (or your configured port) is accessible
 2. Your Meshtastic device is configured to send UDP packets to your Docker host
-3. If running on a different machine, ensure proper network routing
-
-### Docker Networks
-The compose file creates an isolated network `firefly-network` for the container.
+3. If using bridge network, ensure multicast is properly forwarded
+4. Host networking may be required for full multicast support
 
 ## Useful Commands
 
@@ -119,9 +142,27 @@ docker-compose up --build
 3. Check disk space: `df -h`
 
 ### UDP Communication Issues
-1. Verify UDP port is not blocked: `sudo ufw status` (Ubuntu/Debian)
-2. Test UDP connectivity: `nc -u localhost 4403`
-3. Check Meshtastic device configuration
+**This is the most common issue with Docker deployments.**
+
+#### Quick Fix - Use Host Networking
+```bash
+# Stop current container
+docker-compose down
+
+# Use host networking version
+docker-compose -f docker-compose.host.yml up --build
+```
+
+#### Troubleshooting Steps
+1. **Check if UDP port is exposed**: `docker ps` should show `0.0.0.0:4403->4403/udp`
+2. **Test UDP connectivity**: `nc -u localhost 4403`
+3. **Verify firewall settings**: `sudo ufw status` (Ubuntu/Debian)
+4. **Check container logs**: `docker-compose logs firefly`
+5. **Test multicast capability**: 
+   ```bash
+   # Test multicast reception
+   docker-compose exec firefly nc -u -l 4403
+   ```
 
 ### Database Issues
 1. Database is stored in Docker volume `firefly_data`

@@ -12,7 +12,7 @@
                 <option value="">Select profile...</option>
                 {% for profile_id, profile in profiles.items() %}
                     <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
-                        {{ profile.short_name }}
+                        {{ profile.long_name }}
                     </option>
                 {% endfor %}
             </select>
@@ -32,7 +32,7 @@
                     <option value="">Select a profile...</option>
                     {% for profile_id, profile in profiles.items() %}
                         <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
-                            {{ profile.short_name }}
+                            {{ profile.long_name }}
                         </option>
                     {% endfor %}
                 </select>

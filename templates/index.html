@@ -281,28 +281,14 @@ function loadInterfaceStatus() {
                     updateInterfaceStatus('bg-warning', 'Not Started');
                 }
                 
-                // Update profile key info in sidebar
-                const profileKeyInfo = document.getElementById('profileKeyInfo');
-                const currentProfileName = document.getElementById('currentProfileName');
-                if (profileKeyInfo && currentProfileName) {
-                    if (interfaceStatus === 'started') {
-                        profileKeyInfo.style.display = 'block';
-                        currentProfileName.textContent = profile.long_name || 'Unknown';
-                    } else {
-                        profileKeyInfo.style.display = 'none';
-                    }
-                }
+                // Profile banner is updated separately by updateProfileBanner()
                 
                 console.log('[STATUS] Interface status loaded:', interfaceStatus, 'for profile', profile.long_name);
             } else {
                 // No profile set - interface not started
                 updateInterfaceStatus('bg-warning', 'Not Started');
                 
-                // Hide profile key info
-                const profileKeyInfo = document.getElementById('profileKeyInfo');
-                if (profileKeyInfo) {
-                    profileKeyInfo.style.display = 'none';
-                }
+                // Profile banner will be hidden by updateProfileBanner()
                 
                 console.log('[STATUS] Interface status loaded: Not Started (no profile)');
             }
@@ -487,24 +473,16 @@ function setProfile() {
             }
             
             // Update interface status in both sidebar and banner
-            const profileKeyInfo = document.getElementById('profileKeyInfo');
-            const currentProfileName = document.getElementById('currentProfileName');
-            
             if (data.interface_status === 'started') {
                 updateInterfaceStatus('bg-success', 'Connected');
-                if (currentProfile) {
-                    profileKeyInfo.style.display = 'block';
-                    currentProfileName.textContent = currentProfile.long_name;
-                }
+                // Profile banner already updated by updateProfileBanner() call above
             } else if (data.interface_status === 'failed') {
                 updateInterfaceStatus('bg-danger', 'Failed to Start');
-                profileKeyInfo.style.display = 'none';
                 if (data.warning) {
                     alert('Warning: ' + data.warning);
                 }
             } else {
                 updateInterfaceStatus('bg-warning', 'Not Started');
-                profileKeyInfo.style.display = 'none';
             }
             
             // Update nodes overview based on profile selection
@@ -519,17 +497,24 @@ function setProfile() {
             }
             
             // Show profile switch notification with unread message count
+            console.log('[NOTIFICATION] Debug: currentProfile =', currentProfile);
+            console.log('[NOTIFICATION] Debug: data.unread_count =', data.unread_count);
+            console.log('[NOTIFICATION] Debug: condition check:', currentProfile && data.unread_count !== undefined);
+            
             if (currentProfile && data.unread_count !== undefined) {
+                console.log('[NOTIFICATION] Showing notification with unread count:', data.unread_count);
                 // Update unread badge
                 updateUnreadBadge(data.unread_count);
                 
                 if (data.unread_count > 0) {
+                    console.log('[NOTIFICATION] Showing success notification for', data.unread_count, 'unread messages');
                     showNotification(
                         `Switched to ${currentProfile.long_name} (${currentProfile.channel}). ${data.unread_count} unread message${data.unread_count === 1 ? '' : 's'} loaded.`,
                         'success',
                         5000
                     );
                 } else {
+                    console.log('[NOTIFICATION] Showing info notification for no unread messages');
                     showNotification(
                         `Switched to ${currentProfile.long_name} (${currentProfile.channel}). No unread messages.`,
                         'info',
@@ -537,6 +522,7 @@ function setProfile() {
                     );
                 }
             } else {
+                console.log('[NOTIFICATION] NOT showing notification - condition failed');
                 // Clear unread badge if no profile or no unread count
                 updateUnreadBadge(0);
             }
@@ -732,6 +718,7 @@ function showNodeNotification(message, type = 'info') {
 }
 
 function showNotification(message, type = 'info', duration = 4000) {
+    console.log('[NOTIFICATION] showNotification called:', { message, type, duration });
     // Create a temporary notification element
     const notification = document.createElement('div');
     notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
@@ -742,6 +729,7 @@ function showNotification(message, type = 'info', duration = 4000) {
     `;
     
     document.body.appendChild(notification);
+    console.log('[NOTIFICATION] Toast notification displayed');
     
     // Auto-remove after specified duration
     setTimeout(() => {
@@ -753,7 +741,11 @@ function showNotification(message, type = 'info', duration = 4000) {
 
 function updateUnreadBadge(count) {
     const badge = document.getElementById('unreadBadge');
-    if (!badge) return;
+    
+    if (!badge) {
+        console.error('[BADGE] Badge element not found!');
+        return;
+    }
     
     if (count > 0) {
         badge.style.display = 'inline';

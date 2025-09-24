@@ -840,12 +840,11 @@ def set_current_profile():
         except Exception as e:
             print(f"[PROFILE] Error preparing profile switch notification: {e}")
         
-        # Update last seen for this profile+channel combination (mark as read)
-        if expected_channel is not None:
-            db.update_profile_last_seen(current_profile["id"], expected_channel)
-            
+        # Note: We DON'T update last_seen here because user hasn't actually viewed the messages yet
+        # Last seen will be updated when user actually loads/views the messages
+        
         if unread_count > 0:
-            print(f"[PROFILE] Profile switched - loaded {unread_count} unread messages")
+            print(f"[PROFILE] Profile switched - {unread_count} unread messages available")
         else:
             print(f"[PROFILE] Profile switched - user is caught up on messages")
         

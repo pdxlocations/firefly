@@ -6,6 +6,8 @@
 
 A real-time web-based chat application for Meshtastic mesh networks. Features node discovery, profile management, and persistent message storage with an intuitive web interface.
 
+<img width="1240" height="756" alt="firefly-screenshot" src="https://github.com/user-attachments/assets/5de46082-2d0d-4a3d-b39e-ff1d1908e20b" />
+
 ## Features
 
 - **Real-time Chat**: Send and receive messages instantly across the Meshtastic network

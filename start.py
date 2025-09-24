@@ -10,9 +10,9 @@ from database import Database
 
 
 def print_banner():
-    print("🌐 MUDP Chat - Meshtastic Node Discovery")
+    print("🔥 Firefly - Meshtastic Web Chat")
     print("=" * 50)
-    print("Enhanced with node tracking and database storage!")
+    print("Real-time mesh networking with node discovery!")
     print("=" * 50)
 
 
@@ -39,7 +39,9 @@ def show_features():
     print("• Per-Profile History - Each profile maintains its own node list and messages")
     print("• Detailed Node Info - Hardware models, roles, signal strength, and more")
     print("• Real-time Updates - WebSocket notifications for new nodes and messages")
-    print("• Web Interface - Browse to http://localhost:5011 after startup")
+    # Get port from environment for display
+    display_port = int(os.getenv('FIREFLY_PORT', 5011))
+    print(f"• Web Interface - Browse to http://localhost:{display_port} after startup")
     print("")
     print("📋 PAGES AVAILABLE:")
     print("• Chat - Send/receive messages with node overview")
@@ -58,9 +60,11 @@ def main():
         # Show features
         show_features()
 
-        print(f"\n🗄️  Database: mudpchat.db")
+        print(f"\n🗄️  Database: firefly.db")
         print(f"🔧 Test script: python3 test_database.py")
-        print(f"🌐 Web interface: http://localhost:5011")
+        # Get port from environment for display
+        display_port = int(os.getenv('FIREFLY_PORT', 5011))
+        print(f"🌐 Web interface: http://localhost:{display_port}")
         print("\n" + "=" * 50)
         print("Starting Flask application...")
         print("=" * 50)
@@ -69,14 +73,19 @@ def main():
         from app import app, socketio, udp_server
 
         # Note: UDP server will start when a profile is selected
-        print("✓ MUDP server ready (will start with profile selection)")
-        print(f"🌐 Starting Flask server on http://localhost:5011")
+        print("✓ Meshtastic UDP server ready (will start with profile selection)")
+        # Get port from environment variable, default to 5011
+        port = int(os.getenv('FIREFLY_PORT', 5011))
+        host = os.getenv('FIREFLY_HOST', '0.0.0.0')
+        debug = os.getenv('FIREFLY_DEBUG', 'false').lower() == 'true'
+        
+        print(f"🌐 Starting Flask server on http://localhost:{port}")
 
         socketio.run(
             app,
-            host="0.0.0.0",
-            port=5012,
-            debug=False,  # Set to True for development
+            host=host,
+            port=port,
+            debug=debug,
             use_reloader=False,
             allow_unsafe_werkzeug=True,
         )

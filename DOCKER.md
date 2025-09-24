@@ -21,10 +21,11 @@ This guide will help you run Firefly using Docker and Docker Compose, based on t
    docker-compose up --build
    ```
    
-   **If UDP multicast doesn't work** (messages not sending/receiving):
-   ```bash
-   docker-compose -f docker-compose.host.yml up --build
-   ```
+   **For optimal UDP multicast on Linux** (optional):
+   - Edit `docker-compose.yml`
+   - Comment out the `ports:` and `networks:` sections
+   - Uncomment `network_mode: host`
+   - Run: `docker-compose up --build`
 
 4. **Access the application**:
    - Open your browser to http://localhost:5011
@@ -89,15 +90,20 @@ docker-compose up --build
 ```
 - Uses custom bridge network
 - Maps UDP port 4403 to host
+- Works on all platforms
 - May have multicast limitations
 
-**Option 2: Host Network (Recommended for UDP multicast)**
-```bash
-docker-compose -f docker-compose.host.yml up --build
-```
+**Option 2: Host Network (Linux only)**
+
+Edit `docker-compose.yml` to enable host networking:
+1. Comment out the `ports:` and `networks:` sections
+2. Uncomment `network_mode: host`
+3. Run: `docker-compose up --build`
+
+Benefits:
 - Uses host networking directly
-- Full multicast support
-- Best for Meshtastic communication
+- Full multicast support on Linux
+- Best for production Meshtastic communication
 
 #### Requirements
 1. UDP port 4403 (or your configured port) is accessible
@@ -144,13 +150,26 @@ docker-compose up --build
 ### UDP Communication Issues
 **This is the most common issue with Docker deployments.**
 
-#### Quick Fix - Use Host Networking
+#### Recommended Solution for Linux
 ```bash
 # Stop current container
 docker-compose down
 
-# Use host networking version
-docker-compose -f docker-compose.host.yml up --build
+# Edit docker-compose.yml to enable host networking:
+# 1. Comment out 'ports:' and 'networks:' sections
+# 2. Uncomment 'network_mode: host'
+# 3. Restart
+docker-compose up --build
+```
+
+#### macOS/Windows Users
+```bash
+# Docker Desktop has UDP multicast limitations
+# Recommend native installation for development:
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python3 start.py
 ```
 
 #### Troubleshooting Steps

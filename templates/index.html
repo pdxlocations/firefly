@@ -87,7 +87,10 @@
         
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Chat Messages</h5>
+                <div class="d-flex align-items-center">
+                    <h5 class="mb-0 me-2">Chat Messages</h5>
+                    <span id="unreadBadge" class="badge bg-primary" style="display: none;">0 unread</span>
+                </div>
                 <button id="clearMessagesBtn" class="btn btn-outline-danger btn-sm">Clear Messages</button>
             </div>
             <div class="card-body">
@@ -208,6 +211,8 @@ function initializeSocket() {
 
     socket.on('new_message', function(message) {
         addMessageToUI(message);
+        // Clear unread badge since user is actively viewing messages
+        updateUnreadBadge(0);
     });
     
     // Handle profile switch notifications
@@ -415,6 +420,9 @@ function loadMessages() {
             if (!container) return;
             container.innerHTML = '';
             (list || []).forEach(addMessageToUI);
+            
+            // Clear unread badge when messages are loaded/viewed
+            updateUnreadBadge(0);
         })
         .catch(err => {
             console.error('Error loading messages:', err);
@@ -510,10 +518,34 @@ function setProfile() {
                 }
             }
             
+            // Show profile switch notification with unread message count
+            if (currentProfile && data.unread_count !== undefined) {
+                // Update unread badge
+                updateUnreadBadge(data.unread_count);
+                
+                if (data.unread_count > 0) {
+                    showNotification(
+                        `Switched to ${currentProfile.long_name} (${currentProfile.channel}). ${data.unread_count} unread message${data.unread_count === 1 ? '' : 's'} loaded.`,
+                        'success',
+                        5000
+                    );
+                } else {
+                    showNotification(
+                        `Switched to ${currentProfile.long_name} (${currentProfile.channel}). No unread messages.`,
+                        'info',
+                        3000
+                    );
+                }
+            } else {
+                // Clear unread badge if no profile or no unread count
+                updateUnreadBadge(0);
+            }
+            
             console.log('[PROFILE] ✅ Profile set successfully!');
             console.log('[PROFILE] Interface status updated:', data.interface_status);
             console.log('[PROFILE] Banner updated for profile:', currentProfile?.long_name);
             console.log('[PROFILE] Messages loaded:', data.messages ? data.messages.length : 0);
+            console.log('[PROFILE] Unread messages:', data.unread_count || 0);
         }
     })
     .catch(error => {
@@ -717,6 +749,20 @@ function showNotification(message, type = 'info', duration = 4000) {
             notification.remove();
         }
     }, duration);
+}
+
+function updateUnreadBadge(count) {
+    const badge = document.getElementById('unreadBadge');
+    if (!badge) return;
+    
+    if (count > 0) {
+        badge.style.display = 'inline';
+        badge.textContent = `${count} unread`;
+        badge.className = 'badge bg-primary';
+    } else {
+        badge.style.display = 'none';
+    }
+    console.log('[BADGE] Unread count updated:', count);
 }
 
 function escapeHtml(unsafe) {

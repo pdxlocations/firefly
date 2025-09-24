@@ -13,7 +13,7 @@ import engineio
 from pubsub import pub
 
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
-from mudp import UDPPacketStream, node, conn, send_text_message
+from mudp import UDPPacketStream, node, conn, send_text_message, send_nodeinfo
 from database import Database
 from encryption import generate_hash
 
@@ -150,22 +150,30 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
         sender_num = getattr(packet, "from", None)
         
         # Look up node name from database if available
-        sender_display = str(sender_num) if sender_num else "Unknown"
-        current_profile = _get_session_profile()
-        if current_profile and sender_num:
+        # Note: We can't access session in UDP packet handler, so we'll look across all profiles
+        sender_display = f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else "Unknown"
+        
+        if sender_num:
             try:
-                nodes = db.get_nodes_for_profile(current_profile["id"])
-                node = next((n for n in nodes if n["node_num"] == sender_num), None)
-                if node and node.get("long_name"):
-                    sender_display = node["long_name"]
+                # Look for this node across all profiles to get display name
+                all_profiles = db.get_all_profiles()
+                found_node = None
+                
+                for profile_id, profile_data in all_profiles.items():
+                    nodes = db.get_nodes_for_profile(profile_id)
+                    node = next((n for n in nodes if n["node_num"] == sender_num), None)
+                    if node and node.get("long_name"):
+                        found_node = node
+                        break
+                
+                if found_node and found_node.get("long_name"):
+                    sender_display = found_node["long_name"]
                     print(f"[MESSAGE] Using node name: {sender_display} for {sender_num}")
                 else:
-                    # Fallback to hex format if no name found
-                    sender_display = f"!{hex(sender_num)[2:].zfill(8)}"
                     print(f"[MESSAGE] No node name found, using hex: {sender_display}")
+                    
             except Exception as e:
                 print(f"[MESSAGE] Error looking up node name: {e}")
-                sender_display = f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else "Unknown"
         
         message = {
             "id": str(uuid.uuid4()),
@@ -206,32 +214,19 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
 
         if message_channel is not None:
             room_name = f"channel_{message_channel}"
+            print(f"[MESSAGE] Attempting to broadcast to WebSocket room: {room_name}")
+            print(f"[MESSAGE] Message content: {msg[:50]}{'...' if len(msg) > 50 else ''}")
+            print(f"[MESSAGE] From node: {sender_num} ({sender_display})")
             try:
                 socketio.emit("new_message", message, room=room_name)
-                print(f"[MESSAGE] Broadcasted message to room {room_name}")
+                print(f"[MESSAGE] ✅ Successfully broadcasted message to room {room_name}")
             except Exception as e:
-                print(f"[MESSAGE] Error broadcasting to room {room_name}: {e}")
+                print(f"[MESSAGE] ❌ Error broadcasting to room {room_name}: {e}")
+                import traceback
+                traceback.print_exc()
         else: # message_channel is None
             print(f"[MESSAGE] No channel info - message not broadcasted to WebSocket")
-            
-            current_profile = _get_session_profile() # Get current profile once
-            
-            try:
-                current_profile_channel = _current_profile_channel_num()
-                
-                # If current profile's channel is also None, then this message (with no channel) matches
-                if current_profile_channel is None:
-                    # Backward compatibility: if no channel info for message AND profile is set
-                    if current_profile is not None:
-                        should_display = True
-                        print(f"[MESSAGE] No channel info, emitting based on profile existence (backward compatibility): {should_display}")
-                    else:
-                        print(f"[MESSAGE] No current profile set, not emitting to UI")
-                else:
-                    # Message has no channel, but current profile HAS a channel, so they don't match
-                    print(f"[MESSAGE] NOT emitting to UI - message channel (None) != profile channel {current_profile_channel}")
-            except Exception as e:
-                print(f"[MESSAGE] Error checking profile channel: {e}")
+            # Note: Can't access session context in UDP handler, so skip session-based filtering
         
         if should_display:
             socketio.emit("new_message", message)
@@ -837,6 +832,14 @@ def set_current_profile():
             unread_count = 0  # Can't determine messages without channel
             print(f"[PROFILE] No channel determined - no messages loaded")
         
+        # Send WebSocket notification about profile switch with unread count
+        try:
+            # We can't emit to a specific session from a regular route, but we can include
+            # the notification data in the response for the frontend to handle
+            print(f"[PROFILE] Profile switch notification prepared: {profile.get('long_name', 'Unknown')} ({unread_count} unread)")
+        except Exception as e:
+            print(f"[PROFILE] Error preparing profile switch notification: {e}")
+        
         # Update last seen for this profile+channel combination (mark as read)
         if expected_channel is not None:
             db.update_profile_last_seen(current_profile["id"], expected_channel)
@@ -848,12 +851,29 @@ def set_current_profile():
         
         if interface_started:
             print(f"[PROFILE] Interface successfully started with profile key")
+            
+            # Send nodeinfo packet to announce our presence to the mesh (asynchronously)
+            def send_nodeinfo_delayed():
+                try:
+                    import time
+                    # Small delay to ensure interface is fully ready
+                    time.sleep(0.5)
+                    send_nodeinfo()
+                    print(f"[NODEINFO] Sent nodeinfo packet for {profile.get('long_name', 'Unknown')} ({profile.get('node_id', 'Unknown')})")
+                except Exception as e:
+                    print(f"[NODEINFO] Error sending nodeinfo packet: {e}")
+            
+            import threading
+            nodeinfo_thread = threading.Thread(target=send_nodeinfo_delayed, daemon=True)
+            nodeinfo_thread.start()
+            
             return jsonify({
                 "message": "Profile set successfully and interface restarted", 
                 "profile": current_profile,
                 "interface_status": "started",
                 "messages": profile_messages,
-                "channel_number": expected_channel
+                "channel_number": expected_channel,
+                "unread_count": unread_count
             })
         else:
             print(f"[PROFILE] Warning: Profile set but interface failed to start")
@@ -863,7 +883,8 @@ def set_current_profile():
                 "interface_status": "failed",
                 "warning": "You may not receive messages until interface is fixed",
                 "messages": profile_messages,
-                "channel_number": expected_channel
+                "channel_number": expected_channel,
+                "unread_count": unread_count
             })
     else:
         return jsonify({"error": "Profile not found"}), 404
@@ -1000,11 +1021,14 @@ def handle_connect():
 def handle_join_channel(data):
     """Join a WebSocket room for a specific channel"""
     channel = data.get('channel')
+    print(f"[WEBSOCKET] join_channel request received: {data}")
     if channel is not None:
         room_name = f"channel_{channel}"
         join_room(room_name)
-        print(f"Client joined channel room: {room_name}")
+        print(f"[WEBSOCKET] ✅ Client {request.sid} joined room: {room_name}")
         emit("status", {"msg": f"Joined channel {channel}"})
+    else:
+        print(f"[WEBSOCKET] ❌ join_channel called with no channel: {data}")
         
 @socketio.on("leave_channel")
 def handle_leave_channel(data):

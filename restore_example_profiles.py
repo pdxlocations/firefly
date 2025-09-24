@@ -20,7 +20,8 @@ def restore_example_profiles():
             "long_name": "Packet Whisperer",
             "short_name": "Wisp",
             "channel": "LongFast",
-            "key": "AQ=="
+            "key": "AQ==",
+            "hop_limit": 3
         },
         {
             "profile_id": "1a93fd12-2233-4a3a-bbbb-23fe4ad0bb02",
@@ -28,7 +29,8 @@ def restore_example_profiles():
             "long_name": "UDP Genie",
             "short_name": "Geni",
             "channel": "ShortFast",
-            "key": "AQ=="
+            "key": "AQ==",
+            "hop_limit": 2
         },
         {
             "profile_id": "2b84ec23-3344-4a3a-cccc-34ed5be0cc03",
@@ -36,7 +38,8 @@ def restore_example_profiles():
             "long_name": "Mesh Rider",
             "short_name": "Ridr",
             "channel": "ShortFast",
-            "key": "AQ=="
+            "key": "AQ==",
+            "hop_limit": 4
         },
         {
             "profile_id": "3c75db34-4455-4a3a-dddd-45dc6cf0dd04",
@@ -44,7 +47,8 @@ def restore_example_profiles():
             "long_name": "Echo Phantom",
             "short_name": "Echo",
             "channel": "ShortFast",
-            "key": "AQ=="
+            "key": "AQ==",
+            "hop_limit": 3
         },
         {
             "profile_id": "4d66ca45-5566-4a3a-eeee-56cb7df0ee05",
@@ -52,7 +56,8 @@ def restore_example_profiles():
             "long_name": "Ping Lord",
             "short_name": "Ping",
             "channel": "ShortFast",
-            "key": "AQ=="
+            "key": "AQ==",
+            "hop_limit": 5
         },
         {
             "profile_id": "5e57b956-6677-4a3a-ffff-67ba8ef0ff06",
@@ -60,7 +65,8 @@ def restore_example_profiles():
             "long_name": "Captain Multicast",
             "short_name": "Capn",
             "channel": "ShortFast",
-            "key": "AQ=="
+            "key": "AQ==",
+            "hop_limit": 1
         },
         {
             "profile_id": "6f489867-7788-4a3a-aaaa-78a99ff0aa07",
@@ -68,7 +74,8 @@ def restore_example_profiles():
             "long_name": "Byte Bandit",
             "short_name": "Band",
             "channel": "MediumFast",
-            "key": "AQ=="
+            "key": "AQ==",
+            "hop_limit": 3
         },
         {
             "profile_id": "7059a978-8899-4a3a-bbbb-89b0aff0bb08",
@@ -76,7 +83,8 @@ def restore_example_profiles():
             "long_name": "Signal Sprite",
             "short_name": "Sigl",
             "channel": "MeshOregon",
-            "key": "AQ=="
+            "key": "AQ==",
+            "hop_limit": 7
         }
     ]
     
@@ -92,12 +100,13 @@ def restore_example_profiles():
             long_name=profile_data["long_name"],
             short_name=profile_data["short_name"],
             channel=profile_data["channel"],
-            key=profile_data["key"]
+            key=profile_data["key"],
+            hop_limit=profile_data["hop_limit"]
         )
         
         if success:
             channel_num = generate_hash(profile_data["channel"], profile_data["key"])
-            print(f"✅ {profile_data['long_name']} ({profile_data['channel']}) -> Channel {channel_num}")
+            print(f"✅ {profile_data['long_name']} ({profile_data['channel']}) -> Channel {channel_num} | Hop Limit: {profile_data['hop_limit']}")
             created_count += 1
         else:
             print(f"❌ Failed to create {profile_data['long_name']}")

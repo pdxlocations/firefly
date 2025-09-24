@@ -289,7 +289,11 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
             print(f"[NODEINFO_RESPONSE] Sending nodeinfo response to {sender_num}")
             try:
                 # Send our nodeinfo back to the requesting node
-                send_nodeinfo()
+                # Get current profile to use its hop_limit
+                current_profile = _get_session_profile()
+                hop_limit = current_profile.get("hop_limit", 3) if current_profile else 3
+                print(f"[NODEINFO_RESPONSE] Sending response with hop_limit={hop_limit}")
+                send_nodeinfo(hop_limit=hop_limit)
                 print(f"[NODEINFO_RESPONSE] ✅ Sent nodeinfo response to node {sender_num}")
             except Exception as e:
                 print(f"[NODEINFO_RESPONSE] ❌ Failed to send nodeinfo response: {e}")
@@ -513,13 +517,13 @@ class ProfileManager:
         """Get a specific profile"""
         return self.db.get_profile(profile_id)
 
-    def create_profile(self, profile_id, node_id, long_name, short_name, channel, key):
+    def create_profile(self, profile_id, node_id, long_name, short_name, channel, key, hop_limit=3):
         """Create a new profile"""
-        return self.db.create_profile(profile_id, node_id, long_name, short_name, channel, key)
+        return self.db.create_profile(profile_id, node_id, long_name, short_name, channel, key, hop_limit)
 
-    def update_profile(self, profile_id, node_id, long_name, short_name, channel, key):
+    def update_profile(self, profile_id, node_id, long_name, short_name, channel, key, hop_limit=3):
         """Update an existing profile"""
-        return self.db.update_profile(profile_id, node_id, long_name, short_name, channel, key)
+        return self.db.update_profile(profile_id, node_id, long_name, short_name, channel, key, hop_limit)
 
     def delete_profile(self, profile_id):
         """Delete a profile"""
@@ -621,7 +625,10 @@ class UDPChatServer:
                 return False
 
         try:
-            send_text_message(message_content)
+            # Get hop_limit from sender profile, default to 3 if not set
+            hop_limit = sender_profile.get("hop_limit", 3)
+            print(f"[SEND] Sending message with hop_limit={hop_limit}")
+            send_text_message(message_content, hop_limit=hop_limit)
 
             # Mirror to local UI
             my_node_num = _my_node_num()
@@ -739,10 +746,15 @@ def create_profile():
     if not data or any(not data.get(k) for k in required):
         return jsonify({"error": "node_id, long_name, short_name, channel, key are required"}), 400
 
+    # Validate hop_limit if provided
+    hop_limit = data.get("hop_limit", 3)
+    if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
+        return jsonify({"error": "hop_limit must be an integer between 0 and 7"}), 400
+
     # Create and store the profile
     profile_id = str(uuid.uuid4())
     success = profile_manager.create_profile(
-        profile_id, data["node_id"], data["long_name"], data["short_name"], data["channel"], data["key"]
+        profile_id, data["node_id"], data["long_name"], data["short_name"], data["channel"], data["key"], hop_limit
     )
 
     if success:
@@ -760,8 +772,13 @@ def update_profile(profile_id):
     if not data or any(not data.get(k) for k in required):
         return jsonify({"error": "node_id, long_name, short_name, channel, key are required"}), 400
 
+    # Validate hop_limit if provided
+    hop_limit = data.get("hop_limit", 3)
+    if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
+        return jsonify({"error": "hop_limit must be an integer between 0 and 7"}), 400
+
     success = profile_manager.update_profile(
-        profile_id, data["node_id"], data["long_name"], data["short_name"], data["channel"], data["key"]
+        profile_id, data["node_id"], data["long_name"], data["short_name"], data["channel"], data["key"], hop_limit
     )
 
     if success:
@@ -885,7 +902,9 @@ def set_current_profile():
 
                     # Small delay to ensure interface is fully ready
                     time.sleep(0.5)
-                    send_nodeinfo()
+                    hop_limit = profile.get("hop_limit", 3)
+                    print(f"[NODEINFO] Sending nodeinfo with hop_limit={hop_limit}")
+                    send_nodeinfo(hop_limit=hop_limit)
                     print(
                         f"[NODEINFO] Sent nodeinfo packet for {profile.get('long_name', 'Unknown')} ({profile.get('node_id', 'Unknown')})"
                     )

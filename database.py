@@ -26,6 +26,7 @@ class Database:
                     short_name TEXT NOT NULL,
                     channel TEXT NOT NULL,
                     key TEXT NOT NULL,
+                    hop_limit INTEGER DEFAULT 3,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -82,6 +83,14 @@ class Database:
                     FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE
                 )
             """)
+            
+            # Add hop_limit column to existing profiles table if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE profiles ADD COLUMN hop_limit INTEGER DEFAULT 3")
+                print("[DB] Added hop_limit column to profiles table")
+            except sqlite3.OperationalError:
+                # Column already exists, which is fine
+                pass
             
             # Create indexes for better performance
             conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_channel ON nodes (channel)")
@@ -156,7 +165,7 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
-                SELECT id, node_id, long_name, short_name, channel, key, 
+                SELECT id, node_id, long_name, short_name, channel, key, hop_limit, 
                        created_at, updated_at FROM profiles ORDER BY created_at DESC
             """)
             profiles = {}
@@ -168,6 +177,7 @@ class Database:
                     'short_name': row['short_name'],
                     'channel': row['channel'],
                     'key': row['key'],
+                    'hop_limit': row['hop_limit'] or 3,  # Default to 3 if null
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
                 }
@@ -178,7 +188,7 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
-                SELECT id, node_id, long_name, short_name, channel, key, 
+                SELECT id, node_id, long_name, short_name, channel, key, hop_limit, 
                        created_at, updated_at FROM profiles WHERE id = ?
             """, (profile_id,))
             row = cursor.fetchone()
@@ -190,20 +200,25 @@ class Database:
                     'short_name': row['short_name'],
                     'channel': row['channel'],
                     'key': row['key'],
+                    'hop_limit': row['hop_limit'] or 3,  # Default to 3 if null
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
                 }
             return None
 
     def create_profile(self, profile_id: str, node_id: str, long_name: str, 
-                      short_name: str, channel: str, key: str) -> bool:
+                      short_name: str, channel: str, key: str, hop_limit: int = 3) -> bool:
         """Create a new profile"""
+        # Validate hop_limit range (0-7)
+        if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
+            hop_limit = 3  # Default to 3 if invalid
+            
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
-                    INSERT INTO profiles (id, node_id, long_name, short_name, channel, key)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (profile_id, node_id, long_name, short_name, channel, key))
+                    INSERT INTO profiles (id, node_id, long_name, short_name, channel, key, hop_limit)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (profile_id, node_id, long_name, short_name, channel, key, hop_limit))
                 conn.commit()
                 return True
         except Exception as e:
@@ -211,15 +226,19 @@ class Database:
             return False
 
     def update_profile(self, profile_id: str, node_id: str, long_name: str, 
-                      short_name: str, channel: str, key: str) -> bool:
+                      short_name: str, channel: str, key: str, hop_limit: int = 3) -> bool:
         """Update an existing profile"""
+        # Validate hop_limit range (0-7)
+        if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
+            hop_limit = 3  # Default to 3 if invalid
+            
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute("""
                     UPDATE profiles SET node_id = ?, long_name = ?, short_name = ?, 
-                                      channel = ?, key = ?, updated_at = CURRENT_TIMESTAMP
+                                      channel = ?, key = ?, hop_limit = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                """, (node_id, long_name, short_name, channel, key, profile_id))
+                """, (node_id, long_name, short_name, channel, key, hop_limit, profile_id))
                 return cursor.rowcount > 0
         except Exception as e:
             print(f"Error updating profile: {e}")

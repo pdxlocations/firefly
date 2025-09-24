@@ -31,6 +31,11 @@
                         <label for="newKey" class="form-label">Key *</label>
                         <input type="text" class="form-control" id="newKey" required maxlength="256" placeholder="e.g. AQ==">
                     </div>
+                    <div class="mb-3">
+                        <label for="newHopLimit" class="form-label">Hop Limit</label>
+                        <input type="number" class="form-control" id="newHopLimit" min="0" max="7" value="3" placeholder="0-7">
+                        <div class="form-text">Number of hops a message can travel (0-7). Default is 3.</div>
+                    </div>
                     <button type="submit" class="btn btn-primary">Create Profile</button>
                 </form>
             </div>
@@ -52,6 +57,7 @@
                                         <h6 class="mb-1">{{ profile.long_name }}</h6>
                                         <small class="text-muted">Short: {{ profile.short_name }} • Node: {{ profile.node_id }}</small>
                                         <p class="mt-2 mb-1">Channel: {{ profile.channel }} | Key: {{ profile.key }}</p>
+                                        <p class="mb-1">Hop Limit: {{ profile.hop_limit if profile.hop_limit is not none else 3 }}</p>
                                         <small class="text-muted">Created: {{ profile.created_at[:10] }}</small>
                                     </div>
                                     <div class="btn-group-vertical" role="group">
@@ -108,6 +114,11 @@
                         <label for="editKey" class="form-label">Key *</label>
                         <input type="text" class="form-control" id="editKey" required maxlength="256">
                     </div>
+                    <div class="mb-3">
+                        <label for="editHopLimit" class="form-label">Hop Limit</label>
+                        <input type="number" class="form-control" id="editHopLimit" min="0" max="7" value="3" placeholder="0-7">
+                        <div class="form-text">Number of hops a message can travel (0-7). Default is 3.</div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -130,6 +141,7 @@
                 <li><strong>Short Name:</strong> Short identifier shown in lists and compact views</li>
                 <li><strong>Channel:</strong> Communication channel used</li>
                 <li><strong>Key:</strong> Encryption or access key</li>
+                <li><strong>Hop Limit:</strong> Number of hops (0-7) a message can travel before being dropped. Default is 3.</li>
                 <li><strong>Multiple Profiles:</strong> You can create multiple profiles for different purposes</li>
                 <li><strong>Profile Selection:</strong> Go back to the chat page to select which profile to use</li>
             </ul>
@@ -177,12 +189,22 @@ function loadProfiles() {
 
 function createProfile(e) {
     e.preventDefault();
+    const hopLimitValue = document.getElementById('newHopLimit').value;
+    const hopLimit = hopLimitValue === '' ? 3 : parseInt(hopLimitValue);
+    
+    // Validate hop limit
+    if (hopLimit < 0 || hopLimit > 7) {
+        alert('Hop limit must be between 0 and 7');
+        return;
+    }
+    
     const payload = {
         node_id: document.getElementById('newNodeId').value.trim(),
         long_name: document.getElementById('newLongName').value.trim(),
         short_name: document.getElementById('newShortName').value.trim(),
         channel: document.getElementById('newChannel').value.trim(),
         key: document.getElementById('newKey').value.trim(),
+        hop_limit: hopLimit
     };
     if (Object.values(payload).some(v => !v)) {
         alert('All fields are required');
@@ -214,6 +236,7 @@ function openEditModal(profileId) {
     document.getElementById('editShortName').value = profile.short_name || '';
     document.getElementById('editChannel').value = profile.channel || '';
     document.getElementById('editKey').value = profile.key || '';
+    document.getElementById('editHopLimit').value = profile.hop_limit !== undefined ? profile.hop_limit : 3;
     new bootstrap.Modal(document.getElementById('editProfileModal')).show();
 }
 
@@ -224,9 +247,17 @@ function updateProfile() {
     const short_name = document.getElementById('editShortName').value.trim();
     const channel = document.getElementById('editChannel').value.trim();
     const key = document.getElementById('editKey').value.trim();
+    const hopLimitValue = document.getElementById('editHopLimit').value;
+    const hopLimit = hopLimitValue === '' ? 3 : parseInt(hopLimitValue);
 
     if (!node_id || !long_name || !short_name || !channel || !key) {
         alert('All fields are required');
+        return;
+    }
+    
+    // Validate hop limit
+    if (hopLimit < 0 || hopLimit > 7) {
+        alert('Hop limit must be between 0 and 7');
         return;
     }
 
@@ -238,7 +269,8 @@ function updateProfile() {
             long_name: long_name,
             short_name: short_name,
             channel: channel,
-            key: key
+            key: key,
+            hop_limit: hopLimit
         })
     })
     .then(r => r.json())

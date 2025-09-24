@@ -449,9 +449,10 @@ function initializeSocket() {
         document.getElementById('connectionStatus').className = 'badge bg-success';
         document.getElementById('connectionStatus').textContent = 'Connected';
         
-        // Join channel room if we have a current profile
-        if (currentProfile && currentProfile.channel && currentProfile.key) {
-            joinChannelRoom(currentProfile);
+        // Join channel room if we have a current profile and channel number
+        if (currentProfile && currentChannelRoom) {
+            socket.emit('join_channel', { channel: currentChannelRoom });
+            console.log('[socket] rejoined channel room on reconnect:', currentChannelRoom);
         }
     });
 
@@ -519,6 +520,18 @@ function loadCurrentProfile() {
                 const desktopSelect = document.getElementById('profileSelectDesktop');
                 if (mobileSelect) mobileSelect.value = profile.id;
                 if (desktopSelect) desktopSelect.value = profile.id;
+                
+                // Set current channel room and join if socket is ready
+                if (profile.channel_number !== undefined && profile.channel_number !== null) {
+                    currentChannelRoom = profile.channel_number;
+                    console.log('[PROFILE] Set current channel room:', currentChannelRoom);
+                    
+                    // Join the WebSocket room if socket is connected
+                    if (socket && socket.connected) {
+                        socket.emit('join_channel', { channel: currentChannelRoom });
+                        console.log('[socket] joined channel room on profile load:', currentChannelRoom);
+                    }
+                }
             }
             // Update banner with profile info (status will sync from sidebar)
             updateProfileBanner(profile);
@@ -666,16 +679,13 @@ function calculateChannelHash(channelName, key) {
     return null; // Will be set by server response
 }
 
-function joinChannelRoom(profile) {
-    if (!socket || !profile) return;
+function joinChannelRoom(channelNumber) {
+    if (!socket || channelNumber === null || channelNumber === undefined) return;
     
-    // Calculate channel number (we'll get this from the server response instead)
-    // For now, just emit the join request with channel name and key
     socket.emit('join_channel', {
-        channel_name: profile.channel,
-        key: profile.key
+        channel: channelNumber
     });
-    console.log('[socket] requested to join channel room for:', profile.channel);
+    console.log('[socket] requested to join channel room:', channelNumber);
 }
 
 function leaveCurrentChannelRoom() {

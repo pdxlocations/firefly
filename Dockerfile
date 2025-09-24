@@ -11,6 +11,9 @@ ENV FIREFLY_PORT=5011
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
+    iproute2 \
+    iputils-ping \
+    net-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory

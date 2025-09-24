@@ -28,8 +28,38 @@ This guide will help you run Firefly using Docker and Docker Compose, based on t
    - Run: `docker-compose up --build`
 
 4. **Access the application**:
-   - Open your browser to http://localhost:5011
+   - The startup logs will display the correct IP address to access
+   - Look for: `🌐 Web interface: http://[IP_ADDRESS]:5011`
+   - Firefly automatically detects your host machine's IP when running in Docker
    - The application will be ready to use!
+
+## IP Address Detection
+
+**New Feature**: Firefly automatically detects your host machine's IP address when running in Docker containers.
+
+### How it Works
+- **Docker Detection**: Automatically detects when running inside a container
+- **Host IP Discovery**: Uses multiple methods to find the host machine's IP:
+  - Network routing table analysis
+  - Socket connection testing
+  - Docker bridge network inspection
+- **Network Mode Aware**: Handles both host networking and bridge networking
+- **Fallback Protection**: Falls back to `localhost` if detection fails
+
+### Startup Messages
+When starting Firefly in Docker, you'll see:
+```
+🐳 Docker container detected, finding host IP address...
+   Using host networking mode
+   Found host IP: 192.168.1.100
+🌐 Web interface: http://192.168.1.100:5011
+```
+
+### Testing IP Detection
+You can test the IP detection independently:
+```bash
+docker-compose exec firefly python3 test_ip_detection.py
+```
 
 ## Configuration
 

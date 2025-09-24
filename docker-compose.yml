@@ -30,6 +30,8 @@ services:
       # UDP Configuration for Meshtastic communication
       - FIREFLY_UDP_HOST=${FIREFLY_UDP_HOST:-0.0.0.0}
       - FIREFLY_UDP_PORT=${FIREFLY_UDP_PORT:-4403}
+      # Network mode indicator for IP detection
+      - NETWORK_MODE=host
     volumes:
       - firefly_data:/app/data
       # Optional: mount your own config or profiles (uncomment if you have them)

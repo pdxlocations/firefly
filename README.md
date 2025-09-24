@@ -19,11 +19,44 @@ A real-time web-based chat application for Meshtastic mesh networks. Features no
 
 ## Requirements
 
+### Native Installation
 - Python 3.7+
 - Modern web browser with WebSocket support
 - Local network access
 
+### Docker Installation (Recommended)
+- Docker and Docker Compose
+- Modern web browser with WebSocket support
+- Local network access
+
 ## Installation
+
+### Option 1: Docker (Recommended)
+
+The easiest way to run Firefly is using Docker:
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/pdxlocations/firefly.git
+   cd firefly
+   ```
+
+2. **Optional: Configure environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env file if you want to customize settings
+   ```
+
+3. **Build and run with Docker Compose**
+   ```bash
+   docker-compose up --build
+   ```
+
+4. **Access the application**
+   - Open your browser to `http://localhost:5011`
+   - The application will be ready to use!
+
+### Option 2: Native Python Installation
 
 1. **Clone or download this project**
    ```bash
@@ -45,6 +78,20 @@ A real-time web-based chat application for Meshtastic mesh networks. Features no
 ## Usage
 
 ### Starting the Application
+
+#### Docker Method (Recommended)
+
+1. **Start the application**
+   ```bash
+   docker-compose up
+   ```
+   Use `docker-compose up -d` to run in the background.
+
+2. **Open your web browser**
+   - Navigate to `http://localhost:5011`
+   - Or access from other devices on the network using your computer's IP address: `http://YOUR_IP:5011`
+
+#### Native Python Method
 
 1. **Run the application**
    ```bash
@@ -113,6 +160,18 @@ To chat with others on your network:
 
 ## Configuration
 
+### Docker Configuration
+
+Configure Firefly using environment variables in `.env` file:
+
+- **FIREFLY_WEB_PORT**: Web interface port (default: 5011)
+- **FIREFLY_UDP_PORT**: UDP multicast port (default: 4403)
+- **FIREFLY_SECRET_KEY**: Flask secret key (change in production!)
+- **FIREFLY_DEBUG**: Enable debug mode (default: false)
+- **FIREFLY_NAME**: Application name displayed in UI (default: Firefly)
+
+### Native Installation Configuration
+
 You can modify these settings in `app.py`:
 
 - **MCAST_GRP**: Default is 224.0.0.69 (multicast group address)
@@ -151,29 +210,78 @@ firefly/
         └── firefly-logo-light.png  # Logo for light theme
 ```
 
+## Docker Management
+
+### Useful Docker Commands
+
+```bash
+# View logs
+docker-compose logs -f
+
+# Restart the application
+docker-compose restart
+
+# Stop the application
+docker-compose down
+
+# Update and rebuild
+docker-compose up --build
+
+# Access container shell
+docker-compose exec firefly /bin/bash
+```
+
+### Data Persistence (Docker)
+
+- Application data is stored in Docker volume `firefly_data`
+- Database and profiles persist between container restarts
+- To backup data:
+  ```bash
+  docker run --rm -v firefly_data:/data -v $(pwd):/backup alpine tar czf /backup/firefly-backup.tar.gz -C /data .
+  ```
+
 ## Troubleshooting
 
-### Port Already in Use
-If you get a "port already in use" error:
-1. Change the MCAST_PORT in `app.py` to a different number
-2. Restart the application
-3. Make sure all users use the same port number
+### Docker Issues
 
-### No Messages Received
+#### Container Won't Start
+1. Check logs: `docker-compose logs firefly`
+2. Verify port availability: `netstat -tulpn | grep :5011`
+3. Check disk space: `df -h`
+
+#### UDP Communication Issues (Docker)
+1. Verify UDP port 4403 is not blocked by firewall
+2. Test UDP connectivity: `nc -u localhost 4403`
+3. Check Meshtastic device configuration
+4. Ensure Docker container can access host network for UDP multicast
+
+### General Issues
+
+#### Port Already in Use
+If you get a "port already in use" error:
+1. **Docker**: Change `FIREFLY_WEB_PORT` in `.env` file
+2. **Native**: Change the MCAST_PORT in `app.py` to a different number
+3. Restart the application
+4. Make sure all users use the same port number
+
+#### No Messages Received
 1. Check that all devices are on the same network
 2. Verify that UDP port 4403 is not blocked by firewall
 3. Try disabling firewall temporarily for testing
 4. Check that the application is running on all devices
+5. **Docker**: Ensure container networking allows UDP multicast
 
-### Web Interface Not Loading
-1. Make sure Flask is running (you should see startup messages)
+#### Web Interface Not Loading
+1. Make sure the application is running (check logs)
 2. Try accessing via `http://127.0.0.1:5011` instead of localhost
 3. Check that port 5011 is not blocked
+4. **Docker**: Use `docker-compose logs` to check for errors
 
-### Profile Issues
-1. Profiles are stored in `profiles.json` - this file is created automatically
-2. If you have profile issues, you can delete `profiles.json` and restart
+#### Profile Issues
+1. Profiles are stored in SQLite database - this is created automatically
+2. If you have profile issues, you can delete the database and restart
 3. Make sure you select a profile before trying to send messages
+4. **Docker**: Database is in the `firefly_data` volume
 
 ## Technical Details
 
@@ -196,6 +304,23 @@ If you get a "port already in use" error:
 - **Safe Migration**: Migration only occurs once when database is empty
 - **Backup Protection**: Original JSON files are preserved as `.migrated` backups
 
+## Docker vs Native Installation
+
+### Advantages of Docker
+- **Easy Setup**: No need to install Python dependencies
+- **Consistent Environment**: Runs the same on any system with Docker
+- **Isolation**: Doesn't interfere with system Python packages
+- **Data Persistence**: Automatic volume management for database
+- **Production Ready**: Easy deployment and scaling
+- **Quick Updates**: Simple container rebuilding
+
+### When to Use Native Installation
+- **Development**: When modifying the code
+- **Resource Constraints**: Lower overhead without container layer
+- **Integration**: When integrating with existing Python environments
+
+For detailed Docker usage, see [DOCKER.md](DOCKER.md).
+
 ## Security Considerations
 
 - This application integrates with Meshtastic mesh networks
@@ -204,6 +329,7 @@ If you get a "port already in use" error:
 - Database contains channel encryption keys - protect the database file
 - Web interface runs on localhost by default (configure as needed)
 - Consider firewall rules if exposing the web interface beyond localhost
+- **Docker**: Change `FIREFLY_SECRET_KEY` in production deployments
 
 ## License
 

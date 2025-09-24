@@ -8,7 +8,7 @@ import os
 
 
 class Database:
-    def __init__(self, db_path: str = "mudpchat.db"):
+    def __init__(self, db_path: str = "firefly.db"):
         self.db_path = db_path
         self.init_database()
 

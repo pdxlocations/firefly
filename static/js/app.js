@@ -1,4 +1,4 @@
-// Common JavaScript utilities for MUDP Chat App
+// Common JavaScript utilities for Firefly App
 
 // Utility functions
 const Utils = {

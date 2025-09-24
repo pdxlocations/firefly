@@ -1,8 +1,8 @@
-# MUDP Chat Application
+# Firefly
 
-A real-time web-based chat application that communicates over UDP on the local network. Built with Python Flask and WebSockets for real-time messaging with user profile management.
+![Firefly Logo Dark](static/images/firefly-logo-dark.png)
 
-<img width="1239" height="653" alt="image" src="https://github.com/user-attachments/assets/b8914af6-0343-464b-9bc1-e8403c1ff103" />
+A real-time web-based chat application for Meshtastic mesh networks. Features node discovery, profile management, and persistent message storage with an intuitive web interface.
 
 ## Features
 
@@ -25,8 +25,8 @@ A real-time web-based chat application that communicates over UDP on the local n
 
 1. **Clone or download this project**
    ```bash
-   git clone https://github.com/pdxlocations/mudpchat.git
-   cd mudpchat
+   git clone https://github.com/pdxlocations/firefly.git
+   cd firefly
    ```
 
 2. **Create a virtual environment (recommended)**
@@ -115,8 +115,8 @@ You can modify these settings in `app.py`:
 
 - **MCAST_GRP**: Default is 224.0.0.69 (multicast group address)
 - **MCAST_PORT**: Default is 4403 (UDP multicast port)
-- **Flask port**: Default is 5011 (change in run.py)
-- **Database**: SQLite database stored as `mudpchat.db`
+- **Flask port**: Default is 5011 (change in app.py)
+- **Database**: SQLite database stored as `firefly.db`
 
 ## Network Requirements
 
@@ -128,13 +128,12 @@ You can modify these settings in `app.py`:
 ## File Structure
 
 ```
-mudpchat/
+firefly/
 ├── app.py              # Main Flask application
 ├── database.py         # Database models and operations
 ├── encryption.py       # Meshtastic encryption/decryption
 ├── requirements.txt    # Python dependencies
-├── run.py             # Application launcher
-├── mudpchat.db        # SQLite database (created automatically)
+├── firefly.db         # SQLite database (created automatically)
 ├── templates/
 │   ├── base.html      # Base template with navigation
 │   ├── index.html     # Chat interface
@@ -143,28 +142,31 @@ mudpchat/
 └── static/
     ├── css/
     │   └── style.css  # Custom styles
-    └── js/
-        └── app.js     # JavaScript utilities
+    ├── js/
+    │   └── app.js     # JavaScript utilities
+    └── images/
+        ├── firefly-logo-dark.png   # Logo for dark theme
+        └── firefly-logo-light.png  # Logo for light theme
 ```
 
 ## Troubleshooting
 
 ### Port Already in Use
 If you get a "port already in use" error:
-1. Change the UDP_PORT in `app.py` to a different number (e.g., 12346)
+1. Change the MCAST_PORT in `app.py` to a different number
 2. Restart the application
 3. Make sure all users use the same port number
 
 ### No Messages Received
 1. Check that all devices are on the same network
-2. Verify that UDP port 12345 is not blocked by firewall
+2. Verify that UDP port 4403 is not blocked by firewall
 3. Try disabling firewall temporarily for testing
 4. Check that the application is running on all devices
 
 ### Web Interface Not Loading
 1. Make sure Flask is running (you should see startup messages)
-2. Try accessing via `http://127.0.0.1:5000` instead of localhost
-3. Check that port 5000 is not blocked
+2. Try accessing via `http://127.0.0.1:5011` instead of localhost
+3. Check that port 5011 is not blocked
 
 ### Profile Issues
 1. Profiles are stored in `profiles.json` - this file is created automatically
@@ -186,7 +188,7 @@ If you get a "port already in use" error:
 
 ## Data Persistence
 
-- **Profile Storage**: All profiles are stored in `mudpchat.db` SQLite database
+- **Profile Storage**: All profiles are stored in `firefly.db` SQLite database
 - **Automatic Migration**: Existing `profiles.json` files are automatically migrated on first run
 - **Persistent Data**: Profiles, nodes, and messages survive application restarts
 - **Safe Migration**: Migration only occurs once when database is empty

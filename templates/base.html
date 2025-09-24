@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}MUDP Chat{% endblock %}</title>
+    <title>{% block title %}Firefly{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
@@ -388,6 +388,30 @@
         .navbar-brand {
             font-weight: 700 !important;
             font-size: 1.25rem !important;
+            display: flex !important;
+            align-items: center !important;
+        }
+        
+        .navbar-brand img {
+            transition: transform 0.3s ease;
+        }
+        
+        .navbar-brand:hover img {
+            transform: scale(1.1);
+        }
+        
+        /* Theme-specific logo visibility */
+        [data-bs-theme="dark"] #logo-light {
+            display: none !important;
+        }
+        
+        [data-bs-theme="light"] #logo-dark {
+            display: none !important;
+        }
+        
+        /* Default to dark logo if theme not set yet */
+        #logo-light {
+            display: none;
         }
         
         /* Theme toggle button styling */
@@ -504,7 +528,11 @@
 <body data-bs-theme="dark">
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container">
-            <a class="navbar-brand" href="{{ url_for('index') }}">MUDP Chat</a>
+            <a class="navbar-brand" href="{{ url_for('index') }}">
+                <img id="logo-dark" src="{{ url_for('static', filename='images/firefly-logo-dark.png') }}" alt="Firefly" height="32" class="me-2">
+                <img id="logo-light" src="{{ url_for('static', filename='images/firefly-logo-light.png') }}" alt="Firefly" height="32" class="me-2">
+                Firefly
+            </a>
             
             <!-- Hamburger menu button -->
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
@@ -558,7 +586,7 @@
           console.log('[THEME] Initializing theme toggle');
           
           // Load saved theme or default to dark
-          const savedTheme = localStorage.getItem('mudpchat-theme') || 'dark';
+          const savedTheme = localStorage.getItem('firefly-theme') || 'dark';
           console.log('[THEME] Saved theme:', savedTheme);
           setTheme(savedTheme);
           
@@ -569,7 +597,7 @@
                   const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
                   console.log('[THEME] Toggling from', currentTheme, 'to', newTheme);
                   setTheme(newTheme);
-                  localStorage.setItem('mudpchat-theme', newTheme);
+                  localStorage.setItem('firefly-theme', newTheme);
               });
           } else {
               console.error('[THEME] Theme toggle button not found!');
@@ -582,6 +610,21 @@
               
               if (themeIcon) {
                   themeIcon.textContent = theme === 'dark' ? '🌞' : '🌙';
+              }
+              
+              // Update logo visibility based on theme
+              const logoDark = document.getElementById('logo-dark');
+              const logoLight = document.getElementById('logo-light');
+              
+              if (logoDark && logoLight) {
+                  if (theme === 'dark') {
+                      logoDark.style.display = 'inline-block';
+                      logoLight.style.display = 'none';
+                  } else {
+                      logoDark.style.display = 'none';
+                      logoLight.style.display = 'inline-block';
+                  }
+                  console.log('[THEME] Logo visibility updated for', theme, 'theme');
               }
               
               // Update navbar classes for better visibility

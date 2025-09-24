@@ -1088,9 +1088,15 @@ def handle_disconnect():
 
 
 if __name__ == "__main__":
+    print("")
+    print("🔥 Firefly - Meshtastic Node Discovery")
+    print("=" * 50)
+    print("Enhanced with node tracking and database storage!")
+    print("=" * 50)
+    print("")
     print("[STARTUP] Using mudp UDPPacketStream for UDP multicast I/O")
     print("[STARTUP] Interface will start when a profile is selected")
 
     app.config["TEMPLATES_AUTO_RELOAD"] = True
-    print(f"Starting Flask-SocketIO server on http://localhost:5011 (interface starts with profile selection)...")
+    print(f"Starting Firefly server on http://localhost:5011 (interface starts with profile selection)...")
     socketio.run(app, host="0.0.0.0", port=5011, debug=True, use_reloader=True, allow_unsafe_werkzeug=True)

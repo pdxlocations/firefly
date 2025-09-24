@@ -181,6 +181,11 @@ function initializeSocket() {
         console.log('[socket] connected');
         document.getElementById('connectionStatus').className = 'badge bg-success';
         document.getElementById('connectionStatus').textContent = 'Connected';
+        
+        // Join channel room if we have a current profile
+        if (currentProfile && currentProfile.channel && currentProfile.key) {
+            joinChannelRoom(currentProfile);
+        }
     });
 
     socket.on('connect_error', function(err) {
@@ -370,6 +375,37 @@ function refreshProfileBanner() {
     }
 }
 
+// Channel room management for WebSocket
+let currentChannelRoom = null;
+
+function calculateChannelHash(channelName, key) {
+    // This is a simple hash function - ideally should match the server-side logic
+    // For now, we'll get the channel number from the profile switching response
+    return null; // Will be set by server response
+}
+
+function joinChannelRoom(profile) {
+    if (!socket || !profile) return;
+    
+    // Calculate channel number (we'll get this from the server response instead)
+    // For now, just emit the join request with channel name and key
+    socket.emit('join_channel', {
+        channel_name: profile.channel,
+        key: profile.key
+    });
+    console.log('[socket] requested to join channel room for:', profile.channel);
+}
+
+function leaveCurrentChannelRoom() {
+    if (!socket || !currentChannelRoom) return;
+    
+    socket.emit('leave_channel', {
+        channel: currentChannelRoom
+    });
+    console.log('[socket] left channel room:', currentChannelRoom);
+    currentChannelRoom = null;
+}
+
 
 function loadMessages() {
     fetch('/api/messages')
@@ -413,7 +449,20 @@ function setProfile() {
         if (data.error) {
             alert('Error: ' + data.error);
         } else {
+            // Leave current channel room before switching
+            leaveCurrentChannelRoom();
+            
             currentProfile = data.profile || null;
+            
+            // Join new channel room if profile is set
+            if (currentProfile && socket) {
+                // We'll get the channel number from the server response if available
+                if (data.channel_number !== undefined) {
+                    currentChannelRoom = data.channel_number;
+                    socket.emit('join_channel', { channel: currentChannelRoom });
+                    console.log('[socket] joined channel room:', currentChannelRoom);
+                }
+            }
             
             // Update profile banner
             updateProfileBanner(currentProfile);

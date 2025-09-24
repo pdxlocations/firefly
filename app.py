@@ -4,8 +4,8 @@ import json
 from collections import deque
 
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
-from flask_socketio import SocketIO, emit
+from flask import Flask, render_template, request, jsonify, session
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import uuid
 import os
 import socketio as py_socketio
@@ -23,7 +23,7 @@ MCAST_PORT = 4403
 PROFILES_FILE = "profiles.json"
 SOCKETIO_CLIENT_VERSION = "4.7.5"
 
-current_profile = None
+# Note: current_profile is now stored per-session in session['current_profile']
 messages = []
 
 # De-duplication cache for received packets to avoid double-display
@@ -34,11 +34,24 @@ _DEDUP_QUEUE = deque(maxlen=500)
 db = Database()
 
 
+def _get_session_profile():
+    """Get the current profile from session storage"""
+    return session.get('current_profile')
+
+def _set_session_profile(profile):
+    """Set the current profile in session storage"""
+    session['current_profile'] = profile
+    
+def _clear_session_profile():
+    """Clear the current profile from session storage"""
+    session.pop('current_profile', None)
+
 def _current_profile_channel_num():
     """Compute the expected channel number for the current profile using name+key hash.
     Returns an int channel number or None if unavailable.
     """
     try:
+        current_profile = _get_session_profile()
         if not current_profile:
             return None
         ch_name = current_profile.get("channel")
@@ -138,6 +151,7 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
         
         # Look up node name from database if available
         sender_display = str(sender_num) if sender_num else "Unknown"
+        current_profile = _get_session_profile()
         if current_profile and sender_num:
             try:
                 nodes = db.get_nodes_for_profile(current_profile["id"])
@@ -155,7 +169,7 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
         
         message = {
             "id": str(uuid.uuid4()),
-            "sender": str(sender_num) if sender_num else "Unknown",
+            "sender": f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else "Unknown",
             "sender_display": sender_display,
             "content": msg,
             "timestamp": datetime.now().isoformat(),
@@ -187,24 +201,37 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
             # If no channel info, skip storage (can't determine channel)
             print(f"[MESSAGE] No channel info - skipping database storage for: {msg[:50]}...")
         
-        # Only emit to WebSocket clients if message matches current profile's channel
-        should_display = False
-        if current_profile and message_channel is not None:
+        # Broadcast message to WebSocket clients in the appropriate channel room
+        should_display = False # Initialize should_display for this block
+
+        if message_channel is not None:
+            room_name = f"channel_{message_channel}"
+            try:
+                socketio.emit("new_message", message, room=room_name)
+                print(f"[MESSAGE] Broadcasted message to room {room_name}")
+            except Exception as e:
+                print(f"[MESSAGE] Error broadcasting to room {room_name}: {e}")
+        else: # message_channel is None
+            print(f"[MESSAGE] No channel info - message not broadcasted to WebSocket")
+            
+            current_profile = _get_session_profile() # Get current profile once
+            
             try:
                 current_profile_channel = _current_profile_channel_num()
-                if current_profile_channel == message_channel:
-                    should_display = True
-                    print(f"[MESSAGE] Emitting to UI - matches current profile channel {current_profile_channel}")
+                
+                # If current profile's channel is also None, then this message (with no channel) matches
+                if current_profile_channel is None:
+                    # Backward compatibility: if no channel info for message AND profile is set
+                    if current_profile is not None:
+                        should_display = True
+                        print(f"[MESSAGE] No channel info, emitting based on profile existence (backward compatibility): {should_display}")
+                    else:
+                        print(f"[MESSAGE] No current profile set, not emitting to UI")
                 else:
-                    print(f"[MESSAGE] NOT emitting to UI - channel {message_channel} != profile channel {current_profile_channel}")
+                    # Message has no channel, but current profile HAS a channel, so they don't match
+                    print(f"[MESSAGE] NOT emitting to UI - message channel (None) != profile channel {current_profile_channel}")
             except Exception as e:
                 print(f"[MESSAGE] Error checking profile channel: {e}")
-        elif message_channel is None:
-            # Backward compatibility: if no channel info, show for current profile
-            should_display = current_profile is not None
-            print(f"[MESSAGE] No channel info, emitting based on profile existence: {should_display}")
-        else:
-            print(f"[MESSAGE] No current profile set, not emitting")
         
         if should_display:
             socketio.emit("new_message", message)
@@ -331,9 +358,10 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
                 except Exception:
                     pass  # Skip profiles with invalid channel/key
         else:
-            # If no channel info, only store for current profile (backward compatibility)
-            if current_profile:
-                matching_profiles = [current_profile["id"]]
+            # If no channel info, skip for now (we'll handle this per-session when needed)
+            # NOTE: Changed from global current_profile behavior for multi-session support
+            print(f"[NODEINFO_DEBUG] No channel info available, skipping storage")
+            return
         
         print(f"[NODEINFO_DEBUG] Channel {nodeinfo_channel} matches {len(matching_profiles)} profiles: {matching_profiles}")
         
@@ -428,45 +456,9 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
         else:
             print(f"\n[NODEINFO] SEEN NODE {sender_num}: {long_name} ({short_name}) - {hw_model} (stored for {stored_count} profiles, no changes)")
         
-        # Notify connected clients about node update - only if it matches current profile's channel
-        should_emit_node_update = False
-        if current_profile and nodeinfo_channel is not None:
-            try:
-                current_profile_channel = _current_profile_channel_num()
-                if current_profile_channel == nodeinfo_channel:
-                    should_emit_node_update = True
-                    print(f"[NODEINFO] Emitting node update to UI - matches current profile channel {current_profile_channel}")
-                else:
-                    print(f"[NODEINFO] NOT emitting node update to UI - channel {nodeinfo_channel} != profile channel {current_profile_channel}")
-            except Exception as e:
-                print(f"[NODEINFO] Error checking profile channel: {e}")
-        elif nodeinfo_channel is None:
-            # Backward compatibility: if no channel info, show for current profile
-            should_emit_node_update = current_profile is not None
-            print(f"[NODEINFO] No channel info, emitting based on profile existence: {should_emit_node_update}")
-        else:
-            print(f"[NODEINFO] No current profile set, not emitting node update")
-            
-        if should_emit_node_update:
-            try:
-                socketio.emit("node_update", {
-                    "node_num": sender_num,
-                    "node_id": node_id,
-                    "long_name": long_name,
-                    "short_name": short_name,
-                    "hw_model": hw_model,
-                    "role": role,
-                    "is_new": is_new_anywhere,
-                    "changes": list(set(all_changes)),
-                    "packet_info": {
-                        "rx_snr": packet.rx_snr,
-                        "rx_rssi": packet.rx_rssi,
-                        "hop_limit": packet.hop_limit
-                    },
-                    "stored_profiles": stored_count
-                })
-            except Exception as e:
-                print(f"Failed to emit node update: {e}")
+        # Note: Node updates are now handled per-session via WebSocket rooms
+        # Each session will get updates for their selected profile's channel
+        print(f"[NODEINFO] Node stored for {stored_count} profiles, WebSocket updates handled per-session")
             
     except Exception as e:
         print(f"Error processing nodeinfo: {e}")
@@ -614,9 +606,10 @@ class UDPChatServer:
             send_text_message(message_content)
 
             # Mirror to local UI
+            my_node_num = _my_node_num()
             message = {
                 "id": str(uuid.uuid4()),
-                "sender": sender_profile.get("short_name", "Unknown"),
+                "sender": f"!{hex(my_node_num)[2:].zfill(8)}" if my_node_num else sender_profile.get("node_id", "Unknown"),
                 "sender_display": sender_profile.get("long_name", "Unknown"),
                 "content": message_content,
                 "timestamp": datetime.now().isoformat(),
@@ -625,6 +618,7 @@ class UDPChatServer:
             messages.append(message)
             
             # Store sent message in database by channel (accessible to any profile using that channel)
+            current_profile = _get_session_profile()
             if current_profile:
                 try:
                     my_node_num = _my_node_num()
@@ -651,11 +645,16 @@ class UDPChatServer:
                         print(f"[SEND] Cannot determine channel for current profile - message not stored in database")
                 except Exception as e:
                     print(f"Failed to store sent message in database: {e}")
-            
-            try:
-                socketio.emit("new_message", message)
-            except Exception:
-                pass
+                
+                # Broadcast sent message to WebSocket clients in the appropriate channel room
+                current_channel = _current_profile_channel_num()
+                if current_channel is not None:
+                    room_name = f"channel_{current_channel}"
+                    try:
+                        socketio.emit("new_message", message, room=room_name)
+                        print(f"[SEND] Broadcasted sent message to room {room_name}")
+                    except Exception as e:
+                        print(f"[SEND] Error broadcasting sent message to room {room_name}: {e}")
             return True
         except Exception as e:
             print(f"Error sending message via mudp: {e}")
@@ -671,6 +670,7 @@ udp_server = UDPChatServer()
 def index():
     """Main chat interface"""
     profiles = profile_manager.get_all_profiles()
+    current_profile = _get_session_profile()
     return render_template("index.html", profiles=profiles, current_profile=current_profile)
 
 
@@ -684,6 +684,7 @@ def profiles():
 @app.route("/nodes")
 def nodes():
     """Nodes page - display seen nodes for current profile's channel"""
+    current_profile = _get_session_profile()
     if not current_profile:
         # Show empty page if no profile selected
         return render_template("nodes.html", nodes=[], current_profile=None, stats={})
@@ -752,14 +753,13 @@ def update_profile(profile_id):
 @app.route("/api/profiles/<profile_id>", methods=["DELETE"])
 def delete_profile(profile_id):
     """Delete a profile"""
-    global current_profile
-
+    current_profile = _get_session_profile()
     success = profile_manager.delete_profile(profile_id)
 
     if success:
         # If this was the current profile, unset it
         if current_profile and current_profile.get("id") == profile_id:
-            current_profile = None
+            _clear_session_profile()
         return jsonify({"message": "Profile deleted successfully"})
     else:
         return jsonify({"error": "Profile not found"}), 404
@@ -768,6 +768,7 @@ def delete_profile(profile_id):
 @app.route("/api/current-profile", methods=["GET"])
 def get_current_profile():
     """Get the current active profile with interface status"""
+    current_profile = _get_session_profile()
     if current_profile:
         # Determine interface status based on udp_server state
         if udp_server.running and udp_server.current_profile_id == current_profile.get("id"):
@@ -786,18 +787,17 @@ def get_current_profile():
 @app.route("/api/current-profile", methods=["POST"])
 def set_current_profile():
     """Set the current active profile and restart interface with new key"""
-    global current_profile
 
     data = request.get_json()
     profile_id = data.get("profile_id")
 
     if not profile_id:
         # Unset profile and stop interface
-        current_profile = None
+        _clear_session_profile()
         udp_server.stop()
         print("[PROFILE] Profile unset, interface stopped")
         return jsonify({
-            "message": "Profile unset", 
+            "message": "Profile unset",
             "profile": None,
             "messages": []  # Clear messages when no profile selected
         })
@@ -806,7 +806,8 @@ def set_current_profile():
     print(f"[API] set_current_profile -> requested id={profile_id} exists={bool(profile)}")
     
     if profile:
-        # Set current profile
+        # Set current profile in session
+        _set_session_profile(profile)
         current_profile = profile
         
         # Update node attributes
@@ -836,26 +837,14 @@ def set_current_profile():
             unread_count = 0  # Can't determine messages without channel
             print(f"[PROFILE] No channel determined - no messages loaded")
         
-        # Send notification about profile switch via WebSocket
-        try:
-            socketio.emit("profile_switched", {
-                "profile_name": profile.get("long_name", "Unknown"),
-                "profile_channel": profile.get("channel", "Unknown"), 
-                "loaded_messages": unread_count,  # Only count truly unread messages
-                "channel_number": expected_channel
-            })
+        # Update last seen for this profile+channel combination (mark as read)
+        if expected_channel is not None:
+            db.update_profile_last_seen(current_profile["id"], expected_channel)
             
-            if unread_count > 0:
-                print(f"[PROFILE] Notified client about {unread_count} missed messages")
-            else:
-                print(f"[PROFILE] No unread messages to notify about (user is caught up)")
-                
-            # Update last seen for this profile+channel combination (mark as read)
-            if expected_channel is not None:
-                db.update_profile_last_seen(current_profile["id"], expected_channel)
-            
-        except Exception as e:
-            print(f"[PROFILE] Error sending profile notification: {e}")
+        if unread_count > 0:
+            print(f"[PROFILE] Profile switched - loaded {unread_count} unread messages")
+        else:
+            print(f"[PROFILE] Profile switched - user is caught up on messages")
         
         if interface_started:
             print(f"[PROFILE] Interface successfully started with profile key")
@@ -863,7 +852,8 @@ def set_current_profile():
                 "message": "Profile set successfully and interface restarted", 
                 "profile": current_profile,
                 "interface_status": "started",
-                "messages": profile_messages
+                "messages": profile_messages,
+                "channel_number": expected_channel
             })
         else:
             print(f"[PROFILE] Warning: Profile set but interface failed to start")
@@ -872,7 +862,8 @@ def set_current_profile():
                 "profile": current_profile,
                 "interface_status": "failed",
                 "warning": "You may not receive messages until interface is fixed",
-                "messages": profile_messages
+                "messages": profile_messages,
+                "channel_number": expected_channel
             })
     else:
         return jsonify({"error": "Profile not found"}), 404
@@ -881,6 +872,7 @@ def set_current_profile():
 @app.route("/api/messages", methods=["GET"])
 def get_messages():
     """Get messages for current profile's channel"""
+    current_profile = _get_session_profile()
     if not current_profile:
         # Return in-memory messages if no profile is set (backward compatibility)
         return jsonify(messages)
@@ -904,6 +896,7 @@ def get_messages():
 @app.route("/api/nodes", methods=["GET"])
 def get_nodes():
     """Get nodes seen by current profile on the profile's channel"""
+    current_profile = _get_session_profile()
     if not current_profile:
         return jsonify({"error": "No profile selected"}), 400
     
@@ -922,6 +915,7 @@ def get_nodes():
 @app.route("/api/nodes/<int:node_num>", methods=["GET"])
 def get_node_details(node_num):
     """Get detailed information about a specific node"""
+    current_profile = _get_session_profile()
     if not current_profile:
         return jsonify({"error": "No profile selected"}), 400
     
@@ -937,6 +931,7 @@ def get_node_details(node_num):
 @app.route("/api/stats", methods=["GET"])
 def get_stats():
     """Get database statistics"""
+    current_profile = _get_session_profile()
     if current_profile:
         profile_stats = db.get_stats(current_profile["id"])
         global_stats = db.get_stats()
@@ -954,6 +949,7 @@ def get_stats():
 @app.route("/api/send-message", methods=["POST"])
 def send_message():
     """Send a message"""
+    current_profile = _get_session_profile()
     print(f"[API] /api/send-message called. current_profile set? {bool(current_profile)}")
     if not current_profile:
         return jsonify({"error": "No profile selected"}), 400
@@ -999,6 +995,26 @@ def handle_connect():
     """Handle WebSocket connection"""
     print("Client connected")
     emit("status", {"msg": "Connected to chat server"})
+    
+@socketio.on("join_channel")
+def handle_join_channel(data):
+    """Join a WebSocket room for a specific channel"""
+    channel = data.get('channel')
+    if channel is not None:
+        room_name = f"channel_{channel}"
+        join_room(room_name)
+        print(f"Client joined channel room: {room_name}")
+        emit("status", {"msg": f"Joined channel {channel}"})
+        
+@socketio.on("leave_channel")
+def handle_leave_channel(data):
+    """Leave a WebSocket room for a specific channel"""
+    channel = data.get('channel')
+    if channel is not None:
+        room_name = f"channel_{channel}"
+        leave_room(room_name)
+        print(f"Client left channel room: {room_name}")
+        emit("status", {"msg": f"Left channel {channel}"})
 
 
 @socketio.on("disconnect")

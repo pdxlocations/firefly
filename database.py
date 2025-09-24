@@ -427,7 +427,7 @@ class Database:
                 messages.append({
                     'id': row['message_id'],
                     'packet_id': row['packet_id'],
-                    'sender': str(sender_num) if sender_num else 'Unknown',
+                    'sender': f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else 'Unknown',
                     'sender_display': current_sender_display,
                     'content': row['content'],
                     'timestamp': row['timestamp'],
@@ -554,7 +554,7 @@ class Database:
                 messages.append({
                     'id': row['message_id'],
                     'packet_id': row['packet_id'],
-                    'sender': str(sender_num) if sender_num else 'Unknown',
+                    'sender': f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else 'Unknown',
                     'sender_display': current_sender_display,
                     'content': row['content'],
                     'timestamp': row['timestamp'],

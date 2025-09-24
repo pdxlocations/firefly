@@ -4,13 +4,31 @@
 
 {% block content %}
 <div class="row">
-    <div class="col-md-3">
+    <!-- Mobile-optimized profile controls -->
+    <div class="col-12 d-md-none mb-2">
+        <!-- Mobile compact profile bar -->
+        <div class="d-flex gap-2 align-items-center" style="flex-wrap: nowrap;">
+            <select id="profileSelect" class="form-select form-select-sm" style="min-width: 120px; flex: 1;">
+                <option value="">Select profile...</option>
+                {% for profile_id, profile in profiles.items() %}
+                    <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
+                        {{ profile.short_name }}
+                    </option>
+                {% endfor %}
+            </select>
+            <button id="setProfileBtn" class="btn btn-primary btn-sm" style="white-space: nowrap;">Set</button>
+            <a href="{{ url_for('profiles') }}" class="btn btn-outline-secondary btn-sm" style="white-space: nowrap;">Manage</a>
+        </div>
+    </div>
+    
+    <!-- Desktop sidebar -->
+    <div class="col-lg-3 col-md-4 mb-3 d-none d-md-block">
         <div class="card">
             <div class="card-header">
                 <h5>Profile Selection</h5>
             </div>
             <div class="card-body">
-                <select id="profileSelect" class="form-select mb-2">
+                <select id="profileSelectDesktop" class="form-select mb-2">
                     <option value="">Select a profile...</option>
                     {% for profile_id, profile in profiles.items() %}
                         <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
@@ -20,7 +38,7 @@
                 </select>
                 
                 <div class="d-grid gap-2">
-                    <button id="setProfileBtn" class="btn btn-primary btn-sm">Set Profile</button>
+                    <button id="setProfileBtnDesktop" class="btn btn-primary btn-sm">Set Profile</button>
                     <a href="{{ url_for('profiles') }}" class="btn btn-outline-secondary btn-sm">Manage Profiles</a>
                 </div>
             </div>
@@ -42,67 +60,66 @@
                 </div>
             </div>
         </div>
-        
-        {% if current_profile %}
-        <div class="card mt-3">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h6 class="mb-0">Network Nodes</h6>
-                <a href="{{ url_for('nodes') }}" class="btn btn-outline-primary btn-sm">View All</a>
-            </div>
-            <div class="card-body">
-                <div id="nodesOverview" class="text-center text-muted">
-                    <small>Loading...</small>
-                </div>
-            </div>
-        </div>
-        {% endif %}
     </div>
     
-    <div class="col-md-9">
-        <!-- Current Profile Banner -->
-        <div id="currentProfileBanner" class="card mb-3 border-primary" style="display: none;">
+    <!-- Main chat area -->
+    <div class="col-12 col-md-8 col-lg-9">
+        <!-- Current Profile Banner - Mobile Compact -->
+        <div id="currentProfileBanner" class="card mb-2 border-primary" style="display: none;">
             <div class="card-body bg-light py-2">
-                <div class="row align-items-center">
-                    <div class="col-md-9">
-                        <div class="d-flex flex-wrap align-items-center">
-                            <strong class="text-primary me-3" id="bannerProfileName">No Profile Selected</strong>
-                            <div class="d-flex flex-wrap gap-2 small text-muted">
-                                <span>Node: <code class="bg-white px-1 rounded" id="bannerNodeId">-</code></span>
-                                <span>•</span>
-                                <span>Channel: <strong id="bannerChannel">-</strong></span>
-                                <span>•</span>
-                                <span>Key: <code class="bg-white px-1 rounded" id="bannerKey">-</code></span>
+                <!-- Mobile compact layout -->
+                <div class="d-md-none">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <strong class="text-primary" id="bannerProfileName">No Profile Selected</strong>
+                        <span id="bannerInterfaceStatus" class="badge bg-warning">Not Connected</span>
+                    </div>
+                    <div class="small text-muted">
+                        <span id="bannerChannel">-</span> • <span id="bannerNodeId">-</span> • <span id="bannerKey">-</span>
+                    </div>
+                </div>
+                
+                <!-- Desktop layout -->
+                <div class="d-none d-md-block">
+                    <div class="row align-items-center">
+                        <div class="col-md-9">
+                            <div class="d-flex flex-wrap align-items-center">
+                                <strong class="text-primary me-3" id="bannerProfileNameDesktop">No Profile Selected</strong>
+                                <div class="d-flex flex-wrap gap-2 small text-muted">
+                                    <span>Node: <code class="bg-white px-1 rounded" id="bannerNodeIdDesktop">-</code></span>
+                                    <span>•</span>
+                                    <span>Channel: <strong id="bannerChannelDesktop">-</strong></span>
+                                    <span>•</span>
+                                    <span>Key: <code class="bg-white px-1 rounded" id="bannerKeyDesktop">-</code></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 text-end">
+                            <div class="d-flex align-items-center justify-content-end">
+                                <small class="text-muted me-2">Status:</small>
+                                <span id="bannerInterfaceStatusDesktop" class="badge bg-warning">Not Connected</span>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-3 text-end">
-                        <div class="d-flex align-items-center justify-content-end">
-                            <small class="text-muted me-2">Status:</small>
-                            <span id="bannerInterfaceStatus" class="badge bg-warning">Not Connected</span>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
         
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                    <h5 class="mb-0 me-2">Chat Messages</h5>
-                    <span id="unreadBadge" class="badge bg-primary" style="display: none;">0 unread</span>
-                </div>
-                <button id="clearMessagesBtn" class="btn btn-outline-danger btn-sm">Clear Messages</button>
-            </div>
-            <div class="card-body">
-                <div id="messagesContainer" class="mb-3" style="height: 400px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.25rem; padding: 10px;">
+        <div class="card" style="overflow: hidden;">
+            <div class="card-body p-0 d-flex flex-column" style="height: calc(100vh - 250px);">
+                <div id="messagesContainer" class="flex-grow-1 p-3" style="overflow-y: auto; overflow-x: hidden; min-height: 200px;">
                     <!-- Messages will be populated here -->
                 </div>
                 
-                <div class="input-group">
-                    <input type="text" id="messageInput" class="form-control" placeholder="Type your message..." maxlength="1000">
-                    <button id="sendBtn" class="btn btn-primary" type="button">Send</button>
+                <div class="p-3" style="border-top: 1px solid var(--bs-border-color-translucent);">
+                    <div class="input-group mb-2">
+                        <textarea id="messageInput" class="form-control" placeholder="Type your message..." maxlength="220" rows="2" style="resize: none;"></textarea>
+                        <button id="sendBtn" class="btn btn-primary" type="button">Send</button>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="form-text">Press Enter to send, Shift+Enter for new line.</div>
+                        <small class="text-muted" id="charCount">0/220</small>
+                    </div>
                 </div>
-                <div class="form-text">Press Enter to send. Maximum 1000 characters.</div>
             </div>
         </div>
     </div>
@@ -111,20 +128,231 @@
 <div class="mt-4">
     <div class="card">
         <div class="card-header">
-            <h6>Instructions</h6>
+            <h6 class="mb-0">
+                <button class="btn btn-link p-0 text-decoration-none collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#instructionsCollapse" aria-expanded="false" aria-controls="instructionsCollapse">
+                    <i class="fas fa-chevron-right me-1" id="instructionsIcon"></i> Instructions
+                </button>
+            </h6>
         </div>
-        <div class="card-body">
-            <ul class="mb-0">
-                <li>Select or create a profile to start chatting</li>
-                <li>Messages are broadcast via UDP to the local network on port 4403</li>
-                <li>Anyone running this app on the same network can receive and send messages</li>
-            </ul>
+        <div class="collapse" id="instructionsCollapse">
+            <div class="card-body">
+                <ul class="mb-0">
+                    <li>Select or create a profile to start chatting</li>
+                    <li>Messages are broadcast via UDP to the local network on port 4403</li>
+                    <li>Anyone running this app on the same network can receive and send messages</li>
+                    <li><strong>Mobile tip:</strong> Rotate your device to landscape for better chat experience</li>
+                </ul>
+            </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
+<style>
+/* Message text wrapping and overflow prevention */
+#messagesContainer {
+    overflow-x: hidden !important;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+}
+
+.message {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.message .flex-grow-1 {
+    min-width: 0; /* Allows flex item to shrink below content size */
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.message .mt-1 {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap; /* Preserve line breaks but allow wrapping */
+    overflow-wrap: anywhere; /* Break anywhere if needed */
+    hyphens: auto;
+    max-width: 100%;
+}
+
+/* Handle long URLs and unbreakable content */
+.message .mt-1 {
+    /* Force break on very long words/URLs */
+    word-break: break-all;
+    overflow-wrap: anywhere;
+}
+
+/* Ensure sender info doesn't cause overflow */
+.message strong,
+.message small {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+/* Handle URLs, links, and long strings specifically */
+.message a,
+.message code,
+.message pre {
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    max-width: 100%;
+}
+
+/* Handle Discord/Slack message URLs and long identifiers */
+.message .mt-1:contains('http'),
+.message .mt-1:contains('discord.com'),
+.message .mt-1:contains('://') {
+    word-break: break-all;
+    overflow-wrap: anywhere;
+}
+
+/* Fallback for any remaining overflow issues */
+.d-flex.justify-content-between.align-items-start {
+    min-width: 0;
+    width: 100%;
+}
+
+.d-flex.justify-content-between.align-items-start > * {
+    min-width: 0;
+}
+
+/* Message input textarea styling */
+#messageInput {
+    resize: none;
+    transition: height 0.2s ease;
+    line-height: 1.4;
+    font-family: inherit;
+}
+
+/* Character count styling */
+#charCount {
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+/* Chat layout improvements */
+.card-body.d-flex.flex-column {
+    height: calc(100vh - 250px);
+    min-height: 350px;
+}
+
+#messagesContainer {
+    background: inherit;
+    border: none;
+    border-radius: 0;
+}
+
+/* Remove default margins that might cause issues */
+.card-body.p-0 {
+    padding: 0 !important;
+}
+
+/* Ensure no unwanted borders in messages area */
+#messagesContainer {
+    border-top: none !important;
+    border-bottom: none !important;
+}
+
+/* Mobile compact profile controls */
+@media (max-width: 767.98px) {
+    .container {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+    
+    /* Compact profile banner on mobile */
+    #currentProfileBanner .card-body {
+        padding: 0.5rem !important;
+    }
+    
+    #currentProfileBanner {
+        margin-bottom: 0.5rem !important;
+    }
+    
+    /* Mobile chat container - leave space for text entry */
+    .card-body.d-flex.flex-column {
+        height: calc(100vh - 200px) !important;
+        min-height: 200px !important;
+    }
+    
+    .card {
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Extra aggressive text wrapping on mobile */
+    .message .mt-1 {
+        word-break: break-word;
+        overflow-wrap: anywhere;
+        line-break: anywhere;
+    }
+    
+    /* Compact mobile profile controls */
+    .d-flex.gap-2.align-items-center {
+        gap: 0.5rem !important;
+    }
+    
+    /* Make buttons more compact */
+    .btn-sm {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.775rem;
+    }
+    
+    /* Message input area styling - more compact on mobile */
+    #messageInput {
+        max-height: 60px;
+        min-height: 34px;
+        line-height: 1.2;
+        font-size: 0.9rem;
+    }
+    
+    /* Compact input group on mobile */
+    .input-group .btn {
+        padding: 0.375rem 0.75rem;
+    }
+    
+    /* Reduce padding in input area */
+    .card-body > div:last-child {
+        padding: 0.75rem !important;
+    }
+    
+    .input-group.mb-2 {
+        margin-bottom: 0.5rem !important;
+    }
+}
+
+/* Extra small screens - make buttons even more compact */
+@media (max-width: 375px) {
+    .d-md-none .btn-sm {
+        padding: 0.2rem 0.4rem;
+        font-size: 0.7rem;
+    }
+    
+    .d-md-none .form-select-sm {
+        font-size: 0.775rem;
+    }
+    
+    .d-md-none .gap-2 {
+        gap: 0.25rem !important;
+    }
+}
+
+/* Ensure notifications are visible on mobile */
+@media (max-width: 576px) {
+    .alert.position-fixed {
+        top: 10px !important;
+        right: 10px !important;
+        left: 10px !important;
+        max-width: none !important;
+    }
+}
+</style>
 <script>
 // Chat-specific JavaScript
 console.log('[page] index.js inline loaded');
@@ -159,22 +387,58 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Set up event listeners first so the UI is interactive immediately
     document.getElementById('setProfileBtn').addEventListener('click', setProfile);
+    const desktopBtn = document.getElementById('setProfileBtnDesktop');
+    if (desktopBtn) {
+        desktopBtn.addEventListener('click', setProfile);
+    }
     document.getElementById('sendBtn').addEventListener('click', sendMessage);
-    document.getElementById('messageInput').addEventListener('keydown', function(e) {
+    const messageInput = document.getElementById('messageInput');
+    
+    // Handle Enter/Shift+Enter key combinations
+    messageInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
-            e.preventDefault();
-            sendMessage();
+            if (e.shiftKey) {
+                // Shift+Enter: Allow newline (default behavior)
+                return;
+            } else {
+                // Enter alone: Send message
+                e.preventDefault();
+                sendMessage();
+            }
         }
     });
-    document.getElementById('clearMessagesBtn').addEventListener('click', clearMessages);
+    
+    // Character counting
+    messageInput.addEventListener('input', function() {
+        const charCount = document.getElementById('charCount');
+        const currentLength = this.value.length;
+        charCount.textContent = `${currentLength}/220`;
+        
+        // Change color when approaching limit
+        if (currentLength > 200) {
+            charCount.className = 'text-warning';
+        } else if (currentLength === 220) {
+            charCount.className = 'text-danger';
+        } else {
+            charCount.className = 'text-muted';
+        }
+    });
+    
+    // Handle instructions collapse icon rotation
+    const instructionsCollapse = document.getElementById('instructionsCollapse');
+    const instructionsIcon = document.getElementById('instructionsIcon');
+    if (instructionsCollapse && instructionsIcon) {
+        instructionsCollapse.addEventListener('show.bs.collapse', function() {
+            instructionsIcon.className = 'fas fa-chevron-down me-1';
+        });
+        instructionsCollapse.addEventListener('hide.bs.collapse', function() {
+            instructionsIcon.className = 'fas fa-chevron-right me-1';
+        });
+    }
 
     // Now load existing messages (non-blocking)
     loadMessages();
     
-    // Load nodes overview if profile is set
-    if ({{ 'true' if current_profile else 'false' }}) {
-        loadNodesOverview();
-    }
 });
 
 function initializeSocket() {
@@ -211,8 +475,6 @@ function initializeSocket() {
 
     socket.on('new_message', function(message) {
         addMessageToUI(message);
-        // Clear unread badge since user is actively viewing messages
-        updateUnreadBadge(0);
     });
     
     // Handle profile switch notifications
@@ -243,10 +505,6 @@ function initializeSocket() {
             showNodeNotification(`Node updated: ${data.long_name} - ${data.changes.length} change(s)`, 'info');
         }
         
-        // Refresh nodes overview
-        if (currentProfile) {
-            loadNodesOverview();
-        }
     });
 }
 
@@ -256,7 +514,11 @@ function loadCurrentProfile() {
         .then(profile => {
             currentProfile = profile;
             if (profile) {
-                document.getElementById('profileSelect').value = profile.id;
+                // Sync both mobile and desktop selectors
+                const mobileSelect = document.getElementById('profileSelect');
+                const desktopSelect = document.getElementById('profileSelectDesktop');
+                if (mobileSelect) mobileSelect.value = profile.id;
+                if (desktopSelect) desktopSelect.value = profile.id;
             }
             // Update banner with profile info (status will sync from sidebar)
             updateProfileBanner(profile);
@@ -275,8 +537,10 @@ function loadInterfaceStatus() {
                 
                 if (interfaceStatus === 'started') {
                     updateInterfaceStatus('bg-success', 'Connected');
-                } else if (interfaceStatus === 'stopped' || interfaceStatus === 'failed') {
+                } else if (interfaceStatus === 'failed') {
                     updateInterfaceStatus('bg-danger', 'Failed to Start');
+                } else if (interfaceStatus === 'stopped') {
+                    updateInterfaceStatus('bg-secondary', 'Stopped');
                 } else {
                     updateInterfaceStatus('bg-warning', 'Not Started');
                 }
@@ -322,32 +586,59 @@ function updateInterfaceStatus(status, statusText) {
 
 function updateProfileBanner(profile) {
     const banner = document.getElementById('currentProfileBanner');
+    
+    // Mobile elements
     const profileName = document.getElementById('bannerProfileName');
     const nodeId = document.getElementById('bannerNodeId');
     const channel = document.getElementById('bannerChannel');
     const key = document.getElementById('bannerKey');
     const interfaceStatus = document.getElementById('bannerInterfaceStatus');
     
+    // Desktop elements
+    const profileNameDesktop = document.getElementById('bannerProfileNameDesktop');
+    const nodeIdDesktop = document.getElementById('bannerNodeIdDesktop');
+    const channelDesktop = document.getElementById('bannerChannelDesktop');
+    const keyDesktop = document.getElementById('bannerKeyDesktop');
+    const interfaceStatusDesktop = document.getElementById('bannerInterfaceStatusDesktop');
+    
     if (profile) {
         // Show and populate banner
         banner.style.display = 'block';
-        profileName.textContent = profile.long_name || 'Unknown Profile';
-        nodeId.textContent = profile.node_id || 'Unknown';
-        channel.textContent = profile.channel || 'Unknown';
+        
+        const profileLongName = profile.long_name || 'Unknown Profile';
+        const profileNodeId = profile.node_id || 'Unknown';
+        const profileChannel = profile.channel || 'Unknown';
         
         // Show truncated key for security
         const profileKey = profile.key || '';
-        if (profileKey.length > 8) {
-            key.textContent = profileKey.substring(0, 8) + '...';
-        } else {
-            key.textContent = profileKey || 'No Key';
-        }
+        const truncatedKey = profileKey.length > 8 ? profileKey.substring(0, 8) + '...' : (profileKey || 'No Key');
         
-        // Sync banner interface status with sidebar status (don't override existing status)
+        // Update mobile elements
+        if (profileName) profileName.textContent = profileLongName;
+        if (nodeId) nodeId.textContent = profileNodeId;
+        if (channel) channel.textContent = profileChannel;
+        if (key) key.textContent = truncatedKey;
+        
+        // Update desktop elements
+        if (profileNameDesktop) profileNameDesktop.textContent = profileLongName;
+        if (nodeIdDesktop) nodeIdDesktop.textContent = profileNodeId;
+        if (channelDesktop) channelDesktop.textContent = profileChannel;
+        if (keyDesktop) keyDesktop.textContent = truncatedKey;
+        
+        // Sync interface status with sidebar status
         const sidebarInterfaceStatus = document.getElementById('interfaceStatus');
         if (sidebarInterfaceStatus && sidebarInterfaceStatus.textContent) {
-            interfaceStatus.className = sidebarInterfaceStatus.className;
-            interfaceStatus.textContent = sidebarInterfaceStatus.textContent;
+            const statusClass = sidebarInterfaceStatus.className;
+            const statusText = sidebarInterfaceStatus.textContent;
+            
+            if (interfaceStatus) {
+                interfaceStatus.className = statusClass;
+                interfaceStatus.textContent = statusText;
+            }
+            if (interfaceStatusDesktop) {
+                interfaceStatusDesktop.className = statusClass;
+                interfaceStatusDesktop.textContent = statusText;
+            }
         }
         
         console.log('[BANNER] Updated with profile:', profile.long_name);
@@ -407,8 +698,6 @@ function loadMessages() {
             container.innerHTML = '';
             (list || []).forEach(addMessageToUI);
             
-            // Clear unread badge when messages are loaded/viewed
-            updateUnreadBadge(0);
         })
         .catch(err => {
             console.error('Error loading messages:', err);
@@ -416,9 +705,33 @@ function loadMessages() {
         });
 }
 
-function setProfile() {
-    const profileId = document.getElementById('profileSelect').value;
-    const setBtn = document.getElementById('setProfileBtn');
+function setProfile(event) {
+    // Determine which button was clicked
+    const clickedButton = event ? event.target : null;
+    const isDesktopButton = clickedButton && clickedButton.id === 'setProfileBtnDesktop';
+    
+    // Get profile ID from the appropriate selector
+    let profileId = '';
+    let setBtn = null;
+    
+    if (isDesktopButton) {
+        // Desktop button clicked - use desktop selector
+        const desktopSelect = document.getElementById('profileSelectDesktop');
+        profileId = desktopSelect ? desktopSelect.value : '';
+        setBtn = document.getElementById('setProfileBtnDesktop');
+    } else {
+        // Mobile button clicked or fallback - use mobile selector
+        const mobileSelect = document.getElementById('profileSelect');
+        profileId = mobileSelect ? mobileSelect.value : '';
+        setBtn = document.getElementById('setProfileBtn');
+    }
+    
+    if (!setBtn) {
+        console.error('[PROFILE] No set button found');
+        return;
+    }
+    
+    console.log('[PROFILE] Using', isDesktopButton ? 'desktop' : 'mobile', 'selector with value:', profileId);
     
     // Show loading state
     setBtn.disabled = true;
@@ -462,7 +775,10 @@ function setProfile() {
             updateProfileBanner(currentProfile);
             
             // Clear and reload messages with profile-specific messages
-            clearMessagesDisplay();
+            const container = document.getElementById('messagesContainer');
+            if (container) {
+                container.innerHTML = '';
+            }
             if (currentProfile && data.messages && Array.isArray(data.messages)) {
                 console.log(`[PROFILE] Loading ${data.messages.length} messages for profile: ${currentProfile.long_name}`);
                 data.messages.forEach(addMessageToUI);
@@ -481,20 +797,12 @@ function setProfile() {
                 if (data.warning) {
                     alert('Warning: ' + data.warning);
                 }
+            } else if (data.interface_status === 'stopped') {
+                updateInterfaceStatus('bg-secondary', 'Stopped');
             } else {
                 updateInterfaceStatus('bg-warning', 'Not Started');
             }
             
-            // Update nodes overview based on profile selection
-            if (currentProfile) {
-                loadNodesOverview();
-            } else {
-                // Clear nodes overview when no profile selected
-                const nodesContainer = document.getElementById('nodesOverview');
-                if (nodesContainer) {
-                    nodesContainer.innerHTML = '<small class="text-muted">No profile selected</small>';
-                }
-            }
             
             // Show profile switch notification with unread message count
             console.log('[NOTIFICATION] Debug: currentProfile =', currentProfile);
@@ -503,8 +811,6 @@ function setProfile() {
             
             if (currentProfile && data.unread_count !== undefined) {
                 console.log('[NOTIFICATION] Showing notification with unread count:', data.unread_count);
-                // Update unread badge
-                updateUnreadBadge(data.unread_count);
                 
                 if (data.unread_count > 0) {
                     console.log('[NOTIFICATION] Showing success notification for', data.unread_count, 'unread messages');
@@ -523,8 +829,6 @@ function setProfile() {
                 }
             } else {
                 console.log('[NOTIFICATION] NOT showing notification - condition failed');
-                // Clear unread badge if no profile or no unread count
-                updateUnreadBadge(0);
             }
             
             console.log('[PROFILE] ✅ Profile set successfully!');
@@ -563,9 +867,15 @@ function setProfile() {
             });
     })
     .finally(() => {
-        // Reset button state
-        setBtn.disabled = false;
-        setBtn.textContent = 'Set Profile';
+        // Reset the specific button that was used
+        if (setBtn) {
+            setBtn.disabled = false;
+            if (setBtn.id === 'setProfileBtnDesktop') {
+                setBtn.textContent = 'Set Profile';
+            } else {
+                setBtn.textContent = 'Set';
+            }
+        }
     });
 }
 
@@ -575,6 +885,13 @@ async function sendMessage() {
     const message = messageInput.value.trim();
     if (!message) return;
     if (!currentProfile) { alert('Please select a profile first'); return; }
+    
+    // Check message length
+    if (message.length > 220) {
+        alert('Message is too long. Maximum 220 characters allowed.');
+        return;
+    }
+    
     btn.disabled = true;
     try {
         const response = await fetch('/api/send-message', {
@@ -585,6 +902,13 @@ async function sendMessage() {
         const data = await response.json().catch(() => ({ error: 'Invalid JSON response' }));
         if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
         messageInput.value = '';
+        
+        // Reset character counter
+        const charCount = document.getElementById('charCount');
+        if (charCount) {
+            charCount.textContent = '0/220';
+            charCount.className = 'text-muted';
+        }
     } catch (err) {
         console.error('Error sending message:', err);
         alert('Error sending message: ' + err.message);
@@ -599,8 +923,50 @@ function addMessageToUI(message) {
     const messageEl = document.createElement('div');
     messageEl.className = 'message mb-2 p-2 border-bottom';
     
-    const ts = message && message.timestamp ? new Date(message.timestamp) : new Date();
-    const timestamp = isNaN(ts.getTime()) ? '' : ts.toLocaleTimeString();
+    // Handle timestamp - ensure UTC timestamps are properly converted to local time
+    let timestamp = '';
+    if (message && message.timestamp) {
+        try {
+            let ts;
+            const rawTimestamp = message.timestamp;
+            
+            // Convert to Date object based on different possible formats
+            if (typeof rawTimestamp === 'number') {
+                // Unix timestamp (milliseconds or seconds)
+                ts = rawTimestamp > 1e10 ? new Date(rawTimestamp) : new Date(rawTimestamp * 1000);
+            } else if (typeof rawTimestamp === 'string') {
+                // String timestamp - multiple formats possible
+                const tsString = rawTimestamp.trim();
+                
+                if (tsString.includes('T') && (tsString.includes('Z') || tsString.includes('+') || tsString.includes('-'))) {
+                    // ISO 8601 with timezone info
+                    ts = new Date(tsString);
+                } else if (tsString.includes('T')) {
+                    // ISO format without timezone - assume UTC
+                    ts = new Date(tsString + 'Z');
+                } else if (tsString.match(/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/)) {
+                    // SQL datetime format "YYYY-MM-DD HH:MM:SS" - assume UTC
+                    ts = new Date(tsString.replace(' ', 'T') + 'Z');
+                } else {
+                    // Try parsing as-is and assume UTC if no timezone
+                    ts = new Date(tsString);
+                    if (isNaN(ts.getTime())) {
+                        // If that fails, try adding Z
+                        ts = new Date(tsString + 'Z');
+                    }
+                }
+            } else {
+                // Fallback for other types
+                ts = new Date(rawTimestamp);
+            }
+            
+            if (!isNaN(ts.getTime())) {
+                timestamp = ts.toLocaleTimeString([], {hour12: true, hour: 'numeric', minute: '2-digit'});
+            }
+        } catch (e) {
+            console.warn('[TIMESTAMP] Error parsing timestamp:', message.timestamp, e);
+        }
+    }
     const isOwnMessage = message.sender_ip === 'self';
     
     messageEl.innerHTML = `
@@ -609,7 +975,7 @@ function addMessageToUI(message) {
                 <strong class="${isOwnMessage ? 'text-primary' : 'text-info'}">${escapeHtml(message.sender_display)}</strong>
                 <small class="text-muted">(${escapeHtml(message.sender)})</small>
                 ${isOwnMessage ? '<span class="badge bg-primary ms-1">You</span>' : ''}
-                <div class="mt-1">${escapeHtml(message.content)}</div>
+                <div class="mt-1">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div>
             </div>
             <small class="text-muted">${timestamp}</small>
         </div>
@@ -619,83 +985,6 @@ function addMessageToUI(message) {
     container.scrollTop = container.scrollHeight;
 }
 
-function clearMessages() {
-    if (confirm('Are you sure you want to clear all messages? This only clears the display, not the server history.')) {
-        clearMessagesDisplay();
-    }
-}
-
-function clearMessagesDisplay() {
-    const container = document.getElementById('messagesContainer');
-    if (container) {
-        container.innerHTML = '';
-        console.log('[MESSAGES] Display cleared');
-    }
-}
-
-function loadNodesOverview() {
-    const container = document.getElementById('nodesOverview');
-    if (!container) return;
-    
-    fetch('/api/nodes')
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                container.innerHTML = '<small class="text-danger">Error loading nodes</small>';
-                return;
-            }
-            
-            const nodes = data.nodes || [];
-            if (nodes.length === 0) {
-                container.innerHTML = '<small class="text-muted">No nodes seen yet</small>';
-                return;
-            }
-            
-            const recentNodes = nodes.slice(0, 3); // Show only first 3 nodes
-            let html = `<div class="text-start"><strong>${nodes.length}</strong> nodes seen</div>`;
-            
-            recentNodes.forEach(node => {
-                const name = node.long_name || node.short_name || node.node_id || `Node ${node.node_num}`;
-                const shortName = node.short_name || '?';
-                const timeAgo = getTimeAgo(node.last_seen);
-                html += `
-                    <div class="mt-1 p-1 bg-light rounded small">
-                        <div class="d-flex justify-content-between">
-                            <span><strong>${escapeHtml(name)}</strong> (${escapeHtml(shortName)})</span>
-                            <small class="text-muted">${timeAgo}</small>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            if (nodes.length > 3) {
-                html += `<div class="mt-2 text-center"><small class="text-muted">+${nodes.length - 3} more nodes</small></div>`;
-            }
-            
-            container.innerHTML = html;
-        })
-        .catch(error => {
-            console.error('Error loading nodes overview:', error);
-            container.innerHTML = '<small class="text-danger">Error loading nodes</small>';
-        });
-}
-
-function getTimeAgo(dateStr) {
-    if (!dateStr) return 'Unknown';
-    try {
-        const date = new Date(dateStr);
-        const now = new Date();
-        const diffMs = now - date;
-        const diffMins = Math.floor(diffMs / 60000);
-        
-        if (diffMins < 1) return 'Just now';
-        if (diffMins < 60) return `${diffMins}m ago`;
-        if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
-        return `${Math.floor(diffMins / 1440)}d ago`;
-    } catch (e) {
-        return 'Unknown';
-    }
-}
 
 function showNodeNotification(message, type = 'info') {
     // Create a temporary notification element
@@ -737,24 +1026,6 @@ function showNotification(message, type = 'info', duration = 4000) {
             notification.remove();
         }
     }, duration);
-}
-
-function updateUnreadBadge(count) {
-    const badge = document.getElementById('unreadBadge');
-    
-    if (!badge) {
-        console.error('[BADGE] Badge element not found!');
-        return;
-    }
-    
-    if (count > 0) {
-        badge.style.display = 'inline';
-        badge.textContent = `${count} unread`;
-        badge.className = 'badge bg-primary';
-    } else {
-        badge.style.display = 'none';
-    }
-    console.log('[BADGE] Unread count updated:', count);
 }
 
 function escapeHtml(unsafe) {

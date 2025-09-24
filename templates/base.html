@@ -311,6 +311,50 @@
             border-bottom: 2px solid var(--mudp-primary) !important;
         }
         
+        /* Mobile hamburger menu styling */
+        .navbar-toggler {
+            border: none !important;
+            padding: 0.25rem 0.5rem;
+            font-size: 1.2rem;
+        }
+        
+        .navbar-toggler:focus {
+            box-shadow: none !important;
+            outline: none !important;
+        }
+        
+        /* Dark theme hamburger icon */
+        [data-bs-theme="dark"] .navbar-toggler-icon {
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%28255, 255, 255, 0.85%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e") !important;
+        }
+        
+        /* Light theme hamburger icon */
+        [data-bs-theme="light"] .navbar-toggler-icon {
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%2831, 41, 55, 0.85%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e") !important;
+        }
+        
+        /* Mobile nav links spacing */
+        @media (max-width: 991.98px) {
+            .navbar-nav .nav-link {
+                padding: 0.75rem 1rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            
+            [data-bs-theme="light"] .navbar-nav .nav-link {
+                border-bottom: 1px solid rgba(31, 41, 55, 0.1);
+            }
+            
+            .navbar-nav .nav-link:last-child {
+                border-bottom: none;
+            }
+            
+            /* Theme toggle in mobile menu */
+            .navbar-nav .btn {
+                margin: 0.5rem 1rem;
+                align-self: flex-start;
+            }
+        }
+        
         /* Dark theme navbar */
         [data-bs-theme="dark"] .navbar {
             background: #0a0f1a !important;
@@ -321,6 +365,11 @@
             color: #ffffff !important;
         }
         
+        [data-bs-theme="dark"] .navbar .nav-link.active {
+            color: var(--mudp-primary) !important;
+            font-weight: 600;
+        }
+        
         /* Light theme navbar */
         [data-bs-theme="light"] .navbar {
             background: #ffffff !important;
@@ -329,6 +378,11 @@
         [data-bs-theme="light"] .navbar-brand,
         [data-bs-theme="light"] .navbar .nav-link {
             color: #1f2937 !important;
+        }
+        
+        [data-bs-theme="light"] .navbar .nav-link.active {
+            color: var(--mudp-primary-hover) !important;
+            font-weight: 600;
         }
         
         .navbar-brand {
@@ -451,15 +505,24 @@
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('index') }}">MUDP Chat</a>
-            <div class="navbar-nav">
-                <a class="nav-link" href="{{ url_for('index') }}">Chat</a>
-                <a class="nav-link" href="{{ url_for('nodes') }}">Nodes</a>
-                <a class="nav-link" href="{{ url_for('profiles') }}">Profiles</a>
-            </div>
-            <div class="navbar-nav ms-auto">
-                <button class="btn btn-outline-light btn-sm" id="themeToggle" title="Toggle Dark/Light Mode">
-                    <span id="themeIcon">🌞</span>
-                </button>
+            
+            <!-- Hamburger menu button -->
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <!-- Collapsible navbar content -->
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <div class="navbar-nav me-auto">
+                    <a class="nav-link {{ 'active' if request.endpoint == 'index' else '' }}" href="{{ url_for('index') }}">Chat</a>
+                    <a class="nav-link {{ 'active' if request.endpoint == 'nodes' else '' }}" href="{{ url_for('nodes') }}">Nodes</a>
+                    <a class="nav-link {{ 'active' if request.endpoint == 'profiles' else '' }}" href="{{ url_for('profiles') }}">Profiles</a>
+                </div>
+                <div class="navbar-nav ms-auto">
+                    <button class="btn btn-outline-light btn-sm" id="themeToggle" title="Toggle Dark/Light Mode">
+                        <span id="themeIcon">🌞</span>
+                    </button>
+                </div>
             </div>
         </div>
     </nav>
@@ -533,6 +596,29 @@
               
               console.log('[THEME] Successfully switched to', theme, 'mode');
           }
+      });
+      
+      // Auto-collapse mobile navbar when nav link is clicked
+      document.addEventListener('DOMContentLoaded', function() {
+          const navbarCollapse = document.getElementById('navbarNav');
+          const navLinks = document.querySelectorAll('.navbar-nav .nav-link');
+          
+          navLinks.forEach(function(navLink) {
+              navLink.addEventListener('click', function() {
+                  // Only collapse on mobile (when navbar-toggler is visible)
+                  const navbarToggler = document.querySelector('.navbar-toggler');
+                  if (navbarToggler && window.getComputedStyle(navbarToggler).display !== 'none') {
+                      // Check if navbar is expanded
+                      if (navbarCollapse && navbarCollapse.classList.contains('show')) {
+                          // Use Bootstrap's collapse method
+                          const bsCollapse = new bootstrap.Collapse(navbarCollapse, {
+                              toggle: false
+                          });
+                          bsCollapse.hide();
+                      }
+                  }
+              });
+          });
       });
     </script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

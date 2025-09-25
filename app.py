@@ -30,8 +30,17 @@ messages = []
 _DEDUP_CACHE = set()
 _DEDUP_QUEUE = deque(maxlen=500)
 
-# Initialize database
-db = Database()
+# Initialize database with environment variable path for Docker persistence
+db_path = os.getenv('FIREFLY_DATABASE_FILE', 'firefly.db')
+print(f"[DATABASE] Initializing database at: {db_path}")
+
+# Ensure database directory exists
+db_dir = os.path.dirname(db_path)
+if db_dir and not os.path.exists(db_dir):
+    os.makedirs(db_dir, exist_ok=True)
+    print(f"[DATABASE] Created database directory: {db_dir}")
+
+db = Database(db_path)
 
 # Map WebSocket session IDs to Flask session IDs for cleanup
 websocket_to_flask_sessions = {}

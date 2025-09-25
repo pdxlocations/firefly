@@ -33,6 +33,9 @@ _DEDUP_QUEUE = deque(maxlen=500)
 # Initialize database
 db = Database()
 
+# Map WebSocket session IDs to Flask session IDs for cleanup
+websocket_to_flask_sessions = {}
+
 
 def _get_session_profile():
     """Get the current profile from session storage"""
@@ -571,7 +574,7 @@ class UDPChatServer:
         self.running = False
         self.current_profile_id = None
         self.current_channel_hash = None
-        self.active_sessions = set()  # Track sessions using this interface
+        self.active_sessions = {}  # Maps session_id -> {profile_id, channel_hash, timestamp}
 
     def start(self, profile=None):
         """Start the mudp interface receiver with profile-specific key"""
@@ -604,15 +607,67 @@ class UDPChatServer:
         self.running = False
         self.current_profile_id = None
         self.current_channel_hash = None
+        self.active_sessions.clear()
         try:
             if interface:
                 interface.stop()
                 print("[UDP] Interface stopped")
         except Exception as e:
             print(f"[UDP] Error stopping interface: {e}")
+    
+    def register_session(self, session_id, profile_id, channel_hash):
+        """Register a session as using this UDP interface"""
+        import time
+        self.active_sessions[session_id] = {
+            "profile_id": profile_id,
+            "channel_hash": channel_hash,
+            "timestamp": time.time()
+        }
+        print(f"[UDP] Registered session {session_id} for profile {profile_id} on channel {channel_hash}")
+        print(f"[UDP] Active sessions: {len(self.active_sessions)}")
+    
+    def unregister_session(self, session_id):
+        """Unregister a session from using this UDP interface"""
+        if session_id in self.active_sessions:
+            session_info = self.active_sessions.pop(session_id)
+            print(f"[UDP] Unregistered session {session_id} (was using channel {session_info['channel_hash']})")
+            print(f"[UDP] Active sessions remaining: {len(self.active_sessions)}")
+            
+            # If no more sessions are active, stop the interface
+            if not self.active_sessions and self.running:
+                print("[UDP] No active sessions remaining, stopping interface")
+                self.stop()
+        else:
+            print(f"[UDP] Warning: Attempted to unregister unknown session {session_id}")
+    
+    def get_sessions_for_channel(self, channel_hash):
+        """Get all active sessions using a specific channel"""
+        sessions = []
+        for session_id, session_info in self.active_sessions.items():
+            if session_info["channel_hash"] == channel_hash:
+                sessions.append(session_id)
+        return sessions
+    
+    def can_switch_to_channel(self, new_channel_hash):
+        """Check if we can safely switch to a new channel"""
+        if not self.running:
+            # No interface running, can start with any channel
+            return True
+            
+        if self.current_channel_hash == new_channel_hash:
+            # Already on this channel
+            return True
+            
+        # Check if any other sessions are using the current channel
+        current_channel_sessions = self.get_sessions_for_channel(self.current_channel_hash)
+        if len(current_channel_sessions) <= 1:  # Only the requesting session (or none)
+            return True
+            
+        print(f"[UDP] Cannot switch channels: {len(current_channel_sessions)} sessions active on channel {self.current_channel_hash}")
+        return False
 
-    def restart_with_profile(self, profile):
-        """Start or reuse interface for a profile - supports multiple sessions on same channel"""
+    def restart_with_profile(self, profile, session_id=None):
+        """Start or reuse interface for a profile with session-aware channel switching"""
         if not profile:
             return False
             
@@ -623,14 +678,13 @@ class UDPChatServer:
         if self.running and self.current_channel_hash == channel_hash:
             print(f"[UDP] Reusing existing interface for channel {channel_hash} (profile: {profile.get('long_name', 'unknown')})")
             return True
-            
-        # If interface is running for a DIFFERENT channel, cannot switch (other users would be affected)
-        if self.running and self.current_channel_hash != channel_hash:
-            print(f"[UDP] Cannot switch to different channel - would affect other users")
-            print(f"[UDP] Current channel: {self.current_channel_hash}, Requested: {channel_hash}")
+        
+        # Check if we can safely switch to the new channel
+        if not self.can_switch_to_channel(channel_hash):
+            print(f"[UDP] Cannot switch to channel {channel_hash} - other sessions are active on current channel {self.current_channel_hash}")
             return False
             
-        # Start new interface for this channel
+        # Safe to switch - start interface for this channel
         print(f"[UDP] Starting interface for profile {profile.get('long_name', 'unknown')} on channel {channel_hash}")
         self.current_channel_hash = channel_hash
         return self.start(profile)
@@ -877,10 +931,15 @@ def set_current_profile():
     profile_id = data.get("profile_id")
 
     if not profile_id:
-        # Unset profile and stop interface
+        # Unset profile and unregister session
+        old_profile = _get_session_profile()
+        if old_profile:
+            # Use a consistent session identifier
+            session_id = f"flask_session_{id(session)}"
+            udp_server.unregister_session(session_id)
+        
         _clear_session_profile()
-        udp_server.stop()
-        print("[PROFILE] Profile unset, interface stopped")
+        print("[PROFILE] Profile unset, session unregistered")
         return jsonify(
             {"message": "Profile unset", "profile": None, "messages": []}  # Clear messages when no profile selected
         )
@@ -889,15 +948,24 @@ def set_current_profile():
     print(f"[API] set_current_profile -> requested id={profile_id} exists={bool(profile)}")
 
     if profile:
+        # Unregister any previous profile for this session
+        old_profile = _get_session_profile()
+        session_id = f"flask_session_{id(session)}"
+        if old_profile:
+            udp_server.unregister_session(session_id)
+        
         # Set current profile in session
         _set_session_profile(profile)
         current_profile = profile
 
         print(f"[PROFILE] Loaded profile {profile.get('long_name', 'unknown')} for this session")
 
+        # Calculate channel hash for session registration
+        channel_hash = generate_hash(profile.get("channel", ""), profile.get("key", ""))
+        
         # Restart UDP interface with new profile key
         print(f"[PROFILE] Restarting interface with key from profile {profile.get('long_name', 'unknown')}")
-        interface_started = udp_server.restart_with_profile(profile)
+        interface_started = udp_server.restart_with_profile(profile, session_id)
 
         # Get messages for the newly selected profile's channel
         expected_channel = _current_profile_channel_num()
@@ -934,7 +1002,9 @@ def set_current_profile():
             print(f"[PROFILE] Profile switched - user is caught up on messages")
 
         if interface_started:
-            print(f"[PROFILE] Interface successfully started with profile key")
+            # Register this session with the UDP server
+            udp_server.register_session(session_id, profile.get("id"), channel_hash)
+            print(f"[PROFILE] Interface successfully started with profile key and session registered")
 
             # Send nodeinfo packet to announce our presence to the mesh (asynchronously)
             def send_nodeinfo_delayed():
@@ -1140,7 +1210,15 @@ def add_no_cache_headers(response):
 @socketio.on("connect")
 def handle_connect():
     """Handle WebSocket connection"""
-    print("Client connected")
+    print(f"Client connected with WebSocket session ID: {request.sid}")
+    
+    # Get current profile to establish session mapping if one exists
+    current_profile = _get_session_profile()
+    if current_profile:
+        flask_session_id = f"flask_session_{id(session)}"
+        websocket_to_flask_sessions[request.sid] = flask_session_id
+        print(f"[WEBSOCKET] Mapped WebSocket session {request.sid} to Flask session {flask_session_id}")
+    
     emit("status", {"msg": "Connected to chat server"})
 
 
@@ -1172,7 +1250,18 @@ def handle_leave_channel(data):
 @socketio.on("disconnect")
 def handle_disconnect():
     """Handle WebSocket disconnection"""
-    print("Client disconnected")
+    print(f"Client disconnected: {request.sid}")
+    
+    # Find the Flask session ID for this WebSocket session and unregister
+    flask_session_id = websocket_to_flask_sessions.pop(request.sid, None)
+    if flask_session_id:
+        try:
+            udp_server.unregister_session(flask_session_id)
+            print(f"[WEBSOCKET] Flask session {flask_session_id} unregistered from UDP server on WebSocket disconnect")
+        except Exception as e:
+            print(f"[WEBSOCKET] Error unregistering Flask session {flask_session_id}: {e}")
+    else:
+        print(f"[WEBSOCKET] No Flask session mapping found for WebSocket session {request.sid}")
 
 
 if __name__ == "__main__":

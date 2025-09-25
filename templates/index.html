@@ -538,6 +538,8 @@ function loadCurrentProfileAndStatus() {
                     updateInterfaceStatus('bg-success', 'Connected');
                 } else if (interfaceStatus === 'failed') {
                     updateInterfaceStatus('bg-danger', 'Failed to Start');
+                } else if (interfaceStatus === 'conflict') {
+                    updateInterfaceStatus('bg-warning', 'Channel Conflict');
                 } else if (interfaceStatus === 'stopped') {
                     updateInterfaceStatus('bg-secondary', 'Stopped');
                 } else {
@@ -826,6 +828,31 @@ function setProfile(event) {
                 updateInterfaceStatus('bg-danger', 'Failed to Start');
                 if (data.warning) {
                     alert('Warning: ' + data.warning);
+                }
+            } else if (data.interface_status === 'conflict') {
+                updateInterfaceStatus('bg-warning', 'Channel Conflict');
+                if (data.warning) {
+                    // Show a more helpful notification with retry option
+                    const conflictMsg = `Channel Conflict: ${data.warning}\n\nClick 'Retry in 30s' to automatically retry switching to this profile, or 'Cancel' to stay on current profile.`;
+                    if (confirm(conflictMsg)) {
+                        showNotification(
+                            'Will retry switching profiles in 30 seconds...',
+                            'info',
+                            30000
+                        );
+                        // Retry the profile switch after 30 seconds
+                        setTimeout(() => {
+                            console.log('[PROFILE] Retrying profile switch after timeout...');
+                            setProfile({ target: setBtn }); // Retry the same profile switch
+                        }, 30000);
+                    } else {
+                        // User cancelled, show brief notification
+                        showNotification(
+                            'Profile switch cancelled due to channel conflict.',
+                            'warning',
+                            5000
+                        );
+                    }
                 }
             } else if (data.interface_status === 'stopped') {
                 updateInterfaceStatus('bg-secondary', 'Stopped');

@@ -96,9 +96,18 @@ The easiest way to run Firefly is using Docker:
 #### Native Python Method
 
 1. **Run the application**
+   
+   **Option A: With automatic virtual environment handling**
+   ```bash
+   python start_with_venv.py
+   ```
+   This script automatically activates your virtual environment and starts the application.
+   
+   **Option B: Manual start**
    ```bash
    python start.py
    ```
+   
    You can also run app.py directly for testing, but start.py is the recommended entry point.
 
 2. **Open your web browser**

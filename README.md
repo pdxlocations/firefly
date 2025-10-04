@@ -97,9 +97,9 @@ The easiest way to run Firefly is using Docker:
 
 1. **Run the application**
    ```bash
-   python run.py
+   python start.py
    ```
-   You can also run app.py directly for testing, but run.py is the recommended entry point.
+   You can also run app.py directly for testing, but start.py is the recommended entry point.
 
 2. **Open your web browser**
    - Navigate to `http://localhost:5011`

@@ -64,6 +64,9 @@
                                         <button class="btn btn-outline-primary btn-sm edit-profile-btn" data-profile-id="{{ profile_id }}">
                                             Edit
                                         </button>
+                                        <button class="btn btn-outline-primary btn-sm copy-profile-btn" data-profile-id="{{ profile_id }}">
+                                            Copy
+                                        </button>
                                         <button class="btn btn-outline-danger btn-sm delete-profile-btn" data-profile-id="{{ profile_id }}">
                                             Delete
                                         </button>
@@ -163,6 +166,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Delegate edit and delete buttons robustly (use closest)
     document.getElementById('profilesList')?.addEventListener('click', function(e) {
         const editBtn = e.target.closest('.edit-profile-btn');
+        const copyBtn = e.target.closest('.copy-profile-btn');
         const delBtn = e.target.closest('.delete-profile-btn');
         if (editBtn) {
             openEditModal(editBtn.getAttribute('data-profile-id'));
@@ -170,6 +174,26 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (delBtn) {
             deleteProfile(delBtn.getAttribute('data-profile-id'));
+            return;
+        }
+        if (copyBtn) {
+            const profileId = copyBtn.getAttribute('data-profile-id');
+            fetch(`/api/profiles/${profileId}/copy`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    alert('Profile copied successfully!');
+                    location.reload(); // Reload to show the new copied profile
+                }
+            })
+            .catch(error => {
+                console.error('Error copying profile:', error);
+                alert('Error copying profile');
+            });
             return;
         }
     });

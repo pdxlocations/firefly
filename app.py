@@ -540,7 +540,23 @@ class ProfileManager:
     def delete_profile(self, profile_id):
         """Delete a profile"""
         return self.db.delete_profile(profile_id)
-
+    
+    def copy_profile(self, profile_id):
+        """Copy an existing profile to a new one with long name appended with (Copy)"""
+        profile = self.get_profile(profile_id)
+        if not profile:
+            return None
+        new_profile_id = str(uuid.uuid4())
+        new_long_name = f"{profile.get('long_name', 'Profile')} (Copy)"
+        return self.create_profile(
+            profile_id=new_profile_id,
+            node_id=profile.get("node_id", ""),
+            long_name=new_long_name,
+            short_name=profile.get("short_name", ""),
+            channel=profile.get("channel", ""),
+            key=profile.get("key", ""),
+            hop_limit=profile.get("hop_limit", 3)
+        )
 
 def create_interface_for_profile(profile):
     """Create a new MUDP interface with the profile's key"""
@@ -906,7 +922,18 @@ def delete_profile(profile_id):
         return jsonify({"message": "Profile deleted successfully"})
     else:
         return jsonify({"error": "Profile not found"}), 404
-
+    
+@app.route("/api/profiles/<profile_id>/copy", methods=["POST"])
+def post_copy_profile(profile_id):
+    """Copy an existing profile to a new one with channel name appended with '_copy'"""
+    try:
+        new_profile = profile_manager.copy_profile(profile_id)
+        if new_profile:
+            return jsonify({"message": "Profile copied successfully"}), 201
+        else:
+            return jsonify({"error": "Failed to copy profile"}), 500
+    except Exception as e:
+        return jsonify({"error": f"Failed to copy profile: {e}"}), 500
 
 @app.route("/api/current-profile", methods=["GET"])
 def get_current_profile():

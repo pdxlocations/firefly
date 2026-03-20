@@ -3,7 +3,7 @@
 from collections import deque
 
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, has_request_context
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import uuid
 import os
@@ -55,21 +55,29 @@ websocket_to_flask_sessions = {}
 
 def _get_session_profile():
     """Get the current profile from session storage"""
+    if not has_request_context():
+        return None
     return session.get("current_profile")
 
 
 def _set_session_profile(profile):
     """Set the current profile in session storage"""
+    if not has_request_context():
+        return
     session["current_profile"] = profile
 
 
 def _clear_session_profile():
     """Clear the current profile from session storage"""
+    if not has_request_context():
+        return
     session.pop("current_profile", None)
     session.pop("current_channel_index", None)
 
 
 def _get_session_channel_index():
+    if not has_request_context():
+        return 0
     try:
         return int(session.get("current_channel_index", 0))
     except (TypeError, ValueError):
@@ -77,6 +85,8 @@ def _get_session_channel_index():
 
 
 def _set_session_channel_index(channel_index):
+    if not has_request_context():
+        return
     try:
         session["current_channel_index"] = max(0, int(channel_index))
     except (TypeError, ValueError):
@@ -107,6 +117,13 @@ def _selected_channel_index(profile=None):
     channels = _profile_channels(profile or _get_session_profile())
     if not channels:
         return 0
+    if profile is not None:
+        try:
+            selected_index = int(profile.get("selected_channel_index", 0) or 0)
+        except (AttributeError, TypeError, ValueError):
+            selected_index = 0
+        if "selected_channel_index" in profile or not has_request_context():
+            return min(max(selected_index, 0), len(channels) - 1)
     return min(_get_session_channel_index(), len(channels) - 1)
 
 
@@ -125,7 +142,10 @@ def _effective_profile(profile=None, channel_index=None):
     channels = _profile_channels(profile)
     effective["channels"] = channels
     if channels:
-        selected_index = _selected_channel_index(profile) if channel_index is None else max(0, min(int(channel_index), len(channels) - 1))
+        if channel_index is None:
+            selected_index = _selected_channel_index(profile)
+        else:
+            selected_index = max(0, min(int(channel_index), len(channels) - 1))
         selected = channels[selected_index]
         effective["channel"] = selected["name"]
         effective["key"] = selected["key"]

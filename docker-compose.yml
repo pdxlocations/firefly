@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   firefly:
     # Use pre-built image by default, override with 'build: .' for development
@@ -11,27 +9,26 @@ services:
     
     # NETWORKING OPTIONS:
     # Option 1 (Default): Bridge network with port mapping - works on all platforms
-    # ports:
-    #   - "${FIREFLY_WEB_PORT:-5011}:5011"
-    #   - "${FIREFLY_UDP_PORT:-4403}:4403/udp"
-    # networks:
-    #   - firefly-network
+    ports:
+      - "${FIREFLY_WEB_PORT:-5011}:${FIREFLY_PORT:-5011}"
+      - "${FIREFLY_UDP_PORT:-4403}:${FIREFLY_UDP_PORT:-4403}/udp"
+    networks:
+      - firefly-network
     
     # Option 2: Uncomment for host networking (Linux only, better UDP multicast)
-    network_mode: host
+    # network_mode: host
     # Note: When using host networking, comment out the 'ports' and 'networks' sections above
     environment:
-      - FIREFLY_HOST=0.0.0.0
-      - FIREFLY_PORT=5011
-      - FIREFLY_DATABASE_FILE=/app/data/mudpchat.db
-      - FIREFLY_NAME=${FIREFLY_NAME:-Firefly}
+      - FIREFLY_HOST=${FIREFLY_HOST:-0.0.0.0}
+      - FIREFLY_PORT=${FIREFLY_PORT:-5011}
+      - FIREFLY_WEB_PORT=${FIREFLY_WEB_PORT:-5011}
+      - FIREFLY_DATABASE_FILE=${FIREFLY_DATABASE_FILE:-/app/data/mudpchat.db}
       - FIREFLY_SECRET_KEY=${FIREFLY_SECRET_KEY:-dev-secret-key-change-in-production}
       - FIREFLY_DEBUG=${FIREFLY_DEBUG:-false}
-      # UDP Configuration for Meshtastic communication
-      - FIREFLY_UDP_HOST=${FIREFLY_UDP_HOST:-0.0.0.0}
       - FIREFLY_UDP_PORT=${FIREFLY_UDP_PORT:-4403}
-      # Network mode indicator for IP detection
-      - NETWORK_MODE=host
+      # Keep this in sync with the networking option above so startup logs show the right URL.
+      - NETWORK_MODE=bridge
+      # - NETWORK_MODE=host
     volumes:
       - firefly_data:/app/data
       # Optional: mount your own config or profiles (uncomment if you have them)

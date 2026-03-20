@@ -18,11 +18,12 @@ from encryption import generate_hash
 from mesh_runtime import MeshNodeStore, VirtualNodeManager, count_nodes_for_profiles
 
 
-MCAST_GRP = "224.0.0.69"
-MCAST_PORT = 4403
+MCAST_GRP = os.getenv("FIREFLY_MCAST_GRP", "224.0.0.69")
+MCAST_PORT = int(os.getenv("FIREFLY_UDP_PORT", "4403"))
 PROFILES_FILE = "profiles.json"
 SOCKETIO_CLIENT_VERSION = "4.7.5"
 BROADCAST_NODE_NUM = 0xFFFFFFFF
+DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
 
 # Note: current_profile is now stored per-session in session['current_profile']
 messages = []
@@ -497,7 +498,7 @@ pub.subscribe(on_nodeinfo, "mesh.rx.port.4")  # NODEINFO_APP
 
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "your-secret-key-here"
+app.config["SECRET_KEY"] = os.getenv("FIREFLY_SECRET_KEY", DEFAULT_SECRET_KEY)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", logger=True, engineio_logger=True)
 
 

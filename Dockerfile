@@ -6,6 +6,9 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV FIREFLY_HOST=0.0.0.0
 ENV FIREFLY_PORT=5011
+ENV FIREFLY_DATABASE_FILE=/app/data/mudpchat.db
+ENV FIREFLY_SECRET_KEY=dev-secret-key-change-in-production
+ENV FIREFLY_UDP_PORT=4403
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \

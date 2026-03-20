@@ -25,41 +25,17 @@ This guide will help you run Firefly using Docker and Docker Compose, based on t
    - Edit `docker-compose.yml`
    - Comment out the `ports:` and `networks:` sections
    - Uncomment `network_mode: host`
+   - Switch `NETWORK_MODE=bridge` to `NETWORK_MODE=host`
    - Run: `docker-compose up --build`
 
 4. **Access the application**:
-   - The startup logs will display the correct IP address to access
-   - Look for: `🌐 Web interface: http://[IP_ADDRESS]:5011`
-   - Firefly automatically detects your host machine's IP when running in Docker
+   - Default bridge mode: `http://localhost:5011`
+   - Linux host networking: `http://YOUR_IP:5011`
    - The application will be ready to use!
 
-## IP Address Detection
-
-**New Feature**: Firefly automatically detects your host machine's IP address when running in Docker containers.
-
-### How it Works
-- **Docker Detection**: Automatically detects when running inside a container
-- **Host IP Discovery**: Uses multiple methods to find the host machine's IP:
-  - Network routing table analysis
-  - Socket connection testing
-  - Docker bridge network inspection
-- **Network Mode Aware**: Handles both host networking and bridge networking
-- **Fallback Protection**: Falls back to `localhost` if detection fails
-
-### Startup Messages
-When starting Firefly in Docker, you'll see:
-```
-🐳 Docker container detected, finding host IP address...
-   Using host networking mode
-   Found host IP: 192.168.1.100
-🌐 Web interface: http://192.168.1.100:5011
-```
-
-### Testing IP Detection
-You can test the IP detection independently:
-```bash
-docker-compose exec firefly python3 test_ip_detection.py
-```
+Startup messages now reflect the Compose networking mode:
+- `bridge`: Firefly prints a `localhost` URL using `FIREFLY_WEB_PORT`
+- `host`: Firefly prints a host IP URL using `FIREFLY_PORT`
 
 ## Configuration
 
@@ -72,7 +48,10 @@ cp .env.example .env
 ```
 
 Key variables:
-- `FIREFLY_WEB_PORT`: Web interface port (default: 5011)
+- `FIREFLY_HOST`: Flask bind address inside the container (default: `0.0.0.0`)
+- `FIREFLY_PORT`: Application port inside the container (default: `5011`)
+- `FIREFLY_WEB_PORT`: Published host port in `docker-compose.yml` (default: `5011`)
+- `FIREFLY_DATABASE_FILE`: SQLite database path (default: `/app/data/mudpchat.db`)
 - `FIREFLY_SECRET_KEY`: Flask secret key (change in production!)
 - `FIREFLY_UDP_PORT`: UDP port for Meshtastic communication (default: 4403)
 - `FIREFLY_DEBUG`: Enable debug mode (default: false)
@@ -118,8 +97,8 @@ Firefly communicates with Meshtastic devices via UDP multicast. This can be chal
 ```bash
 docker-compose up --build
 ```
-- Uses custom bridge network
-- Maps UDP port 4403 to host
+- Uses the `firefly-network` bridge network
+- Maps the published web port and UDP port from `.env`
 - Works on all platforms
 - May have multicast limitations
 
@@ -128,7 +107,8 @@ docker-compose up --build
 Edit `docker-compose.yml` to enable host networking:
 1. Comment out the `ports:` and `networks:` sections
 2. Uncomment `network_mode: host`
-3. Run: `docker-compose up --build`
+3. Change `NETWORK_MODE=bridge` to `NETWORK_MODE=host`
+4. Run: `docker-compose up --build`
 
 Benefits:
 - Uses host networking directly
@@ -188,7 +168,8 @@ docker-compose down
 # Edit docker-compose.yml to enable host networking:
 # 1. Comment out 'ports:' and 'networks:' sections
 # 2. Uncomment 'network_mode: host'
-# 3. Restart
+# 3. Change 'NETWORK_MODE=bridge' to 'NETWORK_MODE=host'
+# 4. Restart
 docker-compose up --build
 ```
 

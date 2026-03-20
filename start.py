@@ -17,6 +17,14 @@ REQUIRED_RUNTIME_MODULES = ("meshdb", "vnode")
 _SHUTDOWN_IN_PROGRESS = False
 
 
+def running_in_container():
+    return os.path.exists('/.dockerenv') or os.environ.get('container')
+
+
+def get_network_mode():
+    return os.environ.get('NETWORK_MODE', '').strip().lower()
+
+
 def _missing_runtime_modules():
     missing = []
     for module_name in REQUIRED_RUNTIME_MODULES:
@@ -39,11 +47,11 @@ def get_host_ip():
     """Get the host machine's IP address, especially useful in Docker containers"""
     try:
         # Check if we're running in a Docker container
-        if os.path.exists('/.dockerenv') or os.environ.get('container'):
+        if running_in_container():
             print("🐳 Docker container detected, finding host IP address...")
             
             # Check network mode from docker-compose or environment
-            network_mode = os.environ.get('NETWORK_MODE', '')
+            network_mode = get_network_mode()
             is_host_network = (network_mode == 'host' or 
                              os.environ.get('DOCKER_HOST_NETWORK') == 'true')
             
@@ -122,6 +130,20 @@ def get_host_ip():
     return 'localhost'
 
 
+def get_display_host_and_port():
+    app_host = os.getenv('FIREFLY_HOST', '0.0.0.0')
+    app_port = int(os.getenv('FIREFLY_PORT', 5011))
+
+    if running_in_container():
+        if get_network_mode() == 'host':
+            display_host = get_host_ip() if app_host == '0.0.0.0' else app_host
+            return display_host, app_port
+        return 'localhost', int(os.getenv('FIREFLY_WEB_PORT', app_port))
+
+    display_host = get_host_ip() if app_host == '0.0.0.0' else app_host
+    return display_host, app_port
+
+
 def print_banner():
     print("🔥 Firefly - Meshtastic Web Chat")
     print("=" * 50)
@@ -152,10 +174,8 @@ def show_features():
     print("• Per-Profile History - Each profile maintains its own node list and messages")
     print("• Detailed Node Info - Hardware models, roles, signal strength, and more")
     print("• Real-time Updates - WebSocket notifications for new nodes and messages")
-    # Get port from environment for display
-    display_port = int(os.getenv('FIREFLY_PORT', 5011))
-    host_ip = get_host_ip()
-    print(f"• Web Interface - Browse to http://{host_ip}:{display_port} after startup")
+    display_host, display_port = get_display_host_and_port()
+    print(f"• Web Interface - Browse to http://{display_host}:{display_port} after startup")
     print("")
     print("📋 PAGES AVAILABLE:")
     print("• Chat - Send/receive messages with node overview")
@@ -201,12 +221,9 @@ def main():
         # Show features
         show_features()
 
-        print(f"\n🗄️  Database: firefly.db")
-        print(f"🔧 Test script: python3 test_database.py")
-        # Get port and host IP for display
-        display_port = int(os.getenv('FIREFLY_PORT', 5011))
-        host_ip = get_host_ip()
-        print(f"🌐 Web interface: http://{host_ip}:{display_port}")
+        print(f"\n🗄️  Database: {os.getenv('FIREFLY_DATABASE_FILE', 'firefly.db')}")
+        display_host, display_port = get_display_host_and_port()
+        print(f"🌐 Web interface: http://{display_host}:{display_port}")
         print("\n" + "=" * 50)
         print("Starting Flask application...")
         print("=" * 50)
@@ -222,9 +239,8 @@ def main():
         host = os.getenv('FIREFLY_HOST', '0.0.0.0')
         debug = os.getenv('FIREFLY_DEBUG', 'false').lower() == 'true'
         
-        # Get the host IP for display (but still bind to the configured host)
-        display_ip = get_host_ip() if host == '0.0.0.0' else host
-        print(f"🌐 Starting Flask server on http://{display_ip}:{port}")
+        display_host, display_port = get_display_host_and_port()
+        print(f"🌐 Starting Flask server on http://{display_host}:{display_port}")
 
         socketio.run(
             app,

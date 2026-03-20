@@ -424,28 +424,6 @@
             border-bottom: 1px solid rgba(79, 142, 203, 0.35) !important;
         }
         
-        /* Mobile hamburger menu styling */
-        .navbar-toggler {
-            border: none !important;
-            padding: 0.25rem 0.5rem;
-            font-size: 1.2rem;
-        }
-        
-        .navbar-toggler:focus {
-            box-shadow: none !important;
-            outline: none !important;
-        }
-        
-        /* Dark theme hamburger icon */
-        [data-bs-theme="dark"] .navbar-toggler-icon {
-            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%28255, 255, 255, 0.85%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e") !important;
-        }
-        
-        /* Light theme hamburger icon */
-        [data-bs-theme="light"] .navbar-toggler-icon {
-            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%2831, 41, 55, 0.85%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e") !important;
-        }
-        
         /* Mobile nav links spacing */
         @media (max-width: 991.98px) {
             .navbar-nav .nav-link {
@@ -622,24 +600,11 @@
                 <img id="logo-light" src="{{ url_for('static', filename='images/firefly-logo-light.png') }}" alt="Firefly" height="32" class="me-2">
                 Firefly
             </a>
-            
-            <!-- Hamburger menu button -->
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            
-            <!-- Collapsible navbar content -->
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <div class="navbar-nav me-auto d-lg-none">
-                    <a class="nav-link {{ 'active' if request.endpoint == 'index' else '' }}" href="{{ url_for('index') }}">Chat</a>
-                    <a class="nav-link {{ 'active' if request.endpoint == 'nodes' else '' }}" href="{{ url_for('nodes') }}">Nodes</a>
-                    <a class="nav-link {{ 'active' if request.endpoint == 'profiles' else '' }}" href="{{ url_for('profiles') }}">Profiles</a>
-                </div>
-                <div class="navbar-nav ms-auto">
-                    <button class="btn btn-outline-light btn-sm" id="themeToggle" title="Toggle Dark/Light Mode">
-                        <span id="themeIcon">☀️</span>
-                    </button>
-                </div>
+
+            <div class="navbar-nav ms-auto">
+                <button class="btn btn-outline-light btn-sm" id="themeToggle" title="Toggle Dark/Light Mode">
+                    <span id="themeIcon">☀️</span>
+                </button>
             </div>
         </div>
     </nav>
@@ -730,29 +695,6 @@
           }
       });
       
-      // Auto-collapse mobile navbar when nav link is clicked
-      document.addEventListener('DOMContentLoaded', function() {
-          const navbarCollapse = document.getElementById('navbarNav');
-          const navLinks = document.querySelectorAll('.navbar-nav .nav-link');
-          
-          navLinks.forEach(function(navLink) {
-              navLink.addEventListener('click', function() {
-                  // Only collapse on mobile (when navbar-toggler is visible)
-                  const navbarToggler = document.querySelector('.navbar-toggler');
-                  if (navbarToggler && window.getComputedStyle(navbarToggler).display !== 'none') {
-                      // Check if navbar is expanded
-                      if (navbarCollapse && navbarCollapse.classList.contains('show')) {
-                          // Use Bootstrap's collapse method
-                          const bsCollapse = new bootstrap.Collapse(navbarCollapse, {
-                              toggle: false
-                          });
-                          bsCollapse.hide();
-                      }
-                  }
-              });
-          });
-      });
-
       document.addEventListener('DOMContentLoaded', function() {
           const desktopMediaQuery = window.matchMedia('(min-width: 768px)');
 

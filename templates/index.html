@@ -262,6 +262,44 @@
     overflow: hidden;
 }
 
+.message__meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-left: 0.75rem;
+}
+
+.message-ack {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    color: var(--bs-secondary-color);
+}
+
+.message-ack svg {
+    width: 100%;
+    height: 100%;
+}
+
+.message-ack--pending {
+    color: var(--bs-secondary-color);
+}
+
+.message-ack--ack {
+    color: #198754;
+}
+
+.message-ack--implicit_ack {
+    color: #0d6efd;
+}
+
+.message-ack--nak,
+.message-ack--max_retransmit {
+    color: #dc3545;
+}
+
 .message .flex-grow-1 {
     min-width: 0; /* Allows flex item to shrink below content size */
     word-wrap: break-word;
@@ -429,6 +467,24 @@
     border-color: var(--firefly-chat-accent);
     box-shadow: 0 14px 28px rgba(31, 93, 150, 0.12);
     transform: translateY(-1px);
+}
+
+.thread-card__shell {
+    cursor: pointer;
+}
+
+.thread-card__content {
+    min-width: 0;
+}
+
+.thread-card__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.thread-card__delete {
+    flex-shrink: 0;
 }
 
 .node-list {
@@ -1097,6 +1153,10 @@ function initializeSocket() {
     socket.on('new_message', function(message) {
         addIncomingMessage(message);
     });
+
+    socket.on('message_update', function(message) {
+        applyMessageUpdate(message);
+    });
 }
 
 async function loadCurrentProfileAndStatus() {
@@ -1295,19 +1355,43 @@ async function loadDmTargets() {
     syncDmTargetsFromMessages();
 }
 
-function syncDmTargetsFromMessages() {
-    const targetMap = new Map(dmTargets.map(node => [Number(node.node_num), node]));
-    dmMessages.forEach(message => {
-        const peerNodeNum = getPeerNodeNum(message);
-        if (!peerNodeNum || targetMap.has(peerNodeNum)) return;
-        targetMap.set(peerNodeNum, {
-            node_num: peerNodeNum,
-            node_id: message.sender_num === peerNodeNum ? message.sender : message.target,
-            label: getPeerLabel(message, peerNodeNum),
-            short_name: '',
+function upsertDmTarget(target) {
+    if (!target || target.node_num === null || target.node_num === undefined) return;
+
+    const normalizedNodeNum = Number(target.node_num);
+    const existingIndex = dmTargets.findIndex(node => Number(node.node_num) === normalizedNodeNum);
+    if (existingIndex >= 0) {
+        dmTargets[existingIndex] = {
+            ...dmTargets[existingIndex],
+            ...target,
+            node_num: normalizedNodeNum,
+        };
+    } else {
+        dmTargets.push({
+            ...target,
+            node_num: normalizedNodeNum,
         });
+    }
+}
+
+function createDmTargetFromMessage(message, peerNodeNum = getPeerNodeNum(message)) {
+    if (!peerNodeNum) return null;
+
+    const normalizedNodeNum = Number(peerNodeNum);
+    return {
+        node_num: normalizedNodeNum,
+        node_id: message.sender_num === normalizedNodeNum ? message.sender : message.target,
+        label: getPeerLabel(message, normalizedNodeNum),
+        short_name: '',
+    };
+}
+
+function syncDmTargetsFromMessages() {
+    dmMessages.forEach(message => {
+        const fallbackTarget = createDmTargetFromMessage(message);
+        if (fallbackTarget) upsertDmTarget(fallbackTarget);
     });
-    dmTargets = Array.from(targetMap.values()).sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    dmTargets = dmTargets.sort((a, b) => (a.label || a.node_id || '').localeCompare(b.label || b.node_id || ''));
 }
 
 async function applyPendingChatContext() {
@@ -1562,24 +1646,64 @@ function renderChannelThreadList(container) {
 function renderChannelThreadCardHtml(channel, index) {
     const keyPreview = truncateText(channel.key || '', 18);
     return `
-        <button class="dm-thread-card channel-thread-card" type="button" data-channel-index="${Number(index)}">
+        <div class="dm-thread-card channel-thread-card thread-card__shell" role="button" tabindex="0" data-channel-index="${Number(index)}">
             <div class="d-flex justify-content-between align-items-start gap-3">
-                <div class="flex-grow-1 text-start">
+                <div class="flex-grow-1 text-start thread-card__content">
                     <div class="fw-semibold text-primary">${escapeHtml(channel.name || `Channel ${index + 1}`)}</div>
                     <div class="small text-muted mt-1">${escapeHtml(keyPreview ? `Key ${keyPreview}` : 'Configured channel')}</div>
                 </div>
-                <div class="small text-muted text-nowrap">Tap to open</div>
+                <div class="thread-card__actions">
+                    <div class="small text-muted text-nowrap">Tap to open</div>
+                    <button
+                        class="btn btn-sm btn-outline-danger thread-card__delete"
+                        type="button"
+                        data-delete-channel-index="${Number(index)}"
+                    >
+                        Delete
+                    </button>
+                </div>
             </div>
-        </button>
+        </div>
     `;
 }
 
 function handleThreadCardClick(event) {
+    const deleteChannelTrigger = event.target.closest('[data-delete-channel-index]');
+    if (deleteChannelTrigger) {
+        event.preventDefault();
+        event.stopPropagation();
+        const channelIndex = Number(deleteChannelTrigger.dataset.deleteChannelIndex);
+        if (Number.isInteger(channelIndex)) {
+            void deleteChannelThread(channelIndex);
+        }
+        return;
+    }
+
+    const deleteDmTrigger = event.target.closest('[data-delete-dm-node-num]');
+    if (deleteDmTrigger) {
+        event.preventDefault();
+        event.stopPropagation();
+        const nodeNum = Number(deleteDmTrigger.dataset.deleteDmNodeNum);
+        if (Number.isInteger(nodeNum)) {
+            void deleteDmThread(nodeNum);
+        }
+        return;
+    }
+
     const channelCard = event.target.closest('.channel-thread-card');
     if (channelCard) {
         const channelIndex = Number(channelCard.dataset.channelIndex);
         if (Number.isInteger(channelIndex)) {
             void setActiveChannel(channelIndex);
+        }
+        return;
+    }
+
+    const dmThreadCard = event.target.closest('.dm-thread-card[data-dm-node-num]');
+    if (dmThreadCard) {
+        const nodeNum = Number(dmThreadCard.dataset.dmNodeNum);
+        if (Number.isInteger(nodeNum)) {
+            setActiveDmTarget(nodeNum);
         }
         return;
     }
@@ -1684,15 +1808,35 @@ function getFilteredNodes() {
 }
 
 function getDmThreads() {
-    return dmTargets
-        .map(target => {
-            const threadMessages = dmMessages.filter(message => Number(getPeerNodeNum(message)) === Number(target.node_num));
-            const latestMessage = threadMessages.length ? threadMessages[threadMessages.length - 1] : null;
-            return {
-                target,
-                latestMessage,
-            };
-        })
+    const threadMap = new Map();
+
+    dmTargets.forEach(target => {
+        threadMap.set(Number(target.node_num), {
+            target,
+            latestMessage: null,
+        });
+    });
+
+    dmMessages.forEach(message => {
+        const peerNodeNum = getPeerNodeNum(message);
+        if (!peerNodeNum) return;
+
+        const normalizedNodeNum = Number(peerNodeNum);
+        const existing = threadMap.get(normalizedNodeNum);
+        const fallbackTarget = existing?.target || createDmTargetFromMessage(message, normalizedNodeNum);
+        const currentLatest = existing?.latestMessage || null;
+        const nextLatest = !currentLatest || getMessageSortTimestamp(message) >= getMessageSortTimestamp(currentLatest)
+            ? message
+            : currentLatest;
+
+        threadMap.set(normalizedNodeNum, {
+            target: fallbackTarget,
+            latestMessage: nextLatest,
+        });
+    });
+
+    return Array.from(threadMap.values())
+        .filter(thread => thread.target)
         .sort((a, b) => {
             const aTime = getMessageSortTimestamp(a.latestMessage);
             const bTime = getMessageSortTimestamp(b.latestMessage);
@@ -1707,15 +1851,24 @@ function renderDmThreadCardHtml(thread) {
     const timestamp = latestMessage ? formatTimestamp(latestMessage.timestamp) : '';
 
     return `
-        <button class="dm-thread-card" type="button" onclick="setActiveDmTarget(${Number(target.node_num)})">
+        <div class="dm-thread-card thread-card__shell" role="button" tabindex="0" data-dm-node-num="${Number(target.node_num)}">
             <div class="d-flex justify-content-between align-items-start gap-3">
-                <div class="flex-grow-1 text-start">
+                <div class="flex-grow-1 text-start thread-card__content">
                     <div class="fw-semibold text-primary">${escapeHtml(target.label || target.node_id || 'Unknown')}</div>
                     <div class="small text-muted mt-1">${escapeHtml(preview)}</div>
                 </div>
-                <div class="small text-muted text-nowrap">${escapeHtml(timestamp)}</div>
+                <div class="thread-card__actions">
+                    <div class="small text-muted text-nowrap">${escapeHtml(timestamp)}</div>
+                    <button
+                        class="btn btn-sm btn-outline-danger thread-card__delete"
+                        type="button"
+                        data-delete-dm-node-num="${Number(target.node_num)}"
+                    >
+                        Delete
+                    </button>
+                </div>
             </div>
-        </button>
+        </div>
     `;
 }
 
@@ -1775,6 +1928,7 @@ function renderMessageHtml(message) {
     const isOwnMessage = currentProfile && message.sender === currentProfile.node_id;
     const timestamp = formatTimestamp(message.timestamp);
     const dmBadge = message.message_type === 'dm' ? '<span class="badge bg-secondary ms-1">DM</span>' : '';
+    const ackBadge = renderAckStatusHtml(message);
     const replyPreview = renderReplyPreview(message);
     const replyButton = message.packet_id ? `<button class="reply-trigger text-decoration-none text-muted" type="button" onclick="startReply(${message.packet_id})">Reply</button>` : '';
 
@@ -1790,16 +1944,32 @@ function renderMessageHtml(message) {
                     <div class="mt-1">${escapeHtml(message.content || '').replace(/\n/g, '<br>')}</div>
                     <div class="mt-2">${replyButton}</div>
                 </div>
-                <small class="text-muted">${timestamp}</small>
+                <div class="message__meta">
+                    ${ackBadge}
+                    <small class="text-muted">${timestamp}</small>
+                </div>
             </div>
         </div>
     `;
+}
+
+function applyMessageUpdate(message) {
+    const messageType = message.message_type || 'channel';
+    if (messageType === 'dm') {
+        upsertMessage(dmMessages, message);
+    } else {
+        upsertMessage(channelMessages, message);
+    }
+    renderActiveMessages();
+    updateComposerState();
 }
 
 function addIncomingMessage(message) {
     const messageType = message.message_type || 'channel';
     if (messageType === 'dm') {
         upsertMessage(dmMessages, message);
+        const fallbackTarget = createDmTargetFromMessage(message);
+        if (fallbackTarget) upsertDmTarget(fallbackTarget);
         syncDmTargetsFromMessages();
         void loadDmTargets();
     } else {
@@ -1807,6 +1977,59 @@ function addIncomingMessage(message) {
     }
     renderActiveMessages();
     updateComposerState();
+}
+
+async function deleteChannelThread(channelIndex) {
+    const channels = getProfileChannels();
+    const channel = channels[Number(channelIndex)];
+    const label = channel?.name || `Channel ${Number(channelIndex) + 1}`;
+    if (!confirm(`Delete all messages for ${label}?`)) return;
+
+    try {
+        const response = await fetch('/api/threads/channel', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel_index: Number(channelIndex) })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+        if (Number(activeChannelIndex) === Number(channelIndex)) {
+            channelMessages = [];
+        }
+        renderActiveMessages();
+        updateComposerState();
+    } catch (error) {
+        console.error('Error deleting channel thread:', error);
+        alert('Error deleting channel thread: ' + error.message);
+    }
+}
+
+async function deleteDmThread(nodeNum) {
+    const target = dmTargets.find(item => Number(item.node_num) === Number(nodeNum));
+    const label = target?.label || target?.node_id || `!${Number(nodeNum).toString(16).padStart(8, '0')}`;
+    if (!confirm(`Delete the DM thread with ${label}?`)) return;
+
+    try {
+        const response = await fetch('/api/threads/dm', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ peer_node_num: Number(nodeNum) })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+        dmMessages = dmMessages.filter(message => Number(getPeerNodeNum(message)) !== Number(nodeNum));
+        dmTargets = dmTargets.filter(item => Number(item.node_num) !== Number(nodeNum));
+        if (Number(activeDmTargetNodeNum) === Number(nodeNum)) {
+            setActiveDmTarget(null);
+        }
+        renderActiveMessages();
+        updateComposerState();
+    } catch (error) {
+        console.error('Error deleting DM thread:', error);
+        alert('Error deleting DM thread: ' + error.message);
+    }
 }
 
 function upsertMessage(list, message) {
@@ -1998,6 +2221,83 @@ function getMessageByPacketId(packetId) {
     return source.find(message => Number(message.packet_id) === Number(packetId)) || null;
 }
 
+function formatAckReason(reason) {
+    if (!reason) return '';
+    return String(reason)
+        .toLowerCase()
+        .split('_')
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+function getAckStatusMeta(message) {
+    if (!message || message.direction !== 'sent' || !message.ack_requested) {
+        return null;
+    }
+
+    switch (message.ack_status || 'pending') {
+        case 'ack':
+            return { status: 'ack', label: 'ACK received' };
+        case 'implicit_ack':
+            return { status: 'implicit_ack', label: 'Implicit ACK received' };
+        case 'nak':
+            return { status: 'nak', label: 'NAK received' };
+        case 'max_retransmit':
+            return { status: 'max_retransmit', label: 'Delivery failed after retries' };
+        case 'pending':
+        default:
+            return { status: 'pending', label: 'Waiting for ACK' };
+    }
+}
+
+function renderAckIconSvg(status) {
+    if (status === 'ack' || status === 'implicit_ack') {
+        return `
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3.25 8.25 6.25 11.25 12.75 4.75"></path>
+            </svg>
+        `;
+    }
+    if (status === 'nak') {
+        return `
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 4 12 12"></path>
+                <path d="M12 4 4 12"></path>
+            </svg>
+        `;
+    }
+    if (status === 'max_retransmit') {
+        return `
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M8 2.25 13.5 12H2.5L8 2.25Z"></path>
+                <path d="M8 6.25v2.75"></path>
+                <path d="M8 11.25h.01"></path>
+            </svg>
+        `;
+    }
+    return `
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="8" cy="8" r="5.25"></circle>
+            <path d="M8 5.25v3.1"></path>
+            <path d="M8 8.35 10.15 9.7"></path>
+        </svg>
+    `;
+}
+
+function renderAckStatusHtml(message) {
+    const meta = getAckStatusMeta(message);
+    if (!meta) return '';
+
+    const reasonText = formatAckReason(message.ack_error);
+    const title = reasonText ? `${meta.label}: ${reasonText}` : meta.label;
+    return `
+        <span class="message-ack message-ack--${escapeHtml(meta.status)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">
+            ${renderAckIconSvg(meta.status)}
+        </span>
+    `;
+}
+
 function renderReplyPreview(message) {
     if (!message.reply_packet_id) return '';
     const replyMessage = getMessageByPacketId(message.reply_packet_id);
@@ -2119,7 +2419,7 @@ function handleMobileConnectClick() {
 
 function handleDesktopConnectClick() {
     if (!currentProfile) {
-        window.location.href = '{{ url_for("profiles") }}';
+        openProfileSelector();
         return;
     }
     setProfile({ target: document.getElementById('desktopConnectBtn') });

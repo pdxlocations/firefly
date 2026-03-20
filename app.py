@@ -17,6 +17,7 @@ apply_mudp_multicast_patch()
 
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
 from mudp import node
+from mudp.reliability import is_ack, is_nak, parse_routing
 from database import Database
 from encryption import generate_hash
 from mesh_runtime import MeshNodeStore, VirtualNodeManager, count_nodes_for_profiles
@@ -204,6 +205,58 @@ def _already_seen(key):
     return False
 
 
+def _routing_error_name(error_reason):
+    if error_reason is None:
+        return None
+    try:
+        return mesh_pb2.Routing.Error.Name(int(error_reason))
+    except Exception:
+        return str(error_reason)
+
+
+def _sync_cached_message(packet_id, **updates):
+    if packet_id is None:
+        return
+    for message in messages:
+        if int(message.get("packet_id") or 0) != int(packet_id):
+            continue
+        message.update(updates)
+
+
+def _emit_message_update(message):
+    if not message:
+        return
+
+    room_name = None
+    if (message.get("message_type") or "channel") == "dm" and message.get("owner_profile_id"):
+        room_name = f"profile_{message['owner_profile_id']}"
+    elif message.get("channel") is not None:
+        room_name = f"channel_{message['channel']}"
+
+    if not room_name:
+        return
+
+    try:
+        socketio.emit("message_update", message, room=room_name)
+    except Exception as e:
+        print(f"[ACK] Failed to broadcast message update for packet {message.get('packet_id')}: {e}")
+
+
+def _apply_ack_update(packet_id, ack_status, ack_error=None):
+    updated_messages = db.update_message_ack_status(packet_id, ack_status, ack_error)
+    if not updated_messages:
+        return
+
+    for message in updated_messages:
+        _sync_cached_message(
+            packet_id,
+            ack_status=message.get("ack_status"),
+            ack_error=message.get("ack_error"),
+            ack_updated_at=message.get("ack_updated_at"),
+        )
+        _emit_message_update(message)
+
+
 virtual_node_manager = VirtualNodeManager(MCAST_GRP, MCAST_PORT)
 
 
@@ -351,6 +404,7 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
             "content": msg,
             "timestamp": datetime.now().isoformat(),
             "sender_ip": (addr[0] if isinstance(addr, tuple) and len(addr) >= 1 else "mesh"),
+            "direction": "received",
             "message_type": message_type,
             "packet_id": pkt_id,
             "reply_packet_id": reply_packet_id,
@@ -496,9 +550,107 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
         print(f"Error processing nodeinfo: {e}")
 
 
+def on_ack_message(packet, routing=None, addr=None, pending=None):
+    del addr, pending
+    if not packet.HasField("decoded"):
+        return
+
+    request_id = int(getattr(packet.decoded, "request_id", 0) or 0)
+    if request_id <= 0:
+        return
+
+    sender_num = getattr(packet, "from", None)
+    ack_status = "implicit_ack" if sender_num is not None and _my_node_num() == int(sender_num) else "ack"
+    print(f"[ACK] Received {ack_status} for packet {request_id}")
+    _apply_ack_update(request_id, ack_status)
+
+
+def on_nak_message(packet, routing=None, addr=None, pending=None):
+    del addr, pending
+    if not packet.HasField("decoded"):
+        return
+
+    request_id = int(getattr(packet.decoded, "request_id", 0) or 0)
+    if request_id <= 0:
+        return
+
+    error_name = _routing_error_name(getattr(routing, "error_reason", None))
+    print(f"[ACK] Received NAK for packet {request_id}: {error_name}")
+    _apply_ack_update(request_id, "nak", error_name)
+
+
+def on_max_retransmit(pending=None, error_reason=None):
+    request_id = int(getattr(pending, "packet_id", 0) or 0)
+    if request_id <= 0:
+        return
+
+    error_name = _routing_error_name(error_reason) or "MAX_RETRANSMIT"
+    print(f"[ACK] Max retransmit reached for packet {request_id}: {error_name}")
+    _apply_ack_update(request_id, "max_retransmit", error_name)
+
+
+def on_post_decode_compat_packet(packet, addr=None):
+    """Handle PKI-decoded packets after vnode has had a chance to decrypt them."""
+    if not packet or not packet.HasField("decoded"):
+        return
+
+    is_pki_or_channel_zero = bool(getattr(packet, "pki_encrypted", False)) or int(getattr(packet, "channel", 0) or 0) == 0
+    if not is_pki_or_channel_zero:
+        return
+
+    portnum = int(getattr(packet.decoded, "portnum", 0) or 0)
+    if portnum in (
+        int(portnums_pb2.PortNum.TEXT_MESSAGE_APP),
+        int(portnums_pb2.PortNum.TEXT_MESSAGE_COMPRESSED_APP),
+    ):
+        on_text_message(packet, addr=addr)
+        return
+
+    if portnum != int(portnums_pb2.PortNum.ROUTING_APP):
+        return
+
+    routing = parse_routing(packet)
+    if routing is None:
+        return
+
+    if is_ack(packet):
+        on_ack_message(packet, routing=routing, addr=addr, pending=None)
+    elif is_nak(packet):
+        on_nak_message(packet, routing=routing, addr=addr, pending=None)
+
+
+def on_meshtastic_text(packet, interface=None):
+    del interface
+    raw_packet = packet.get("raw") if isinstance(packet, dict) else None
+    if isinstance(raw_packet, mesh_pb2.MeshPacket) and raw_packet.HasField("decoded"):
+        on_text_message(raw_packet, addr=("mesh", 0))
+
+
+def on_meshtastic_routing(packet, interface=None):
+    del interface
+    raw_packet = packet.get("raw") if isinstance(packet, dict) else None
+    if not isinstance(raw_packet, mesh_pb2.MeshPacket) or not raw_packet.HasField("decoded"):
+        return
+
+    routing = parse_routing(raw_packet)
+    if routing is None:
+        return
+
+    if is_ack(raw_packet):
+        on_ack_message(raw_packet, routing=routing, addr=("mesh", 0), pending=None)
+    elif is_nak(raw_packet):
+        on_nak_message(raw_packet, routing=routing, addr=("mesh", 0), pending=None)
+
+
 pub.subscribe(on_recieve, "mesh.rx.packet")
+pub.subscribe(on_post_decode_compat_packet, "mesh.rx.unique_packet")
 pub.subscribe(on_text_message, "mesh.rx.port.1")
+pub.subscribe(on_meshtastic_text, "meshtastic.receive.text")
+pub.subscribe(on_meshtastic_routing, "meshtastic.receive.routing")
 pub.subscribe(on_nodeinfo, "mesh.rx.port.4")  # NODEINFO_APP
+pub.subscribe(on_ack_message, "mesh.rx.ack")
+pub.subscribe(on_nak_message, "mesh.rx.nak")
+pub.subscribe(on_max_retransmit, "mesh.tx.max_retransmit")
 
 
 app = Flask(__name__)
@@ -720,6 +872,7 @@ class UDPChatServer:
 
         try:
             hop_limit = sender_profile.get("hop_limit", 3)
+            ack_requested = message_type == "dm"
             if message_type == "dm":
                 if target_node_num in (None, 0, BROADCAST_NODE_NUM):
                     print("[SEND] Refusing to send DM without a valid target node")
@@ -755,11 +908,16 @@ class UDPChatServer:
                 "content": message_content,
                 "timestamp": datetime.now().isoformat(),
                 "sender_ip": "self",  # Keep for backward compatibility but use sender for identity
+                "direction": "sent",
                 "message_type": message_type,
                 "reply_packet_id": reply_packet_id,
                 "target_node_num": int(target_node_num) if target_node_num not in (None, "", 0, BROADCAST_NODE_NUM) else None,
                 "target": _node_id_from_num(target_node_num) if target_node_num not in (None, "", 0, BROADCAST_NODE_NUM) else None,
                 "owner_profile_id": sender_profile.get("id") if message_type == "dm" else None,
+                "ack_requested": ack_requested,
+                "ack_status": "pending" if ack_requested else None,
+                "ack_error": None,
+                "ack_updated_at": datetime.now().isoformat() if ack_requested else None,
             }
             messages.append(message)
 
@@ -787,6 +945,10 @@ class UDPChatServer:
                         hop_start=None,
                         rx_snr=None,
                         rx_rssi=None,
+                        ack_requested=message["ack_requested"],
+                        ack_status=message["ack_status"],
+                        ack_error=message["ack_error"],
+                        ack_updated_at=message["ack_updated_at"],
                     )
                     print(f"[SEND] Sent message stored successfully on channel {sender_channel}")
                     
@@ -1162,6 +1324,50 @@ def get_messages():
         db.update_profile_last_seen(current_profile["id"], expected_channel)
 
     return jsonify(chat_payload)
+
+
+@app.route("/api/threads/channel", methods=["DELETE"])
+def delete_channel_thread():
+    """Delete channel message history for the selected profile channel."""
+    current_profile = _get_session_profile()
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+
+    data = request.get_json(silent=True) or {}
+    channel_index = data.get("channel_index", _selected_channel_index(current_profile))
+    try:
+        channel_index = int(channel_index)
+    except (TypeError, ValueError):
+        return jsonify({"error": "channel_index must be an integer"}), 400
+
+    channels = _profile_channels(current_profile)
+    if channel_index < 0 or channel_index >= len(channels):
+        return jsonify({"error": "channel_index out of range"}), 400
+
+    channel_hash = _profile_channel_num(_effective_profile(current_profile, channel_index=channel_index))
+    if channel_hash is None:
+        return jsonify({"error": "Unable to determine channel"}), 400
+
+    deleted_count = db.delete_channel_messages(channel_hash)
+    return jsonify({"message": "Channel thread deleted", "deleted_count": deleted_count, "channel_index": channel_index})
+
+
+@app.route("/api/threads/dm", methods=["DELETE"])
+def delete_dm_thread():
+    """Delete a DM thread for the current profile."""
+    current_profile = _get_session_profile()
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+
+    data = request.get_json(silent=True) or {}
+    peer_node_num = data.get("peer_node_num")
+    try:
+        peer_node_num = int(peer_node_num)
+    except (TypeError, ValueError):
+        return jsonify({"error": "peer_node_num must be an integer"}), 400
+
+    deleted_count = db.delete_dm_thread_for_profile(current_profile["id"], peer_node_num)
+    return jsonify({"message": "DM thread deleted", "deleted_count": deleted_count, "peer_node_num": peer_node_num})
 
 
 @app.route("/api/nodes", methods=["GET"])

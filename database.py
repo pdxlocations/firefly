@@ -73,7 +73,11 @@ class Database:
                     hop_limit INTEGER,
                     hop_start INTEGER,
                     rx_snr REAL,
-                    rx_rssi INTEGER
+                    rx_rssi INTEGER,
+                    ack_requested INTEGER DEFAULT 0,
+                    ack_status TEXT,
+                    ack_error TEXT,
+                    ack_updated_at TIMESTAMP
                 )
             """)
             
@@ -107,6 +111,10 @@ class Database:
                 ("ALTER TABLE messages ADD COLUMN reply_packet_id INTEGER", "reply_packet_id"),
                 ("ALTER TABLE messages ADD COLUMN target_node_num INTEGER", "target_node_num"),
                 ("ALTER TABLE messages ADD COLUMN owner_profile_id TEXT", "owner_profile_id"),
+                ("ALTER TABLE messages ADD COLUMN ack_requested INTEGER DEFAULT 0", "ack_requested"),
+                ("ALTER TABLE messages ADD COLUMN ack_status TEXT", "ack_status"),
+                ("ALTER TABLE messages ADD COLUMN ack_error TEXT", "ack_error"),
+                ("ALTER TABLE messages ADD COLUMN ack_updated_at TIMESTAMP", "ack_updated_at"),
             ]:
                 try:
                     conn.execute(column_sql)
@@ -544,7 +552,8 @@ class Database:
                      content: str = None, sender_ip: str = None, direction: str = "received",
                      channel: int = None, message_type: str = "channel", reply_packet_id: int = None, target_node_num: int = None,
                      owner_profile_id: str = None, hop_limit: int = None, hop_start: int = None,
-                     rx_snr: float = None, rx_rssi: int = None) -> bool:
+                     rx_snr: float = None, rx_rssi: int = None, ack_requested: bool = False,
+                     ack_status: str = None, ack_error: str = None, ack_updated_at: str = None) -> bool:
         """Store a message by channel (accessible to any profile using that channel)"""
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -552,11 +561,12 @@ class Database:
                     INSERT INTO messages 
                     (message_id, packet_id, sender_num, sender_display, 
                      content, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                     owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi, ack_requested, ack_status, ack_error, ack_updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (message_id, packet_id, sender_num, sender_display,
                      content, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                     owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi))
+                     owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
+                     int(bool(ack_requested)), ack_status, ack_error, ack_updated_at))
                 conn.commit()
                 return True
         except Exception as e:
@@ -622,7 +632,8 @@ class Database:
             cursor = conn.execute("""
                 SELECT message_id, packet_id, sender_num, sender_display, content, 
                        timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                       owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi
+                       owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
+                       ack_requested, ack_status, ack_error, ack_updated_at
                 FROM messages WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel'
                 ORDER BY timestamp DESC LIMIT ?
             """, (channel, limit))
@@ -636,12 +647,88 @@ class Database:
             cursor = conn.execute("""
                 SELECT message_id, packet_id, sender_num, sender_display, content,
                        timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                       owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi
+                       owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
+                       ack_requested, ack_status, ack_error, ack_updated_at
                 FROM messages
                 WHERE owner_profile_id = ? AND COALESCE(message_type, 'channel') = 'dm'
                 ORDER BY timestamp DESC LIMIT ?
             """, (profile_id, limit))
             return self._serialize_messages(cursor)
+
+    def update_message_ack_status(self, packet_id: int, ack_status: str, ack_error: str = None) -> List[Dict]:
+        """Update ACK status for outbound messages matching a packet ID and return updated rows."""
+        if packet_id is None:
+            return []
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute(
+                    """
+                    UPDATE messages
+                    SET ack_status = ?, ack_error = ?, ack_updated_at = CURRENT_TIMESTAMP
+                    WHERE packet_id = ?
+                      AND direction = 'sent'
+                      AND COALESCE(ack_requested, 0) = 1
+                    """,
+                    (ack_status, ack_error, int(packet_id)),
+                )
+                cursor = conn.execute(
+                    """
+                    SELECT message_id, packet_id, sender_num, sender_display, content,
+                           timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
+                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
+                           ack_requested, ack_status, ack_error, ack_updated_at
+                    FROM messages
+                    WHERE packet_id = ?
+                      AND direction = 'sent'
+                      AND COALESCE(ack_requested, 0) = 1
+                    ORDER BY id DESC
+                    """,
+                    (int(packet_id),),
+                )
+                rows = self._serialize_messages(cursor)
+                conn.commit()
+                return rows
+        except Exception as e:
+            print(f"Error updating ACK status: {e}")
+            return []
+
+    def delete_channel_messages(self, channel: int) -> int:
+        """Delete all channel messages for a specific channel hash."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    DELETE FROM messages
+                    WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel'
+                    """,
+                    (channel,),
+                )
+                conn.commit()
+                return int(cursor.rowcount or 0)
+        except Exception as e:
+            print(f"Error deleting channel messages: {e}")
+            return 0
+
+    def delete_dm_thread_for_profile(self, profile_id: str, peer_node_num: int) -> int:
+        """Delete all DM messages in a thread for a given profile and peer node."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    DELETE FROM messages
+                    WHERE owner_profile_id = ?
+                      AND COALESCE(message_type, 'channel') = 'dm'
+                      AND (sender_num = ? OR target_node_num = ?)
+                    """,
+                    (profile_id, int(peer_node_num), int(peer_node_num)),
+                )
+                conn.commit()
+                return int(cursor.rowcount or 0)
+        except Exception as e:
+            print(f"Error deleting DM thread: {e}")
+            return 0
 
     def get_nodes_for_profile_channel(self, profile_id: str, channel: int) -> List[Dict]:
         """Get nodes for a specific profile that have been seen on a specific channel"""
@@ -742,7 +829,8 @@ class Database:
                 cursor = conn.execute("""
                     SELECT message_id, packet_id, sender_num, sender_display, content, 
                            timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi
+                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
+                           ack_requested, ack_status, ack_error, ack_updated_at
                     FROM messages WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel' AND timestamp > ?
                     ORDER BY timestamp DESC LIMIT ?
                 """, (channel, last_seen_row['last_seen_timestamp'], limit))
@@ -751,7 +839,8 @@ class Database:
                 cursor = conn.execute("""
                     SELECT message_id, packet_id, sender_num, sender_display, content, 
                            timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi
+                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
+                           ack_requested, ack_status, ack_error, ack_updated_at
                     FROM messages WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel'
                     ORDER BY timestamp DESC LIMIT ?
                 """, (channel, limit))
@@ -790,6 +879,10 @@ class Database:
                 'hop_limit': row['hop_limit'],
                 'hop_start': row['hop_start'],
                 'rx_snr': row['rx_snr'],
-                'rx_rssi': row['rx_rssi']
+                'rx_rssi': row['rx_rssi'],
+                'ack_requested': bool(row['ack_requested']) if row['ack_requested'] is not None else False,
+                'ack_status': row['ack_status'],
+                'ack_error': row['ack_error'],
+                'ack_updated_at': row['ack_updated_at'],
             })
         return messages[::-1]

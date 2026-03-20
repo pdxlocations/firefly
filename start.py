@@ -144,6 +144,22 @@ def get_display_host_and_port():
     return display_host, app_port
 
 
+def get_bind_host_and_port():
+    return os.getenv('FIREFLY_HOST', '0.0.0.0'), int(os.getenv('FIREFLY_PORT', 5011))
+
+
+def print_access_summary():
+    display_host, display_port = get_display_host_and_port()
+    bind_host, bind_port = get_bind_host_and_port()
+
+    if running_in_container() and get_network_mode() == 'bridge':
+        print(f"🌐 Web interface: http://{display_host}:{display_port} (host-published)")
+        print(f"🔌 Container bind: http://{bind_host}:{bind_port}")
+        return
+
+    print(f"🌐 Web interface: http://{display_host}:{display_port}")
+
+
 def print_banner():
     print("🔥 Firefly - Meshtastic Web Chat")
     print("=" * 50)
@@ -175,7 +191,11 @@ def show_features():
     print("• Detailed Node Info - Hardware models, roles, signal strength, and more")
     print("• Real-time Updates - WebSocket notifications for new nodes and messages")
     display_host, display_port = get_display_host_and_port()
-    print(f"• Web Interface - Browse to http://{display_host}:{display_port} after startup")
+    if running_in_container() and get_network_mode() == 'bridge':
+        print(f"• Web Interface - Browse to http://{display_host}:{display_port} on the host machine")
+        print("• Container Port - Flask listens on the internal container port configured by FIREFLY_PORT")
+    else:
+        print(f"• Web Interface - Browse to http://{display_host}:{display_port} after startup")
     print("")
     print("📋 PAGES AVAILABLE:")
     print("• Chat - Send/receive messages with node overview")
@@ -222,8 +242,7 @@ def main():
         show_features()
 
         print(f"\n🗄️  Database: {os.getenv('FIREFLY_DATABASE_FILE', 'firefly.db')}")
-        display_host, display_port = get_display_host_and_port()
-        print(f"🌐 Web interface: http://{display_host}:{display_port}")
+        print_access_summary()
         print("\n" + "=" * 50)
         print("Starting Flask application...")
         print("=" * 50)
@@ -239,8 +258,12 @@ def main():
         host = os.getenv('FIREFLY_HOST', '0.0.0.0')
         debug = os.getenv('FIREFLY_DEBUG', 'false').lower() == 'true'
         
-        display_host, display_port = get_display_host_and_port()
-        print(f"🌐 Starting Flask server on http://{display_host}:{display_port}")
+        if running_in_container() and get_network_mode() == 'bridge':
+            bind_host, bind_port = get_bind_host_and_port()
+            print(f"🌐 Starting Flask server inside container on http://{bind_host}:{bind_port}")
+        else:
+            display_host, display_port = get_display_host_and_port()
+            print(f"🌐 Starting Flask server on http://{display_host}:{display_port}")
 
         socketio.run(
             app,

@@ -53,9 +53,9 @@
                                     <th>Short Name</th>
                                     <th>Hardware</th>
                                     <th>Role</th>
-                                    <th>First Seen</th>
-                                    <th>Last Seen</th>
-                                    <th>Packets</th>
+                                    <th>Last Heard</th>
+                                    <th>SNR</th>
+                                    <th>Hops</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -67,9 +67,6 @@
                                     </td>
                                     <td>
                                         <strong>{{ node.long_name or "Unknown" }}</strong>
-                                        {% if node.raw_nodeinfo and node.raw_nodeinfo.changes %}
-                                        <br><small class="text-info"><i class="fas fa-edit"></i> Recently updated</small>
-                                        {% endif %}
                                     </td>
                                     <td>
                                         <span class="badge bg-secondary">{{ node.short_name or "?" }}</span>
@@ -81,20 +78,9 @@
                                         <span class="badge bg-info">{{ node.role or "CLIENT" }}</span>
                                     </td>
                                     <td class="text-muted small">
-                                        {% if node.first_seen %}
-                                            <span title="{{ node.first_seen }}">
-                                                {% set first_parts = node.first_seen.split('T') %}
-                                                {{ first_parts[0] if first_parts|length > 0 else node.first_seen }}<br>
-                                                <small>{{ first_parts[1][:8] if first_parts|length > 1 else '' }}</small>
-                                            </span>
-                                        {% else %}
-                                            Unknown
-                                        {% endif %}
-                                    </td>
-                                    <td class="text-muted small">
                                         {% if node.last_seen %}
-                                            {% set last_parts = node.last_seen.split('T') %}
                                             <span title="{{ node.last_seen }}">
+                                                {% set last_parts = node.last_seen.split('T') %}
                                                 {{ last_parts[0] if last_parts|length > 0 else node.last_seen }}<br>
                                                 <small>{{ last_parts[1][:8] if last_parts|length > 1 else '' }}</small>
                                             </span>
@@ -103,16 +89,29 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        <span class="badge bg-success">{{ node.packet_count }}</span>
-                                        {% if node.packet_count > 5 %}
-                                        <br><small class="text-success">Active</small>
+                                        {% if node.snr is not none %}
+                                            <span class="badge {{ 'bg-success' if node.snr > 0 else 'bg-warning text-dark' }}">{{ node.snr }} dB</span>
+                                        {% else %}
+                                            <span class="text-muted">Unknown</span>
                                         {% endif %}
                                     </td>
                                     <td>
-                                        <button class="btn btn-sm btn-outline-primary" 
-                                                onclick="showNodeDetails({{ node.node_num }})">
-                                            Details
-                                        </button>
+                                        {% if node.hops_away is not none %}
+                                            <span class="badge bg-success">{{ node.hops_away }}</span>
+                                        {% else %}
+                                            <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="d-flex gap-2">
+                                            <a class="btn btn-sm btn-outline-success" href="{{ url_for('index') }}?tab=dms&dm={{ node.node_num }}">
+                                                DM
+                                            </a>
+                                            <button class="btn btn-sm btn-outline-primary" 
+                                                    onclick="showNodeDetails({{ node.node_num }})">
+                                                Details
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                                 {% endfor %}
@@ -179,56 +178,15 @@ function showNodeDetails(nodeNum) {
                     <div class="col-md-6">
                         <h6>Network Information</h6>
                         <table class="table table-sm">
-                            <tr><td><strong>First Seen:</strong></td><td>${formatDateTime(data.first_seen)}</td></tr>
-                            <tr><td><strong>Last Seen:</strong></td><td>${formatDateTime(data.last_seen)}</td></tr>
-                            <tr><td><strong>Packet Count:</strong></td><td><span class="badge bg-success">${data.packet_count}</span></td></tr>
+                            <tr><td><strong>Last Heard:</strong></td><td>${formatDateTime(data.last_seen)}</td></tr>
+                            <tr><td><strong>SNR:</strong></td><td>${formatSnr(data.snr)}</td></tr>
+                            <tr><td><strong>Hops Away:</strong></td><td>${formatHops(data.hops_away)}</td></tr>
                             ${data.macaddr ? `<tr><td><strong>MAC Address:</strong></td><td><code>${data.macaddr}</code></td></tr>` : ''}
+                            ${data.public_key ? `<tr><td><strong>Public Key:</strong></td><td><code>${data.public_key}</code></td></tr>` : ''}
                         </table>
                     </div>
                 </div>
             `;
-            
-            // Show change history if available
-            if (data.raw_nodeinfo && data.raw_nodeinfo.changes && data.raw_nodeinfo.changes.length > 0) {
-                content += `
-                    <hr>
-                    <h6>Recent Changes</h6>
-                    <div class="alert alert-info">
-                        <strong>Last Update:</strong> Node information was recently modified.<br>
-                        <ul class="mb-0 mt-2">
-                `;
-                
-                data.raw_nodeinfo.changes.forEach(change => {
-                    content += `<li><code>${change}</code></li>`;
-                });
-                
-                content += `
-                        </ul>
-                    </div>
-                `;
-            }
-            
-            if (data.raw_nodeinfo && data.raw_nodeinfo.packet_info) {
-                content += `
-                    <hr>
-                    <h6>Last Packet Information</h6>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <table class="table table-sm">
-                                <tr><td><strong>Channel:</strong></td><td>${data.raw_nodeinfo.packet_info.channel || 'Unknown'}</td></tr>
-                                <tr><td><strong>Hop Limit:</strong></td><td>${data.raw_nodeinfo.packet_info.hop_limit || 'Unknown'}</td></tr>
-                                <tr><td><strong>Hop Start:</strong></td><td>${data.raw_nodeinfo.packet_info.hop_start || 'Unknown'}</td></tr>
-                            </table>
-                        </div>
-                        <div class="col-md-6">
-                            <table class="table table-sm">
-                                ${data.raw_nodeinfo.packet_info.rx_snr !== null ? `<tr><td><strong>RX SNR:</strong></td><td><span class="${data.raw_nodeinfo.packet_info.rx_snr > 0 ? 'text-success' : 'text-warning'}">${data.raw_nodeinfo.packet_info.rx_snr} dB</span></td></tr>` : ''}
-                                ${data.raw_nodeinfo.packet_info.rx_rssi !== null ? `<tr><td><strong>RX RSSI:</strong></td><td><span class="${data.raw_nodeinfo.packet_info.rx_rssi > -100 ? 'text-success' : 'text-warning'}">${data.raw_nodeinfo.packet_info.rx_rssi} dBm</span></td></tr>` : ''}
-                            </table>
-                        </div>
-                    </div>
-                `;
-            }
             
             document.getElementById('nodeDetailsContent').innerHTML = content;
             document.getElementById('nodeDetailsModalLabel').textContent = 
@@ -250,6 +208,16 @@ function formatDateTime(dateTimeStr) {
     } catch (e) {
         return dateTimeStr;
     }
+}
+
+function formatSnr(value) {
+    if (value === null || value === undefined) return 'Unknown';
+    return `${value} dB`;
+}
+
+function formatHops(value) {
+    if (value === null || value === undefined) return 'Unknown';
+    return `${value}`;
 }
 
 // Auto-refresh node list every 30 seconds if profile is selected

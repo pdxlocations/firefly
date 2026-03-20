@@ -8,7 +8,101 @@ import sys
 import os
 import socket
 import subprocess
+import shutil
+import importlib.util
 from database import Database
+
+REQUIRED_RUNTIME_MODULES = ("meshdb", "vnode")
+BOOTSTRAP_ENV_VAR = "FIREFLY_PYTHON_BOOTSTRAPPED"
+
+
+def _missing_runtime_modules():
+    missing = []
+    for module_name in REQUIRED_RUNTIME_MODULES:
+        if importlib.util.find_spec(module_name) is None:
+            missing.append(module_name)
+    return missing
+
+
+def _interpreter_has_runtime_modules(python_path: str) -> bool:
+    if not python_path or not os.path.exists(python_path):
+        return False
+
+    probe_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime_probe.py")
+    probe_env = os.environ.copy()
+    for key in list(probe_env):
+        if key.startswith("DEBUGPY_") or key.startswith("PYDEVD_"):
+            probe_env.pop(key, None)
+    try:
+        result = subprocess.run(
+            [python_path, "-I", probe_script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+            env=probe_env,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _candidate_interpreters():
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        sys.executable,
+        os.path.join(repo_dir, ".venv", "bin", "python3"),
+        os.path.join(repo_dir, ".venv", "bin", "python"),
+        shutil.which("python3"),
+        shutil.which("python"),
+    ]
+
+    seen = set()
+    ordered = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        resolved = os.path.realpath(candidate)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        ordered.append(candidate)
+    return ordered
+
+
+def ensure_runtime_python():
+    missing = _missing_runtime_modules()
+    if not missing:
+        return
+
+    if os.environ.get(BOOTSTRAP_ENV_VAR) == "1":
+        missing_str = ", ".join(missing)
+        raise ModuleNotFoundError(
+            f"Missing required modules in interpreter {sys.executable}: {missing_str}. "
+            "Install dependencies in this environment or run via ./start_with_venv.py."
+        )
+
+    for candidate in _candidate_interpreters():
+        resolved = os.path.realpath(candidate)
+        current = os.path.realpath(sys.executable)
+        if resolved == current:
+            continue
+        if not _interpreter_has_runtime_modules(candidate):
+            continue
+
+        env = os.environ.copy()
+        env[BOOTSTRAP_ENV_VAR] = "1"
+        script_path = os.path.abspath(__file__)
+        print(f"⚠️  Current Python is missing {', '.join(missing)}")
+        print(f"↪ Switching to compatible interpreter: {candidate}")
+        os.execvpe(candidate, [candidate, script_path, *sys.argv[1:]], env)
+
+    missing_str = ", ".join(missing)
+    raise ModuleNotFoundError(
+        f"Missing required modules: {missing_str}. "
+        f"Current interpreter: {sys.executable}. "
+        "Install dependencies with `pip install -r requirements.txt` in the active environment."
+    )
 
 
 def get_host_ip():
@@ -144,6 +238,8 @@ def main():
     print_banner()
 
     try:
+        ensure_runtime_python()
+
         # Initialize database
         db = initialize_database()
 

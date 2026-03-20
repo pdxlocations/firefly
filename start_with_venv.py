@@ -7,6 +7,15 @@ This script ensures the virtual environment is activated before starting the app
 import os
 import sys
 import subprocess
+import importlib.util
+
+REQUIRED_RUNTIME_MODULES = ("meshdb", "vnode")
+
+
+def has_required_modules():
+    """Check whether the active interpreter has the runtime dependencies we need."""
+    missing = [name for name in REQUIRED_RUNTIME_MODULES if importlib.util.find_spec(name) is None]
+    return (len(missing) == 0, missing)
 
 def check_virtual_env():
     """Check if we're running in the virtual environment"""
@@ -20,8 +29,12 @@ def check_virtual_env():
     
     # Check if we're already in the virtual environment
     if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
-        print("✅ Virtual environment is active")
-        return True
+        ok, missing = has_required_modules()
+        if ok:
+            print("✅ Virtual environment is active and dependencies are installed")
+            return True
+        print("⚠️  Virtual environment is active but missing dependencies:", ", ".join(missing))
+        return False
     else:
         print("⚠️  Virtual environment not activated")
         return False

@@ -1,9 +1,50 @@
 {% extends "base.html" %}
 
 {% block title %}Profiles - Firefly{% endblock %}
+{% block body_class %}mobile-fixed-nav-page{% endblock %}
 
 {% block content %}
 <div class="row">
+    <div class="col-12 d-none d-md-block mb-3">
+        <div class="card">
+            <div class="card-body p-0">
+                <div class="border-bottom px-3 pt-3 pb-2">
+                    <ul class="nav nav-tabs card-header-tabs mb-0">
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('index') }}">Channels</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('index') }}?tab=dms">DMs</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('nodes') }}">Nodes</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('index') }}?open_profiles=1">Profiles</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 d-none d-md-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="mb-1">Manage Profiles</h1>
+            <div class="text-muted">Create, edit, and organize your identities and channels.</div>
+        </div>
+        <a class="btn btn-outline-secondary" href="{{ url_for('index') }}?open_profiles=1">Back To Profile Selector</a>
+    </div>
+    <div class="col-12 d-md-none">
+        <div class="mobile-page-header mb-3">
+            <div class="mobile-page-header__brand mb-2">
+                <img class="mobile-page-header__logo--dark" src="{{ url_for('static', filename='images/firefly-logo-dark.png') }}" alt="Firefly" height="22">
+                <img class="mobile-page-header__logo--light" src="{{ url_for('static', filename='images/firefly-logo-light.png') }}" alt="Firefly" height="22">
+                <span>Firefly</span>
+            </div>
+            <div class="fw-semibold">Profiles</div>
+            <div class="small text-muted">Create, edit, and manage your identities</div>
+        </div>
+    </div>
     <div class="col-md-6">
         <div class="card">
             <div class="card-header">
@@ -24,12 +65,12 @@
                         <input type="text" class="form-control" id="newShortName" required maxlength="16" placeholder="e.g. UDP">
                     </div>
                     <div class="mb-3">
-                        <label for="newChannel" class="form-label">Channel *</label>
-                        <input type="text" class="form-control" id="newChannel" required maxlength="64" placeholder="e.g. LongFast">
-                    </div>
-                    <div class="mb-3">
-                        <label for="newKey" class="form-label">Key *</label>
-                        <input type="text" class="form-control" id="newKey" required maxlength="256" placeholder="e.g. AQ==">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label mb-0">Channels *</label>
+                            <button class="btn btn-sm btn-outline-secondary" id="addNewChannelBtn" type="button">Add Channel</button>
+                        </div>
+                        <div id="newChannelsList" class="channel-editor-list"></div>
+                        <div class="form-text">Each profile can have multiple channel and key pairs.</div>
                     </div>
                     <div class="mb-3">
                         <label for="newHopLimit" class="form-label">Hop Limit</label>
@@ -56,7 +97,12 @@
                                     <div class="flex-grow-1">
                                         <h6 class="mb-1">{{ profile.long_name }}</h6>
                                         <small class="text-muted">Short: {{ profile.short_name }} • Node: {{ profile.node_id }}</small>
-                                        <p class="mt-2 mb-1">Channel: {{ profile.channel }} | Key: {{ profile.key }}</p>
+                                        <p class="mt-2 mb-1">Channels: {{ profile.channels|length if profile.channels else 0 }}</p>
+                                        <div class="mb-1 small text-muted">
+                                            {% for channel in profile.channels or [] %}
+                                                <div>{{ channel.name }} • {{ channel.key }}</div>
+                                            {% endfor %}
+                                        </div>
                                         <p class="mb-1">Hop Limit: {{ profile.hop_limit if profile.hop_limit is not none else 3 }}</p>
                                         <small class="text-muted">Created: {{ profile.created_at[:10] }}</small>
                                     </div>
@@ -110,12 +156,12 @@
                         <input type="text" class="form-control" id="editShortName" required maxlength="16">
                     </div>
                     <div class="mb-3">
-                        <label for="editChannel" class="form-label">Channel *</label>
-                        <input type="text" class="form-control" id="editChannel" required maxlength="64">
-                    </div>
-                    <div class="mb-3">
-                        <label for="editKey" class="form-label">Key *</label>
-                        <input type="text" class="form-control" id="editKey" required maxlength="256">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label mb-0">Channels *</label>
+                            <button class="btn btn-sm btn-outline-secondary" id="addEditChannelBtn" type="button">Add Channel</button>
+                        </div>
+                        <div id="editChannelsList" class="channel-editor-list"></div>
+                        <div class="form-text">Each channel needs a name and key.</div>
                     </div>
                     <div class="mb-3">
                         <label for="editHopLimit" class="form-label">Hop Limit</label>
@@ -142,8 +188,7 @@
                 <li><strong>Node ID:</strong> Unique identifier for your device or node</li>
                 <li><strong>Long Name:</strong> Descriptive name shown in chat messages</li>
                 <li><strong>Short Name:</strong> Short identifier shown in lists and compact views</li>
-                <li><strong>Channel:</strong> Communication channel used</li>
-                <li><strong>Key:</strong> Encryption or access key</li>
+                <li><strong>Channels:</strong> Each profile can keep multiple channel and key pairs</li>
                 <li><strong>Hop Limit:</strong> Number of hops (0-7) a message can travel before being dropped. Default is 3.</li>
                 <li><strong>Multiple Profiles:</strong> You can create multiple profiles for different purposes</li>
                 <li><strong>Profile Selection:</strong> Go back to the chat page to select which profile to use</li>
@@ -151,9 +196,83 @@
         </div>
     </div>
 </div>
+
+<div class="mobile-bottom-nav d-md-none">
+    <a class="mobile-bottom-nav__button" href="{{ url_for('index') }}">
+        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 7h16"></path>
+                <path d="M7 12h10"></path>
+                <path d="M10 17h4"></path>
+            </svg>
+        </span>
+        <span>Channels</span>
+    </a>
+    <a class="mobile-bottom-nav__button" href="{{ url_for('index') }}?tab=dms">
+        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+        </span>
+        <span>DMs</span>
+    </a>
+    <a class="mobile-bottom-nav__button" href="{{ url_for('nodes') }}">
+        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="6" r="2"></circle>
+                <circle cx="6" cy="18" r="2"></circle>
+                <circle cx="18" cy="18" r="2"></circle>
+                <path d="M12 8v4"></path>
+                <path d="M10.5 13 7.5 16"></path>
+                <path d="M13.5 13 16.5 16"></path>
+            </svg>
+        </span>
+        <span>Nodes</span>
+    </a>
+    <a class="mobile-bottom-nav__button" href="{{ url_for('index') }}?open_profiles=1">
+        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+        </span>
+        <span>Profiles</span>
+    </a>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<style>
+.channel-editor-list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.channel-editor-row {
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.85rem;
+    padding: 0.75rem;
+    background: var(--bs-tertiary-bg);
+}
+
+@media (max-width: 767.98px) {
+    .profile-item {
+        padding: 0.8rem !important;
+        margin-bottom: 0.7rem !important;
+        border-radius: 0.85rem !important;
+        background: var(--firefly-mobile-surface);
+        border-color: var(--firefly-mobile-border) !important;
+    }
+
+    .profile-item .btn-group-vertical {
+        min-width: 5.1rem;
+    }
+
+    .channel-editor-row {
+        padding: 0.65rem;
+    }
+}
+</style>
 <script>
 console.log('[profiles] script loaded');
 let profiles = {};
@@ -162,6 +281,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Set up event listeners first so the UI is interactive immediately
     document.getElementById('createProfileForm').addEventListener('submit', createProfile);
     document.getElementById('saveProfileBtn').addEventListener('click', updateProfile);
+    document.getElementById('addNewChannelBtn').addEventListener('click', () => addChannelRow('newChannelsList'));
+    document.getElementById('addEditChannelBtn').addEventListener('click', () => addChannelRow('editChannelsList'));
 
     // Delegate edit and delete buttons robustly (use closest)
     document.getElementById('profilesList')?.addEventListener('click', function(e) {
@@ -200,7 +321,60 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Only load profiles, not messages
     loadProfiles();
+    renderChannelRows('newChannelsList', [{ name: '', key: '' }]);
+    renderChannelRows('editChannelsList', [{ name: '', key: '' }]);
 });
+
+function renderChannelRows(containerId, channels) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const normalized = Array.isArray(channels) && channels.length ? channels : [{ name: '', key: '' }];
+    container.innerHTML = normalized.map((channel, index) => `
+        <div class="channel-editor-row" data-channel-index="${index}">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-5">
+                    <label class="form-label small text-muted">Channel Name</label>
+                    <input type="text" class="form-control channel-name-input" maxlength="64" value="${escapeHtml(channel.name || '')}" placeholder="e.g. LongFast">
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label small text-muted">Key</label>
+                    <input type="text" class="form-control channel-key-input" maxlength="256" value="${escapeHtml(channel.key || '')}" placeholder="e.g. AQ==">
+                </div>
+                <div class="col-12 col-md-1">
+                    <button class="btn btn-outline-danger w-100 remove-channel-btn" type="button" onclick="removeChannelRow('${containerId}', ${index})">×</button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function addChannelRow(containerId) {
+    const channels = collectChannels(containerId, false);
+    channels.push({ name: '', key: '' });
+    renderChannelRows(containerId, channels);
+}
+
+function removeChannelRow(containerId, index) {
+    const channels = collectChannels(containerId, false).filter((_, rowIndex) => rowIndex !== index);
+    renderChannelRows(containerId, channels);
+}
+
+function collectChannels(containerId, requireValues = true) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+
+    const rows = Array.from(container.querySelectorAll('.channel-editor-row'));
+    const channels = rows.map(row => ({
+        name: row.querySelector('.channel-name-input')?.value.trim() || '',
+        key: row.querySelector('.channel-key-input')?.value.trim() || '',
+    }));
+
+    const filtered = channels.filter(channel => channel.name || channel.key);
+    if (!requireValues) {
+        return filtered;
+    }
+    return filtered.filter(channel => channel.name && channel.key);
+}
 
 function loadProfiles() {
     fetch('/api/profiles')
@@ -226,12 +400,11 @@ function createProfile(e) {
         node_id: document.getElementById('newNodeId').value.trim(),
         long_name: document.getElementById('newLongName').value.trim(),
         short_name: document.getElementById('newShortName').value.trim(),
-        channel: document.getElementById('newChannel').value.trim(),
-        key: document.getElementById('newKey').value.trim(),
+        channels: collectChannels('newChannelsList'),
         hop_limit: hopLimit
     };
-    if (Object.values(payload).some(v => !v)) {
-        alert('All fields are required');
+    if (!payload.node_id || !payload.long_name || !payload.short_name || !payload.channels.length) {
+        alert('All fields are required, including at least one complete channel.');
         return;
     }
     fetch('/api/profiles', {
@@ -258,9 +431,8 @@ function openEditModal(profileId) {
     document.getElementById('editNodeId').value = profile.node_id || '';
     document.getElementById('editLongName').value = profile.long_name || '';
     document.getElementById('editShortName').value = profile.short_name || '';
-    document.getElementById('editChannel').value = profile.channel || '';
-    document.getElementById('editKey').value = profile.key || '';
     document.getElementById('editHopLimit').value = profile.hop_limit !== undefined ? profile.hop_limit : 3;
+    renderChannelRows('editChannelsList', profile.channels || [{ name: profile.channel || '', key: profile.key || '' }]);
     new bootstrap.Modal(document.getElementById('editProfileModal')).show();
 }
 
@@ -269,13 +441,12 @@ function updateProfile() {
     const node_id = document.getElementById('editNodeId').value.trim();
     const long_name = document.getElementById('editLongName').value.trim();
     const short_name = document.getElementById('editShortName').value.trim();
-    const channel = document.getElementById('editChannel').value.trim();
-    const key = document.getElementById('editKey').value.trim();
+    const channels = collectChannels('editChannelsList');
     const hopLimitValue = document.getElementById('editHopLimit').value;
     const hopLimit = hopLimitValue === '' ? 3 : parseInt(hopLimitValue);
 
-    if (!node_id || !long_name || !short_name || !channel || !key) {
-        alert('All fields are required');
+    if (!node_id || !long_name || !short_name || !channels.length) {
+        alert('All fields are required, including at least one complete channel.');
         return;
     }
     
@@ -292,8 +463,7 @@ function updateProfile() {
             node_id: node_id,
             long_name: long_name,
             short_name: short_name,
-            channel: channel,
-            key: key,
+            channels: channels,
             hop_limit: hopLimit
         })
     })
@@ -339,6 +509,14 @@ function deleteProfile(profileId) {
     });
 }
 
-</script>
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 </script>
 {% endblock %}

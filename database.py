@@ -66,6 +66,10 @@ class Database:
                     sender_ip TEXT,
                     direction TEXT DEFAULT 'received',  -- 'sent' or 'received'
                     channel INTEGER NOT NULL,  -- Channel number (from generate_hash)
+                    message_type TEXT DEFAULT 'channel',  -- 'channel' or 'dm'
+                    reply_packet_id INTEGER,
+                    target_node_num INTEGER,
+                    owner_profile_id TEXT,
                     hop_limit INTEGER,
                     hop_start INTEGER,
                     rx_snr REAL,
@@ -91,17 +95,63 @@ class Database:
             except sqlite3.OperationalError:
                 # Column already exists, which is fine
                 pass
+
+            try:
+                conn.execute("ALTER TABLE profiles ADD COLUMN channels_json TEXT")
+                print("[DB] Added channels_json column to profiles table")
+            except sqlite3.OperationalError:
+                pass
+
+            for column_sql, column_name in [
+                ("ALTER TABLE messages ADD COLUMN message_type TEXT DEFAULT 'channel'", "message_type"),
+                ("ALTER TABLE messages ADD COLUMN reply_packet_id INTEGER", "reply_packet_id"),
+                ("ALTER TABLE messages ADD COLUMN target_node_num INTEGER", "target_node_num"),
+                ("ALTER TABLE messages ADD COLUMN owner_profile_id TEXT", "owner_profile_id"),
+            ]:
+                try:
+                    conn.execute(column_sql)
+                    print(f"[DB] Added {column_name} column to messages table")
+                except sqlite3.OperationalError:
+                    pass
             
             # Create indexes for better performance
             conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_channel ON nodes (channel)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes (last_seen DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_channel_last_seen ON nodes (channel, last_seen DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages (channel)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_type ON messages (message_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_owner_profile ON messages (owner_profile_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_target_node ON messages (target_node_num)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages (timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_timestamp ON messages (channel, timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_last_seen ON profile_last_seen (profile_id)")
             
             conn.commit()
+
+    @staticmethod
+    def _normalize_channels(channels=None, legacy_channel: str = "", legacy_key: str = "") -> List[Dict]:
+        normalized = []
+
+        if isinstance(channels, str):
+            try:
+                channels = json.loads(channels)
+            except Exception:
+                channels = None
+
+        if isinstance(channels, list):
+            for channel in channels:
+                if not isinstance(channel, dict):
+                    continue
+                name = (channel.get("name") or channel.get("channel") or "").strip()
+                key = (channel.get("key") or "").strip()
+                if not name or not key:
+                    continue
+                normalized.append({"name": name, "key": key})
+
+        if not normalized and legacy_channel and legacy_key:
+            normalized.append({"name": legacy_channel, "key": legacy_key})
+
+        return normalized
 
     def migrate_profiles_from_json(self, json_file: str = "profiles.json"):
         """Migrate existing profiles from JSON file to database (only if not already migrated)"""
@@ -129,17 +179,25 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 migrated_count = 0
                 for profile_id, profile in profiles_data.items():
+                    channels = self._normalize_channels(
+                        profile.get("channels"),
+                        profile.get("channel", ""),
+                        profile.get("key", ""),
+                    )
+                    primary_channel = channels[0]["name"] if channels else profile.get("channel", "")
+                    primary_key = channels[0]["key"] if channels else profile.get("key", "")
                     conn.execute("""
                         INSERT OR IGNORE INTO profiles 
-                        (id, node_id, long_name, short_name, channel, key, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, node_id, long_name, short_name, channel, key, channels_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         profile_id,
                         profile.get('node_id', ''),
                         profile.get('long_name', ''),
                         profile.get('short_name', ''),
-                        profile.get('channel', ''),
-                        profile.get('key', ''),
+                        primary_channel,
+                        primary_key,
+                        json.dumps(channels),
                         profile.get('created_at', datetime.now().isoformat()),
                         profile.get('updated_at', datetime.now().isoformat())
                     ))
@@ -165,18 +223,22 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
-                SELECT id, node_id, long_name, short_name, channel, key, hop_limit, 
+                SELECT id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
                        created_at, updated_at FROM profiles ORDER BY created_at DESC
             """)
             profiles = {}
             for row in cursor:
+                channels = self._normalize_channels(row["channels_json"], row["channel"], row["key"])
+                primary_channel = channels[0]["name"] if channels else row["channel"]
+                primary_key = channels[0]["key"] if channels else row["key"]
                 profiles[row['id']] = {
                     'id': row['id'],
                     'node_id': row['node_id'],
                     'long_name': row['long_name'],
                     'short_name': row['short_name'],
-                    'channel': row['channel'],
-                    'key': row['key'],
+                    'channel': primary_channel,
+                    'key': primary_key,
+                    'channels': channels,
                     'hop_limit': row['hop_limit'] or 3,  # Default to 3 if null
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
@@ -188,57 +250,87 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
-                SELECT id, node_id, long_name, short_name, channel, key, hop_limit, 
+                SELECT id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
                        created_at, updated_at FROM profiles WHERE id = ?
             """, (profile_id,))
             row = cursor.fetchone()
             if row:
+                channels = self._normalize_channels(row["channels_json"], row["channel"], row["key"])
+                primary_channel = channels[0]["name"] if channels else row["channel"]
+                primary_key = channels[0]["key"] if channels else row["key"]
                 return {
                     'id': row['id'],
                     'node_id': row['node_id'],
                     'long_name': row['long_name'],
                     'short_name': row['short_name'],
-                    'channel': row['channel'],
-                    'key': row['key'],
+                    'channel': primary_channel,
+                    'key': primary_key,
+                    'channels': channels,
                     'hop_limit': row['hop_limit'] or 3,  # Default to 3 if null
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
                 }
             return None
 
-    def create_profile(self, profile_id: str, node_id: str, long_name: str, 
-                      short_name: str, channel: str, key: str, hop_limit: int = 3) -> bool:
+    def create_profile(self, profile_id: str, node_id: str, long_name: str,
+                      short_name: str, channels: List[Dict], hop_limit: int = 3) -> bool:
         """Create a new profile"""
         # Validate hop_limit range (0-7)
         if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
             hop_limit = 3  # Default to 3 if invalid
+        channels = self._normalize_channels(channels)
+        if not channels:
+            return False
+        primary = channels[0]
             
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
-                    INSERT INTO profiles (id, node_id, long_name, short_name, channel, key, hop_limit)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (profile_id, node_id, long_name, short_name, channel, key, hop_limit))
+                    INSERT INTO profiles (id, node_id, long_name, short_name, channel, key, channels_json, hop_limit)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    profile_id,
+                    node_id,
+                    long_name,
+                    short_name,
+                    primary["name"],
+                    primary["key"],
+                    json.dumps(channels),
+                    hop_limit,
+                ))
                 conn.commit()
                 return True
         except Exception as e:
             print(f"Error creating profile: {e}")
             return False
 
-    def update_profile(self, profile_id: str, node_id: str, long_name: str, 
-                      short_name: str, channel: str, key: str, hop_limit: int = 3) -> bool:
+    def update_profile(self, profile_id: str, node_id: str, long_name: str,
+                      short_name: str, channels: List[Dict], hop_limit: int = 3) -> bool:
         """Update an existing profile"""
         # Validate hop_limit range (0-7)
         if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
             hop_limit = 3  # Default to 3 if invalid
+        channels = self._normalize_channels(channels)
+        if not channels:
+            return False
+        primary = channels[0]
             
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute("""
                     UPDATE profiles SET node_id = ?, long_name = ?, short_name = ?, 
-                                      channel = ?, key = ?, hop_limit = ?, updated_at = CURRENT_TIMESTAMP
+                                      channel = ?, key = ?, channels_json = ?, hop_limit = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                """, (node_id, long_name, short_name, channel, key, hop_limit, profile_id))
+                """, (
+                    node_id,
+                    long_name,
+                    short_name,
+                    primary["name"],
+                    primary["key"],
+                    json.dumps(channels),
+                    hop_limit,
+                    profile_id,
+                ))
                 return cursor.rowcount > 0
         except Exception as e:
             print(f"Error updating profile: {e}")
@@ -450,7 +542,8 @@ class Database:
     def store_message(self, message_id: str, packet_id: int = None,
                      sender_num: int = None, sender_display: str = None,
                      content: str = None, sender_ip: str = None, direction: str = "received",
-                     channel: int = None, hop_limit: int = None, hop_start: int = None,
+                     channel: int = None, message_type: str = "channel", reply_packet_id: int = None, target_node_num: int = None,
+                     owner_profile_id: str = None, hop_limit: int = None, hop_start: int = None,
                      rx_snr: float = None, rx_rssi: int = None) -> bool:
         """Store a message by channel (accessible to any profile using that channel)"""
         try:
@@ -458,12 +551,12 @@ class Database:
                 conn.execute("""
                     INSERT INTO messages 
                     (message_id, packet_id, sender_num, sender_display, 
-                     content, sender_ip, direction, channel, hop_limit, hop_start, 
-                     rx_snr, rx_rssi)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     content, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
+                     owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (message_id, packet_id, sender_num, sender_display,
-                     content, sender_ip, direction, channel, hop_limit, hop_start,
-                     rx_snr, rx_rssi))
+                     content, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
+                     owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi))
                 conn.commit()
                 return True
         except Exception as e:
@@ -528,40 +621,27 @@ class Database:
             # Get messages for the specific channel
             cursor = conn.execute("""
                 SELECT message_id, packet_id, sender_num, sender_display, content, 
-                       timestamp, sender_ip, direction, channel, hop_limit, hop_start,
-                       rx_snr, rx_rssi
-                FROM messages WHERE channel = ?
+                       timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
+                       owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi
+                FROM messages WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel'
                 ORDER BY timestamp DESC LIMIT ?
             """, (channel, limit))
             
-            messages = []
-            for row in cursor:
-                sender_num = row['sender_num']
-                
-                # Use stored sender_display or fallback
-                if row['sender_display']:
-                    current_sender_display = row['sender_display']
-                elif sender_num:
-                    current_sender_display = f"!{hex(sender_num)[2:].zfill(8)}"
-                else:
-                    current_sender_display = 'Unknown'
-                
-                messages.append({
-                    'id': row['message_id'],
-                    'packet_id': row['packet_id'],
-                    'sender': f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else 'Unknown',
-                    'sender_display': current_sender_display,
-                    'content': row['content'],
-                    'timestamp': row['timestamp'],
-                    'sender_ip': row['sender_ip'],
-                    'direction': row['direction'],
-                    'channel': row['channel'],
-                    'hop_limit': row['hop_limit'],
-                    'hop_start': row['hop_start'],
-                    'rx_snr': row['rx_snr'],
-                    'rx_rssi': row['rx_rssi']
-                })
-            return messages[::-1]  # Return in chronological order
+            return self._serialize_messages(cursor)
+
+    def get_dm_messages_for_profile(self, profile_id: str, limit: int = 200) -> List[Dict]:
+        """Get direct messages scoped to a specific profile identity."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT message_id, packet_id, sender_num, sender_display, content,
+                       timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
+                       owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi
+                FROM messages
+                WHERE owner_profile_id = ? AND COALESCE(message_type, 'channel') = 'dm'
+                ORDER BY timestamp DESC LIMIT ?
+            """, (profile_id, limit))
+            return self._serialize_messages(cursor)
 
     def get_nodes_for_profile_channel(self, profile_id: str, channel: int) -> List[Dict]:
         """Get nodes for a specific profile that have been seen on a specific channel"""
@@ -661,46 +741,55 @@ class Database:
                 # Get messages newer than last seen
                 cursor = conn.execute("""
                     SELECT message_id, packet_id, sender_num, sender_display, content, 
-                           timestamp, sender_ip, direction, channel, hop_limit, hop_start,
-                           rx_snr, rx_rssi
-                    FROM messages WHERE channel = ? AND timestamp > ?
+                           timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
+                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi
+                    FROM messages WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel' AND timestamp > ?
                     ORDER BY timestamp DESC LIMIT ?
                 """, (channel, last_seen_row['last_seen_timestamp'], limit))
             else:
                 # No last seen timestamp - return all messages (but limit to prevent overload)
                 cursor = conn.execute("""
                     SELECT message_id, packet_id, sender_num, sender_display, content, 
-                           timestamp, sender_ip, direction, channel, hop_limit, hop_start,
-                           rx_snr, rx_rssi
-                    FROM messages WHERE channel = ?
+                           timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
+                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi
+                    FROM messages WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel'
                     ORDER BY timestamp DESC LIMIT ?
                 """, (channel, limit))
-            
-            messages = []
-            for row in cursor:
-                sender_num = row['sender_num']
-                
-                # Use stored sender_display or fallback
-                if row['sender_display']:
-                    current_sender_display = row['sender_display']
-                elif sender_num:
-                    current_sender_display = f"!{hex(sender_num)[2:].zfill(8)}"
-                else:
-                    current_sender_display = 'Unknown'
-                
-                messages.append({
-                    'id': row['message_id'],
-                    'packet_id': row['packet_id'],
-                    'sender': f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else 'Unknown',
-                    'sender_display': current_sender_display,
-                    'content': row['content'],
-                    'timestamp': row['timestamp'],
-                    'sender_ip': row['sender_ip'],
-                    'direction': row['direction'],
-                    'channel': row['channel'],
-                    'hop_limit': row['hop_limit'],
-                    'hop_start': row['hop_start'],
-                    'rx_snr': row['rx_snr'],
-                    'rx_rssi': row['rx_rssi']
-                })
-            return messages[::-1]  # Return in chronological order
+
+            return self._serialize_messages(cursor)
+
+    def _serialize_messages(self, cursor) -> List[Dict]:
+        messages = []
+        for row in cursor:
+            sender_num = row['sender_num']
+            target_node_num = row['target_node_num']
+
+            if row['sender_display']:
+                current_sender_display = row['sender_display']
+            elif sender_num:
+                current_sender_display = f"!{hex(sender_num)[2:].zfill(8)}"
+            else:
+                current_sender_display = 'Unknown'
+
+            messages.append({
+                'id': row['message_id'],
+                'packet_id': row['packet_id'],
+                'reply_packet_id': row['reply_packet_id'],
+                'sender_num': sender_num,
+                'sender': f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else 'Unknown',
+                'sender_display': current_sender_display,
+                'content': row['content'],
+                'timestamp': row['timestamp'],
+                'sender_ip': row['sender_ip'],
+                'direction': row['direction'],
+                'channel': row['channel'],
+                'message_type': row['message_type'] or 'channel',
+                'target_node_num': target_node_num,
+                'target': f"!{hex(target_node_num)[2:].zfill(8)}" if target_node_num else None,
+                'owner_profile_id': row['owner_profile_id'],
+                'hop_limit': row['hop_limit'],
+                'hop_start': row['hop_start'],
+                'rx_snr': row['rx_snr'],
+                'rx_rssi': row['rx_rssi']
+            })
+        return messages[::-1]

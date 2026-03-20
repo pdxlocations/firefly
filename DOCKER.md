@@ -21,45 +21,17 @@ This guide will help you run Firefly using Docker and Docker Compose, based on t
    docker-compose up --build
    ```
    
-   **For optimal UDP multicast on Linux** (optional):
-   - Edit `docker-compose.yml`
-   - Comment out the `ports:` and `networks:` sections
-   - Uncomment `network_mode: host`
-   - Run: `docker-compose up --build`
+   The checked-in Compose file now defaults to `network_mode: host` so Firefly can use the host network stack for Meshtastic UDP.
+   On Docker Desktop, make sure host networking is enabled in Docker Desktop settings.
 
 4. **Access the application**:
-   - The startup logs will display the correct IP address to access
-   - Look for: `🌐 Web interface: http://[IP_ADDRESS]:5011`
-   - Firefly automatically detects your host machine's IP when running in Docker
+   - Host networking: `http://YOUR_IP:5011`
+   - If you switch back to bridge mode, use `http://localhost:5011` or your configured `FIREFLY_WEB_PORT`
    - The application will be ready to use!
 
-## IP Address Detection
-
-**New Feature**: Firefly automatically detects your host machine's IP address when running in Docker containers.
-
-### How it Works
-- **Docker Detection**: Automatically detects when running inside a container
-- **Host IP Discovery**: Uses multiple methods to find the host machine's IP:
-  - Network routing table analysis
-  - Socket connection testing
-  - Docker bridge network inspection
-- **Network Mode Aware**: Handles both host networking and bridge networking
-- **Fallback Protection**: Falls back to `localhost` if detection fails
-
-### Startup Messages
-When starting Firefly in Docker, you'll see:
-```
-🐳 Docker container detected, finding host IP address...
-   Using host networking mode
-   Found host IP: 192.168.1.100
-🌐 Web interface: http://192.168.1.100:5011
-```
-
-### Testing IP Detection
-You can test the IP detection independently:
-```bash
-docker-compose exec firefly python3 test_ip_detection.py
-```
+Startup messages now reflect the Compose networking mode:
+- `host`: Firefly prints a host IP URL using `FIREFLY_PORT`
+- `bridge`: Firefly prints a `localhost` URL using `FIREFLY_WEB_PORT`
 
 ## Configuration
 
@@ -72,7 +44,10 @@ cp .env.example .env
 ```
 
 Key variables:
-- `FIREFLY_WEB_PORT`: Web interface port (default: 5011)
+- `FIREFLY_HOST`: Flask bind address inside the container (default: `0.0.0.0`)
+- `FIREFLY_PORT`: Application port inside the container (default: `5011`)
+- `FIREFLY_WEB_PORT`: Published host port for bridge mode in `docker-compose.yml` (default: `5011`)
+- `FIREFLY_DATABASE_FILE`: SQLite database path (default: `/app/data/mudpchat.db`)
 - `FIREFLY_SECRET_KEY`: Flask secret key (change in production!)
 - `FIREFLY_UDP_PORT`: UDP port for Meshtastic communication (default: 4403)
 - `FIREFLY_DEBUG`: Enable debug mode (default: false)
@@ -114,32 +89,31 @@ Firefly communicates with Meshtastic devices via UDP multicast. This can be chal
 
 #### Docker Networking Options
 
-**Option 1: Bridge Network with Port Mapping (Default)**
+**Option 1: Host Network (Default)**
 ```bash
 docker-compose up --build
 ```
-- Uses custom bridge network
-- Maps UDP port 4403 to host
-- Works on all platforms
-- May have multicast limitations
+- Uses the host network stack directly
+- Best chance of working with Meshtastic UDP multicast
+- Requires host networking support in your Docker runtime
 
-**Option 2: Host Network (Linux only)**
+**Option 2: Bridge Network with Port Mapping**
 
-Edit `docker-compose.yml` to enable host networking:
-1. Comment out the `ports:` and `networks:` sections
-2. Uncomment `network_mode: host`
-3. Run: `docker-compose up --build`
+Edit `docker-compose.yml` to enable bridge networking:
+1. Comment out `network_mode: host`
+2. Uncomment the `ports:` and `networks:` sections
+3. Change `NETWORK_MODE=host` to `NETWORK_MODE=bridge`
+4. Run `docker-compose up --build`
 
 Benefits:
-- Uses host networking directly
-- Full multicast support on Linux
-- Best for production Meshtastic communication
+- Works on runtimes where host networking is unavailable
+- Lets you remap the host web port with `FIREFLY_WEB_PORT`
 
 #### Requirements
 1. UDP port 4403 (or your configured port) is accessible
 2. Your Meshtastic device is configured to send UDP packets to your Docker host
-3. If using bridge network, ensure multicast is properly forwarded
-4. Host networking may be required for full multicast support
+3. Host networking is usually required for full multicast support
+4. If using bridge mode, ensure multicast is properly forwarded
 
 ## Useful Commands
 
@@ -180,22 +154,18 @@ docker-compose up --build
 ### UDP Communication Issues
 **This is the most common issue with Docker deployments.**
 
-#### Recommended Solution for Linux
+#### Recommended Solution
 ```bash
 # Stop current container
 docker-compose down
 
-# Edit docker-compose.yml to enable host networking:
-# 1. Comment out 'ports:' and 'networks:' sections
-# 2. Uncomment 'network_mode: host'
-# 3. Restart
+# Use the default checked-in host-networking configuration
 docker-compose up --build
 ```
 
-#### macOS/Windows Users
+#### If Host Networking Is Unavailable
 ```bash
-# Docker Desktop has UDP multicast limitations
-# Recommend native installation for development:
+# Fall back to native installation for development:
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt

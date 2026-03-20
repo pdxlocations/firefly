@@ -7,3 +7,5 @@ meshtastic
 cryptography
 mudp
 Pypubsub
+vnode
+meshdb

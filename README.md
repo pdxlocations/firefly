@@ -55,7 +55,8 @@ The easiest way to run Firefly is using Docker:
    ```
 
 4. **Access the application**
-   - Open your browser to `http://localhost:5011`
+   - In the default Docker bridge setup, open `http://localhost:5011`
+   - If you switch Compose to Linux host networking, use `http://YOUR_IP:5011`
    - The application will be ready to use!
 
 ### Option 2: Native Python Installation
@@ -101,7 +102,7 @@ The easiest way to run Firefly is using Docker:
    ```bash
    python start_with_venv.py
    ```
-   This script automatically activates your virtual environment and starts the application.
+   This script validates the active interpreter and starts the application.
    
    **Option B: Manual start**
    ```bash
@@ -152,7 +153,7 @@ To chat with others on your network:
 - Real-time messaging with other Meshtastic nodes
 - Profile selection and management
 - Connection status monitoring
-- Quick overview of recently seen nodes
+- Channel, DM, and node inbox views in one interface
 
 ### Nodes Page
 - Comprehensive list of all discovered mesh nodes
@@ -175,20 +176,24 @@ To chat with others on your network:
 
 Configure Firefly using environment variables in `.env` file:
 
-- **FIREFLY_WEB_PORT**: Web interface port (default: 5011)
+- **FIREFLY_HOST**: Bind address for the Flask server inside the container (default: `0.0.0.0`)
+- **FIREFLY_PORT**: Application port inside the container (default: `5011`)
+- **FIREFLY_WEB_PORT**: Published host port in `docker-compose.yml` (default: `5011`)
 - **FIREFLY_UDP_PORT**: UDP multicast port (default: 4403)
+- **FIREFLY_DATABASE_FILE**: SQLite database path (Docker default: `/app/data/mudpchat.db`)
 - **FIREFLY_SECRET_KEY**: Flask secret key (change in production!)
 - **FIREFLY_DEBUG**: Enable debug mode (default: false)
-- **FIREFLY_NAME**: Application name displayed in UI (default: Firefly)
+- **NETWORK_MODE**: Set by `docker-compose.yml` to match bridge vs host networking for startup messages
 
 ### Native Installation Configuration
 
-You can modify these settings in `app.py`:
+Native runs use the same application defaults without Docker:
 
-- **MCAST_GRP**: Default is 224.0.0.69 (multicast group address)
-- **MCAST_PORT**: Default is 4403 (UDP multicast port)
-- **Flask port**: Default is 5011 (change in app.py)
-- **Database**: SQLite database stored as `firefly.db`
+- **FIREFLY_HOST**: Flask bind address (default: `0.0.0.0`)
+- **FIREFLY_PORT**: Web interface port (default: `5011`)
+- **FIREFLY_DATABASE_FILE**: SQLite database path (default: `firefly.db`)
+- **FIREFLY_UDP_PORT**: UDP multicast port (default: `4403`)
+- **FIREFLY_MCAST_GRP**: Multicast group address (default: `224.0.0.69`)
 
 ## Network Requirements
 
@@ -201,11 +206,16 @@ You can modify these settings in `app.py`:
 
 ```
 firefly/
+├── .env.example       # Example Docker environment overrides
+├── DOCKER.md          # Docker-specific setup and troubleshooting
+├── Dockerfile         # Container image definition
 ├── app.py              # Main Flask application
 ├── database.py         # Database models and operations
+├── docker-compose.yml  # Local Docker orchestration
 ├── encryption.py       # Meshtastic encryption/decryption
 ├── requirements.txt    # Python dependencies
-├── firefly.db         # SQLite database (created automatically)
+├── start.py            # Primary startup entry point
+├── start_with_venv.py  # Interpreter validation helper
 ├── templates/
 │   ├── base.html      # Base template with navigation
 │   ├── index.html     # Chat interface
@@ -309,7 +319,8 @@ If you get a "port already in use" error:
 
 ## Data Persistence
 
-- **Profile Storage**: All profiles are stored in `firefly.db` SQLite database
+- **Profile Storage**: Profiles, nodes, and messages are stored in SQLite
+- **Database Location**: Native default is `firefly.db`; Docker default is `/app/data/mudpchat.db`
 - **Automatic Migration**: Existing `profiles.json` files are automatically migrated on first run
 - **Persistent Data**: Profiles, nodes, and messages survive application restarts
 - **Safe Migration**: Migration only occurs once when database is empty
@@ -338,12 +349,11 @@ For detailed Docker usage, see [DOCKER.md](DOCKER.md).
 - Uses Meshtastic's built-in AES encryption for message security
 - Node information and messages are stored locally in SQLite database
 - Database contains channel encryption keys - protect the database file
-- Web interface runs on localhost by default (configure as needed)
-- Consider firewall rules if exposing the web interface beyond localhost
+- The Flask server binds to `0.0.0.0` by default; use firewall rules if exposing it beyond trusted networks
 - **Docker**: Change `FIREFLY_SECRET_KEY` in production deployments
 
 ## License
-This project is provided as-is for educational and personal use.
+
+GPL-3.0-only. See [`LICENSE`](LICENSE).
 
 Meshtastic® is a registered trademark of Meshtastic LLC. Meshtastic software components are released under various licenses, see GitHub for details. No warranty is provided - use at your own risk.
-

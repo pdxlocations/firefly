@@ -7,32 +7,34 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
-        /* Meshtastic Web Client Color Palette */
+        /* Firefly color palette */
         :root {
-            /* Dark Theme Colors - Matching Meshtastic Web */
-            --mudp-dark-bg: #0f172a;
-            --mudp-dark-surface: #1e293b;
-            --mudp-dark-surface-hover: #334155;
-            --mudp-dark-border: #475569;
-            --mudp-dark-text: #ebebeb;
-            --mudp-dark-text-muted: #bdbdbd;
-            
-            /* Light Theme Colors - Matching Meshtastic Web */
-            --mudp-light-bg: #ffffff;
-            --mudp-light-surface: #f8fafc;
-            --mudp-light-surface-hover: #f1f5f9;
-            --mudp-light-border: #e2e8f0;
-            --mudp-light-text: #111132;
-            --mudp-light-text-muted: #64748b;
-            
-            /* Meshtastic Accent Colors */
-            --mudp-primary: #67ea94;
-            --mudp-primary-hover: #4caf50;
-            --mudp-secondary: #64748b;
-            --mudp-success: #10b981;
-            --mudp-warning: #f59e0b;
-            --mudp-danger: #ef4444;
-            --mudp-info: #3b82f6;
+            --mudp-dark-bg: #0b1420;
+            --mudp-dark-surface: #162231;
+            --mudp-dark-surface-hover: #223347;
+            --mudp-dark-border: #34506b;
+            --mudp-dark-text: #edf3f8;
+            --mudp-dark-text-muted: #9fb3c7;
+
+            --mudp-light-bg: #edf3f8;
+            --mudp-light-surface: #ffffff;
+            --mudp-light-surface-hover: #f3f7fa;
+            --mudp-light-border: #d7e0e8;
+            --mudp-light-text: #162231;
+            --mudp-light-text-muted: #61758a;
+
+            --mudp-primary: #1f5d96;
+            --mudp-primary-hover: #17476f;
+            --mudp-secondary: #61758a;
+            --mudp-success: #2f9e72;
+            --mudp-warning: #d3922e;
+            --mudp-danger: #c65353;
+            --mudp-info: #4f8ecb;
+
+            --firefly-mobile-accent: #1f5d96;
+            --firefly-mobile-surface: rgba(255, 255, 255, 0.92);
+            --firefly-mobile-surface-muted: rgba(244, 248, 251, 0.92);
+            --firefly-mobile-border: rgba(175, 191, 205, 0.68);
         }
         
         /* Enhanced dark mode with custom colors */
@@ -40,6 +42,10 @@
             color-scheme: dark;
             background-color: var(--mudp-dark-bg) !important;
             color: var(--mudp-dark-text) !important;
+            --firefly-mobile-accent: #68a6de;
+            --firefly-mobile-surface: rgba(18, 31, 45, 0.9);
+            --firefly-mobile-surface-muted: rgba(24, 38, 55, 0.92);
+            --firefly-mobile-border: rgba(71, 97, 123, 0.9);
         }
         
         [data-bs-theme="light"] {
@@ -47,16 +53,123 @@
             background-color: var(--mudp-light-bg) !important;
             color: var(--mudp-light-text) !important;
         }
+
+        .mobile-page-header {
+            background: var(--firefly-mobile-surface-muted);
+            border: 1px solid var(--firefly-mobile-border);
+            border-radius: 1.1rem;
+            padding: 0.85rem 0.95rem;
+            box-shadow: 0 10px 24px rgba(44, 64, 82, 0.08);
+        }
+
+        .mobile-page-header__brand {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        .mobile-page-header__brand img {
+            display: block;
+        }
+
+        .mobile-page-header__logo--light {
+            display: none;
+        }
+
+        [data-bs-theme="dark"] .mobile-page-header__logo--light {
+            display: none !important;
+        }
+
+        [data-bs-theme="light"] .mobile-page-header__logo--dark {
+            display: none !important;
+        }
+
+        [data-bs-theme="light"] .mobile-page-header__logo--light {
+            display: block !important;
+        }
+
+        @media (max-width: 767.98px) {
+            body.mobile-fixed-nav-page > .navbar {
+                display: none;
+            }
+
+            body.mobile-fixed-nav-page > .container.mt-4 {
+                margin-top: 0 !important;
+                padding-top: 0;
+                padding-left: 0.5rem;
+                padding-right: 0.5rem;
+                padding-bottom: calc(5.9rem + env(safe-area-inset-bottom));
+            }
+
+            body.mobile-fixed-nav-page .mobile-bottom-nav {
+                position: fixed;
+                left: 0.75rem;
+                right: 0.75rem;
+                bottom: calc(0.65rem + env(safe-area-inset-bottom));
+                z-index: 1040;
+                display: grid;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 0.5rem;
+                padding: 0.55rem;
+                background: var(--firefly-mobile-surface-muted);
+                backdrop-filter: blur(18px);
+                border: 1px solid var(--firefly-mobile-border);
+                border-radius: 1.5rem;
+                box-shadow: 0 18px 45px rgba(38, 57, 77, 0.18);
+            }
+
+            body.mobile-fixed-nav-page .mobile-bottom-nav__button {
+                border: none;
+                background: transparent;
+                color: #516170;
+                border-radius: 1.1rem;
+                padding: 0.55rem 0.4rem;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 0.28rem;
+                font-size: 0.72rem;
+                font-weight: 600;
+                transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+                text-decoration: none;
+            }
+
+            [data-bs-theme="dark"] body.mobile-fixed-nav-page .mobile-bottom-nav__button {
+                color: #9fb3c7;
+            }
+
+            body.mobile-fixed-nav-page .mobile-bottom-nav__button.active {
+                background: var(--firefly-mobile-accent);
+                color: #ffffff;
+                transform: translateY(-1px);
+            }
+
+            body.mobile-fixed-nav-page .mobile-bottom-nav__icon {
+                width: 1.35rem;
+                height: 1.35rem;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            body.mobile-fixed-nav-page .mobile-bottom-nav__icon svg {
+                width: 100%;
+                height: 100%;
+            }
+        }
         
         /* Enhanced body styling */
         body[data-bs-theme="dark"] {
-            background: linear-gradient(135deg, var(--mudp-dark-bg) 0%, #161b22 100%) !important;
+            background: linear-gradient(180deg, #08111b 0%, var(--mudp-dark-bg) 45%, #101c2b 100%) !important;
             color: var(--mudp-dark-text) !important;
             min-height: 100vh;
         }
         
         body[data-bs-theme="light"] {
-            background: linear-gradient(135deg, var(--mudp-light-bg) 0%, #ffffff 100%) !important;
+            background: linear-gradient(180deg, #f7fafc 0%, var(--mudp-light-bg) 55%, #e8eff5 100%) !important;
             color: var(--mudp-light-text) !important;
             min-height: 100vh;
         }
@@ -308,7 +421,7 @@
         /* Enhanced navbar styling */
         .navbar {
             backdrop-filter: blur(10px);
-            border-bottom: 2px solid var(--mudp-primary) !important;
+            border-bottom: 1px solid rgba(79, 142, 203, 0.35) !important;
         }
         
         /* Mobile hamburger menu styling */
@@ -357,7 +470,7 @@
         
         /* Dark theme navbar */
         [data-bs-theme="dark"] .navbar {
-            background: #0a0f1a !important;
+            background: linear-gradient(180deg, rgba(12, 21, 34, 0.96) 0%, rgba(22, 34, 49, 0.92) 100%) !important;
         }
         
         [data-bs-theme="dark"] .navbar-brand,
@@ -372,7 +485,7 @@
         
         /* Light theme navbar */
         [data-bs-theme="light"] .navbar {
-            background: #ffffff !important;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(237, 243, 248, 0.92) 100%) !important;
         }
         
         [data-bs-theme="light"] .navbar-brand,
@@ -501,7 +614,7 @@
         }
     </style>
 </head>
-<body data-bs-theme="dark">
+<body data-bs-theme="dark" class="{% block body_class %}{% endblock %}">
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('index') }}">
@@ -517,7 +630,7 @@
             
             <!-- Collapsible navbar content -->
             <div class="collapse navbar-collapse" id="navbarNav">
-                <div class="navbar-nav me-auto">
+                <div class="navbar-nav me-auto d-lg-none">
                     <a class="nav-link {{ 'active' if request.endpoint == 'index' else '' }}" href="{{ url_for('index') }}">Chat</a>
                     <a class="nav-link {{ 'active' if request.endpoint == 'nodes' else '' }}" href="{{ url_for('nodes') }}">Nodes</a>
                     <a class="nav-link {{ 'active' if request.endpoint == 'profiles' else '' }}" href="{{ url_for('profiles') }}">Profiles</a>
@@ -638,6 +751,32 @@
                   }
               });
           });
+      });
+
+      document.addEventListener('DOMContentLoaded', function() {
+          const desktopMediaQuery = window.matchMedia('(min-width: 768px)');
+
+          function syncProfileSelectorSheets() {
+              document.querySelectorAll('.profile-selector-sheet').forEach(function(sheet) {
+                  if (desktopMediaQuery.matches) {
+                      sheet.classList.remove('offcanvas-bottom');
+                      sheet.classList.add('offcanvas-end');
+                  } else {
+                      sheet.classList.remove('offcanvas-end');
+                      sheet.classList.add('offcanvas-bottom');
+                  }
+              });
+          }
+
+          syncProfileSelectorSheets();
+
+          if (typeof desktopMediaQuery.addEventListener === 'function') {
+              desktopMediaQuery.addEventListener('change', syncProfileSelectorSheets);
+          } else if (typeof desktopMediaQuery.addListener === 'function') {
+              desktopMediaQuery.addListener(syncProfileSelectorSheets);
+          }
+
+          window.addEventListener('resize', syncProfileSelectorSheets);
       });
     </script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

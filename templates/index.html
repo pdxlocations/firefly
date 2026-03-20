@@ -936,6 +936,7 @@ let activeDmTargetNodeNum = null;
 let pendingChannelIndex = null;
 let pendingDmTargetNodeNum = null;
 let meshNodes = [];
+let nodeSearchQuery = '';
 let channelMessages = [];
 let dmMessages = [];
 let dmTargets = [];
@@ -981,6 +982,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     messageInput.addEventListener('input', updateCharacterCounter);
     if (messagesContainer) {
         messagesContainer.addEventListener('click', handleThreadCardClick);
+        messagesContainer.addEventListener('input', handleThreadListInput);
     }
 
     const instructionsCollapse = document.getElementById('instructionsCollapse');
@@ -1345,6 +1347,7 @@ function openDmInbox() {
 
 async function openNodesInbox() {
     await loadNodes();
+    nodeSearchQuery = '';
     setActiveChatTab('nodes');
 }
 
@@ -1600,6 +1603,13 @@ function handleThreadCardClick(event) {
     }
 }
 
+function handleThreadListInput(event) {
+    if (event.target && event.target.id === 'nodeSearchInput') {
+        nodeSearchQuery = event.target.value || '';
+        renderActiveMessages();
+    }
+}
+
 function renderDmThreadList(container) {
     const threads = getDmThreads();
     if (!threads.length) {
@@ -1621,18 +1631,56 @@ function renderNodesList(container) {
         return;
     }
 
+    const filteredNodes = getFilteredNodes();
+    const searchValue = escapeHtml(nodeSearchQuery);
+
     container.innerHTML = `
         <div class="card">
             <div class="card-header">
-                <h5 class="mb-0">Recently Seen Nodes (${meshNodes.length})</h5>
+                <div class="d-flex flex-column gap-2">
+                    <div class="d-flex justify-content-between align-items-center gap-3">
+                        <small class="text-muted">${meshNodes.length} total</small>
+                    </div>
+                    <input
+                        id="nodeSearchInput"
+                        class="form-control"
+                        type="search"
+                        placeholder="Search nodes"
+                        value="${searchValue}"
+                        autocomplete="off"
+                    >
+                </div>
             </div>
             <div class="card-body">
-                <div class="node-list">
-                    ${meshNodes.map(renderNodeCardHtml).join('')}
-                </div>
+                ${
+                    filteredNodes.length
+                        ? `<div class="node-list">${filteredNodes.map(renderNodeCardHtml).join('')}</div>`
+                        : '<div class="text-muted small">No nodes match this search.</div>'
+                }
             </div>
         </div>
     `;
+}
+
+function getFilteredNodes() {
+    const query = nodeSearchQuery.trim().toLowerCase();
+    if (!query) return meshNodes;
+
+    return meshNodes.filter(node => {
+        const haystack = [
+            node.long_name,
+            node.short_name,
+            node.node_id,
+            node.hw_model,
+            node.role,
+            node.node_num,
+        ]
+            .filter(value => value !== null && value !== undefined)
+            .map(value => String(value).toLowerCase())
+            .join(' ');
+
+        return haystack.includes(query);
+    });
 }
 
 function getDmThreads() {

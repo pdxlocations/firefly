@@ -343,7 +343,7 @@ For detailed Docker usage, see [DOCKER.md](DOCKER.md).
 - **Docker**: Change `FIREFLY_SECRET_KEY` in production deployments
 
 ## License
-This project is provided as-is for educational and personal use.
+
+GPL-3.0-only. See [`LICENSE`](LICENSE).
 
 Meshtastic® is a registered trademark of Meshtastic LLC. Meshtastic software components are released under various licenses, see GitHub for details. No warranty is provided - use at your own risk.
-

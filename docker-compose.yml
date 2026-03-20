@@ -8,16 +8,14 @@ services:
     container_name: firefly-app
     
     # NETWORKING OPTIONS:
-    # Option 1 (Default): Bridge network with port mapping - works on all platforms
-    ports:
-      - "${FIREFLY_WEB_PORT:-5011}:${FIREFLY_PORT:-5011}"
-      - "${FIREFLY_UDP_PORT:-4403}:${FIREFLY_UDP_PORT:-4403}/udp"
-    networks:
-      - firefly-network
-    
-    # Option 2: Uncomment for host networking (Linux only, better UDP multicast)
-    # network_mode: host
-    # Note: When using host networking, comment out the 'ports' and 'networks' sections above
+    # Default: host networking for direct UDP multicast access on the host network stack.
+    network_mode: host
+    # If you need bridge mode instead, comment out `network_mode: host`, then uncomment:
+    # ports:
+    #   - "${FIREFLY_WEB_PORT:-5011}:${FIREFLY_PORT:-5011}"
+    #   - "${FIREFLY_UDP_PORT:-4403}:${FIREFLY_UDP_PORT:-4403}/udp"
+    # networks:
+    #   - firefly-network
     environment:
       - FIREFLY_HOST=${FIREFLY_HOST:-0.0.0.0}
       - FIREFLY_PORT=${FIREFLY_PORT:-5011}
@@ -27,8 +25,8 @@ services:
       - FIREFLY_DEBUG=${FIREFLY_DEBUG:-false}
       - FIREFLY_UDP_PORT=${FIREFLY_UDP_PORT:-4403}
       # Keep this in sync with the networking option above so startup logs show the right URL.
-      - NETWORK_MODE=bridge
-      # - NETWORK_MODE=host
+      - NETWORK_MODE=host
+      # - NETWORK_MODE=bridge
     volumes:
       - firefly_data:/app/data
       # Optional: mount your own config or profiles (uncomment if you have them)

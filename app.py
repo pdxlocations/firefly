@@ -11,6 +11,10 @@ import socketio as py_socketio
 import engineio
 from pubsub import pub
 
+from mudp_compat import apply_mudp_multicast_patch
+
+apply_mudp_multicast_patch()
+
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
 from mudp import node
 from database import Database

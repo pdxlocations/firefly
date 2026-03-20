@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 
 import meshdb
 from vnode import VirtualNode, parse_node_id
+from encryption import generate_hash
 
 
 BROADCAST_NODE_NUM = 0xFFFFFFFF
@@ -40,6 +41,10 @@ def _meshdb_root(profile: Dict) -> Path:
     root = _profile_root(profile) / "meshdb"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _firefly_db_path() -> Path:
+    return Path(os.getenv("FIREFLY_DATABASE_FILE", "firefly.db")).expanduser()
 
 
 def owner_node_num(profile: Dict) -> int:
@@ -149,6 +154,8 @@ class MeshNodeStore:
         self.profile = profile
         self.owner_node_num = owner_node_num(profile)
         self.db_path = str(_meshdb_root(profile))
+        self.firefly_db_path = str(_firefly_db_path())
+        self.channel_num = generate_hash(profile["channel"], profile["key"])
         self.node_db = meshdb.NodeDB(self.owner_node_num, self.db_path)
         self.node_db.ensure_table()
 
@@ -166,7 +173,7 @@ class MeshNodeStore:
             row = cursor.fetchone()
         if not row:
             return None
-        return self._row_to_dict(row)
+        return self._row_to_dict(row, fallback_hops=self._get_fallback_hops(int(node_num)))
 
     def list_nodes(self) -> List[Dict]:
         with self.node_db.connect() as con:
@@ -175,7 +182,12 @@ class MeshNodeStore:
                 f"SELECT * FROM {self.node_db.table} ORDER BY COALESCE(last_heard, 0) DESC, long_name ASC, node_num ASC"
             )
             rows = cursor.fetchall()
-        return [self._row_to_dict(row) for row in rows if int(row["node_num"]) != self.owner_node_num]
+        fallback_hops = self._get_fallback_hops_map()
+        return [
+            self._row_to_dict(row, fallback_hops=fallback_hops.get(int(row["node_num"])))
+            for row in rows
+            if int(row["node_num"]) != self.owner_node_num
+        ]
 
     def count_nodes(self) -> int:
         with self.node_db.connect() as con:
@@ -186,8 +198,51 @@ class MeshNodeStore:
             row = cursor.fetchone()
         return int(row[0]) if row else 0
 
-    def _row_to_dict(self, row: sqlite3.Row) -> Dict:
+    def _get_fallback_hops(self, node_num: int) -> Optional[int]:
+        hops_map = self._get_fallback_hops_map(node_num=node_num)
+        return hops_map.get(int(node_num))
+
+    def _get_fallback_hops_map(self, node_num: Optional[int] = None) -> Dict[int, int]:
+        if not os.path.exists(self.firefly_db_path):
+            return {}
+
+        query = """
+            SELECT sender_num, hop_start, hop_limit
+            FROM messages
+            WHERE channel = ?
+              AND sender_num IS NOT NULL
+              AND hop_start IS NOT NULL
+              AND hop_limit IS NOT NULL
+              AND COALESCE(message_type, 'channel') = 'channel'
+        """
+        params: List[object] = [self.channel_num]
+        if node_num is not None:
+            query += " AND sender_num = ?"
+            params.append(int(node_num))
+        query += " ORDER BY timestamp DESC"
+
+        hops_map: Dict[int, int] = {}
+        try:
+            with sqlite3.connect(self.firefly_db_path) as con:
+                con.row_factory = sqlite3.Row
+                cursor = con.execute(query, params)
+                for row in cursor.fetchall():
+                    sender_num = int(row["sender_num"])
+                    if sender_num in hops_map:
+                        continue
+                    hop_start = row["hop_start"]
+                    hop_limit = row["hop_limit"]
+                    if hop_start is None or hop_limit is None:
+                        continue
+                    hops_map[sender_num] = max(int(hop_start) - int(hop_limit), 0)
+        except Exception:
+            return {}
+
+        return hops_map
+
+    def _row_to_dict(self, row: sqlite3.Row, fallback_hops: Optional[int] = None) -> Dict:
         node_num = int(row["node_num"])
+        hops_away = row["hops_away"] if row["hops_away"] is not None else fallback_hops
         node = {
             "node_num": node_num,
             "node_id": node_id_from_num(node_num),
@@ -199,7 +254,7 @@ class MeshNodeStore:
             "public_key": row["public_key"] or None,
             "is_licensed": bool(row["is_licensed"]) if row["is_licensed"] is not None else False,
             "is_unmessagable": bool(row["is_unmessagable"]) if row["is_unmessagable"] is not None else False,
-            "hops_away": row["hops_away"],
+            "hops_away": hops_away,
             "snr": row["snr"],
             "last_heard": row["last_heard"],
             "last_seen": _epoch_to_iso(row["last_heard"]),

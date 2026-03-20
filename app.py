@@ -3,7 +3,7 @@
 from collections import deque
 
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import uuid
 import os
@@ -60,6 +60,73 @@ def _set_session_profile(profile):
 def _clear_session_profile():
     """Clear the current profile from session storage"""
     session.pop("current_profile", None)
+    session.pop("current_channel_index", None)
+
+
+def _get_session_channel_index():
+    try:
+        return int(session.get("current_channel_index", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _set_session_channel_index(channel_index):
+    try:
+        session["current_channel_index"] = max(0, int(channel_index))
+    except (TypeError, ValueError):
+        session["current_channel_index"] = 0
+
+
+def _profile_channels(profile):
+    if not profile:
+        return []
+    channels = profile.get("channels")
+    if isinstance(channels, list) and channels:
+        return [
+            {
+                "name": (channel.get("name") or "").strip(),
+                "key": (channel.get("key") or "").strip(),
+            }
+            for channel in channels
+            if isinstance(channel, dict) and (channel.get("name") or "").strip() and (channel.get("key") or "").strip()
+        ]
+    channel_name = (profile.get("channel") or "").strip()
+    channel_key = (profile.get("key") or "").strip()
+    if channel_name and channel_key:
+        return [{"name": channel_name, "key": channel_key}]
+    return []
+
+
+def _selected_channel_index(profile=None):
+    channels = _profile_channels(profile or _get_session_profile())
+    if not channels:
+        return 0
+    return min(_get_session_channel_index(), len(channels) - 1)
+
+
+def _selected_channel(profile=None):
+    channels = _profile_channels(profile or _get_session_profile())
+    if not channels:
+        return None
+    return channels[_selected_channel_index(profile)]
+
+
+def _effective_profile(profile=None, channel_index=None):
+    profile = profile or _get_session_profile()
+    if not profile:
+        return None
+    effective = dict(profile)
+    channels = _profile_channels(profile)
+    effective["channels"] = channels
+    if channels:
+        selected_index = _selected_channel_index(profile) if channel_index is None else max(0, min(int(channel_index), len(channels) - 1))
+        selected = channels[selected_index]
+        effective["channel"] = selected["name"]
+        effective["key"] = selected["key"]
+        effective["selected_channel_index"] = selected_index
+    else:
+        effective["selected_channel_index"] = 0
+    return effective
 
 
 def _current_profile_channel_num():
@@ -67,7 +134,7 @@ def _current_profile_channel_num():
     Returns an int channel number or None if unavailable.
     """
     try:
-        current_profile = _get_session_profile()
+        current_profile = _effective_profile()
         if not current_profile:
             return None
         ch_name = current_profile.get("channel")
@@ -81,6 +148,7 @@ def _current_profile_channel_num():
 
 def _profile_channel_num(profile):
     try:
+        profile = _effective_profile(profile)
         if not profile:
             return None
         ch_name = profile.get("channel")
@@ -135,7 +203,7 @@ virtual_node_manager = VirtualNodeManager(MCAST_GRP, MCAST_PORT)
 
 
 def _get_mesh_store(profile=None):
-    profile = profile or _get_session_profile()
+    profile = _effective_profile(profile)
     if not profile or not profile.get("node_id"):
         return None
     try:
@@ -146,13 +214,15 @@ def _get_mesh_store(profile=None):
 
 
 def _get_chat_payload(profile):
-    channel_number = _profile_channel_num(profile)
+    effective_profile = _effective_profile(profile)
+    channel_number = _profile_channel_num(effective_profile)
     channel_messages = db.get_messages_for_channel(channel_number) if channel_number is not None else []
-    dm_messages = db.get_dm_messages_for_profile(profile["id"]) if profile else []
+    dm_messages = db.get_dm_messages_for_profile(effective_profile["id"]) if effective_profile else []
     return {
         "channel_messages": channel_messages,
         "dm_messages": dm_messages,
         "channel_number": channel_number,
+        "selected_channel_index": effective_profile.get("selected_channel_index", 0) if effective_profile else 0,
     }
 
 
@@ -454,13 +524,13 @@ class ProfileManager:
         """Get a specific profile"""
         return self.db.get_profile(profile_id)
 
-    def create_profile(self, profile_id, node_id, long_name, short_name, channel, key, hop_limit=3):
+    def create_profile(self, profile_id, node_id, long_name, short_name, channels, hop_limit=3):
         """Create a new profile"""
-        return self.db.create_profile(profile_id, node_id, long_name, short_name, channel, key, hop_limit)
+        return self.db.create_profile(profile_id, node_id, long_name, short_name, channels, hop_limit)
 
-    def update_profile(self, profile_id, node_id, long_name, short_name, channel, key, hop_limit=3):
+    def update_profile(self, profile_id, node_id, long_name, short_name, channels, hop_limit=3):
         """Update an existing profile"""
-        return self.db.update_profile(profile_id, node_id, long_name, short_name, channel, key, hop_limit)
+        return self.db.update_profile(profile_id, node_id, long_name, short_name, channels, hop_limit)
 
     def delete_profile(self, profile_id):
         """Delete a profile"""
@@ -510,11 +580,12 @@ class UDPChatServer:
 
         try:
             self.running = True
-            self.current_profile_id = profile.get("id")
-            self.current_profile = profile
-            self.current_channel_hash = generate_hash(profile.get("channel", ""), profile.get("key", ""))
+            effective_profile = _effective_profile(profile)
+            self.current_profile_id = effective_profile.get("id")
+            self.current_profile = effective_profile
+            self.current_channel_hash = generate_hash(effective_profile.get("channel", ""), effective_profile.get("key", ""))
             print(
-                f"[UDP] Started virtual node for profile {profile.get('long_name', 'unknown')} on channel {self.current_channel_hash}"
+                f"[UDP] Started virtual node for profile {effective_profile.get('long_name', 'unknown')} on channel {self.current_channel_hash}"
             )
             print(f"[UDP] Listening on {MCAST_GRP}:{MCAST_PORT} with vnode identity")
             return True
@@ -569,21 +640,20 @@ class UDPChatServer:
                 sessions.append(session_id)
         return sessions
 
-    def can_switch_to_profile(self, profile_id, requester_session_id=None):
-        """Check if we can safely switch to a new vnode identity."""
+    def can_switch_transport(self, profile_id, channel_hash, requester_session_id=None):
+        """Check if we can safely switch to a new vnode identity and channel."""
         if not self.running:
             return True
 
-        if self.current_profile_id == profile_id:
+        if self.current_profile_id == profile_id and self.current_channel_hash == channel_hash:
             return True
 
-        current_profile_sessions = self.get_sessions_for_profile(self.current_profile_id)
-        other_sessions = [sid for sid in current_profile_sessions if sid != requester_session_id]
+        other_sessions = [sid for sid in self.active_sessions if sid != requester_session_id]
         if not other_sessions:
             return True
 
         print(
-            f"[UDP] Cannot switch profiles: {len(other_sessions)} other sessions active on profile {self.current_profile_id}"
+            f"[UDP] Cannot switch transport: {len(other_sessions)} other sessions are using profile {self.current_profile_id} channel {self.current_channel_hash}"
         )
         return False
 
@@ -591,19 +661,23 @@ class UDPChatServer:
         """Start or reuse the active vnode for a profile."""
         if not profile:
             return False
+        effective_profile = _effective_profile(profile)
+        channel_hash = generate_hash(effective_profile.get("channel", ""), effective_profile.get("key", ""))
 
-        if self.running and self.current_profile_id == profile.get("id"):
-            print(f"[UDP] Reusing existing virtual node for profile {profile.get('long_name', 'unknown')}")
+        if self.running and self.current_profile_id == effective_profile.get("id") and self.current_channel_hash == channel_hash:
+            print(
+                f"[UDP] Reusing existing virtual node for profile {effective_profile.get('long_name', 'unknown')} on channel {channel_hash}"
+            )
             return True
 
-        if not self.can_switch_to_profile(profile.get("id"), requester_session_id=session_id):
+        if not self.can_switch_transport(effective_profile.get("id"), channel_hash, requester_session_id=session_id):
             print(
-                f"[UDP] Cannot switch to profile {profile.get('id')} - other sessions are active on profile {self.current_profile_id}"
+                f"[UDP] Cannot switch to profile {effective_profile.get('id')} channel {channel_hash} - other sessions are active on profile {self.current_profile_id}"
             )
             return False
 
-        print(f"[UDP] Starting virtual node for profile {profile.get('long_name', 'unknown')}")
-        return self.start(profile)
+        print(f"[UDP] Starting virtual node for profile {effective_profile.get('long_name', 'unknown')}")
+        return self.start(effective_profile)
 
     def get_active_profile(self):
         return self.current_profile
@@ -626,6 +700,7 @@ class UDPChatServer:
         if not sender_profile:
             return False
 
+        sender_profile = _effective_profile(sender_profile)
         sender_channel_hash = generate_hash(sender_profile.get("channel", ""), sender_profile.get("key", ""))
         print(f"[SEND] Debug: Profile '{sender_profile.get('long_name', 'Unknown')}' wants channel {sender_channel_hash}")
         print(f"[SEND] Debug: UDP server running={self.running}, current_profile={self.current_profile_id}")
@@ -752,21 +827,8 @@ def profiles():
 
 @app.route("/nodes")
 def nodes():
-    """Nodes page - display nodes from meshdb for the current profile."""
-    current_profile = _get_session_profile()
-    if not current_profile:
-        return render_template("nodes.html", nodes=[], current_profile=None, stats={})
-
-    mesh_store = _get_mesh_store(current_profile)
-    nodes = mesh_store.list_nodes() if mesh_store else []
-    expected_channel = _current_profile_channel_num()
-    message_count = len(db.get_messages_for_channel(expected_channel)) if expected_channel is not None else 0
-    stats = {
-        "nodes": len(nodes),
-        "messages": message_count,
-    }
-
-    return render_template("nodes.html", nodes=nodes, current_profile=current_profile, stats=stats)
+    """Legacy nodes route redirects into the unified index tab view."""
+    return redirect(url_for("index", tab="nodes"))
 
 
 @app.route("/api/profiles", methods=["GET"])
@@ -780,9 +842,10 @@ def create_profile():
     """Create a new profile"""
     data = request.get_json()
 
-    required = ["node_id", "long_name", "short_name", "channel", "key"]
-    if not data or any(not data.get(k) for k in required):
-        return jsonify({"error": "node_id, long_name, short_name, channel, key are required"}), 400
+    channels = _profile_channels(data)
+    required = ["node_id", "long_name", "short_name"]
+    if not data or any(not data.get(k) for k in required) or not channels:
+        return jsonify({"error": "node_id, long_name, short_name, and at least one channel are required"}), 400
 
     # Validate hop_limit if provided
     hop_limit = data.get("hop_limit", 3)
@@ -792,7 +855,7 @@ def create_profile():
     # Create and store the profile
     profile_id = str(uuid.uuid4())
     success = profile_manager.create_profile(
-        profile_id, data["node_id"], data["long_name"], data["short_name"], data["channel"], data["key"], hop_limit
+        profile_id, data["node_id"], data["long_name"], data["short_name"], channels, hop_limit
     )
 
     if success:
@@ -806,9 +869,10 @@ def update_profile(profile_id):
     """Update an existing profile"""
     data = request.get_json()
 
-    required = ["node_id", "long_name", "short_name", "channel", "key"]
-    if not data or any(not data.get(k) for k in required):
-        return jsonify({"error": "node_id, long_name, short_name, channel, key are required"}), 400
+    channels = _profile_channels(data)
+    required = ["node_id", "long_name", "short_name"]
+    if not data or any(not data.get(k) for k in required) or not channels:
+        return jsonify({"error": "node_id, long_name, short_name, and at least one channel are required"}), 400
 
     # Validate hop_limit if provided
     hop_limit = data.get("hop_limit", 3)
@@ -816,7 +880,7 @@ def update_profile(profile_id):
         return jsonify({"error": "hop_limit must be an integer between 0 and 7"}), 400
 
     success = profile_manager.update_profile(
-        profile_id, data["node_id"], data["long_name"], data["short_name"], data["channel"], data["key"], hop_limit
+        profile_id, data["node_id"], data["long_name"], data["short_name"], channels, hop_limit
     )
 
     if success:
@@ -845,8 +909,13 @@ def get_current_profile():
     """Get the current active profile with interface status and channel number"""
     current_profile = _get_session_profile()
     if current_profile:
-        profile_channel_hash = generate_hash(current_profile.get("channel", ""), current_profile.get("key", ""))
-        if udp_server.running and udp_server.current_profile_id == current_profile.get("id"):
+        effective_profile = _effective_profile(current_profile)
+        profile_channel_hash = generate_hash(effective_profile.get("channel", ""), effective_profile.get("key", ""))
+        if (
+            udp_server.running
+            and udp_server.current_profile_id == current_profile.get("id")
+            and udp_server.current_channel_hash == profile_channel_hash
+        ):
             interface_status = "started"
         else:
             interface_status = "stopped"
@@ -858,6 +927,8 @@ def get_current_profile():
         response_data = dict(current_profile)
         response_data["interface_status"] = interface_status
         response_data["channel_number"] = expected_channel
+        response_data["selected_channel_index"] = _selected_channel_index(current_profile)
+        response_data["selected_channel"] = _selected_channel(current_profile)
         return jsonify(response_data)
     else:
         return jsonify(None)
@@ -869,6 +940,7 @@ def set_current_profile():
 
     data = request.get_json()
     profile_id = data.get("profile_id")
+    requested_channel_index = data.get("channel_index", 0)
 
     if not profile_id:
         # Unset profile and unregister session
@@ -896,12 +968,13 @@ def set_current_profile():
         
         # Set current profile in session
         _set_session_profile(profile)
+        _set_session_channel_index(requested_channel_index)
         current_profile = profile
 
         print(f"[PROFILE] Loaded profile {profile.get('long_name', 'unknown')} for this session")
 
         # Calculate channel hash for session registration
-        channel_hash = generate_hash(profile.get("channel", ""), profile.get("key", ""))
+        channel_hash = _current_profile_channel_num()
         
         # Restart the active virtual node with the selected profile identity
         print(f"[PROFILE] Restarting virtual node for profile {profile.get('long_name', 'unknown')}")
@@ -938,6 +1011,10 @@ def set_current_profile():
         else:
             print(f"[PROFILE] Profile switched - user is caught up on messages")
 
+        response_profile = dict(current_profile)
+        response_profile["selected_channel_index"] = _selected_channel_index(current_profile)
+        response_profile["selected_channel"] = _selected_channel(current_profile)
+
         if interface_started:
             udp_server.register_session(session_id, profile.get("id"), channel_hash)
             print(f"[PROFILE] Interface successfully started with vnode profile and session registered")
@@ -963,13 +1040,14 @@ def set_current_profile():
             return jsonify(
                 {
                     "message": "Profile set successfully and interface started",
-                    "profile": current_profile,
+                    "profile": response_profile,
                     "interface_status": "started",
                     "messages": chat_payload["channel_messages"],
                     "channel_messages": chat_payload["channel_messages"],
                     "dm_messages": chat_payload["dm_messages"],
                     "channel_number": expected_channel,
                     "unread_count": unread_count,
+                    "selected_channel_index": _selected_channel_index(current_profile),
                 }
             )
         else:
@@ -980,7 +1058,7 @@ def set_current_profile():
                     return jsonify(
                         {
                             "message": "Cannot switch to this profile - another profile is currently active",
-                            "profile": current_profile,
+                            "profile": response_profile,
                             "interface_status": "conflict",
                             "warning": f"The active virtual node is currently profile {current_profile_id}. Wait for other users to finish before switching identities.",
                             "messages": chat_payload["channel_messages"],
@@ -988,6 +1066,7 @@ def set_current_profile():
                             "dm_messages": chat_payload["dm_messages"],
                             "channel_number": expected_channel,
                             "unread_count": unread_count,
+                            "selected_channel_index": _selected_channel_index(current_profile),
                         }
                     )
             
@@ -995,7 +1074,7 @@ def set_current_profile():
             return jsonify(
                 {
                     "message": "Profile set but virtual node failed to start",
-                    "profile": current_profile,
+                    "profile": response_profile,
                     "interface_status": "failed",
                     "warning": "Virtual node could not be started. Check logs for details.",
                     "messages": chat_payload["channel_messages"],
@@ -1003,10 +1082,55 @@ def set_current_profile():
                     "dm_messages": chat_payload["dm_messages"],
                     "channel_number": expected_channel,
                     "unread_count": unread_count,
+                    "selected_channel_index": _selected_channel_index(current_profile),
                 }
             )
     else:
         return jsonify({"error": "Profile not found"}), 404
+
+
+@app.route("/api/current-channel", methods=["POST"])
+def set_current_channel():
+    """Switch the active channel within the current profile."""
+    current_profile = _get_session_profile()
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+
+    data = request.get_json() or {}
+    channel_index = data.get("channel_index", 0)
+    channels = _profile_channels(current_profile)
+    try:
+        channel_index = int(channel_index)
+    except (TypeError, ValueError):
+        return jsonify({"error": "channel_index must be an integer"}), 400
+
+    if channel_index < 0 or channel_index >= len(channels):
+        return jsonify({"error": "channel_index out of range"}), 400
+
+    session_id = f"flask_session_{id(session)}"
+    _set_session_channel_index(channel_index)
+    effective_profile = _effective_profile(current_profile)
+    channel_hash = _profile_channel_num(effective_profile)
+    interface_started = udp_server.restart_with_profile(current_profile, session_id=session_id)
+    if interface_started:
+        udp_server.register_session(session_id, current_profile.get("id"), channel_hash)
+
+    chat_payload = _get_chat_payload(current_profile)
+    response_profile = dict(current_profile)
+    response_profile["selected_channel_index"] = channel_index
+    response_profile["selected_channel"] = channels[channel_index]
+
+    return jsonify(
+        {
+            "message": "Channel selected",
+            "profile": response_profile,
+            "interface_status": "started" if interface_started else "failed",
+            "channel_messages": chat_payload["channel_messages"],
+            "dm_messages": chat_payload["dm_messages"],
+            "channel_number": chat_payload["channel_number"],
+            "selected_channel_index": channel_index,
+        }
+    )
 
 
 @app.route("/api/messages", methods=["GET"])
@@ -1015,6 +1139,17 @@ def get_messages():
     current_profile = _get_session_profile()
     if not current_profile:
         return jsonify({"channel_messages": messages, "dm_messages": []})
+
+    requested_channel_index = request.args.get("channel_index")
+    if requested_channel_index is not None:
+        try:
+            requested_channel_index = int(requested_channel_index)
+        except (TypeError, ValueError):
+            return jsonify({"error": "channel_index must be an integer"}), 400
+        channels = _profile_channels(current_profile)
+        if requested_channel_index < 0 or requested_channel_index >= len(channels):
+            return jsonify({"error": "channel_index out of range"}), 400
+        _set_session_channel_index(requested_channel_index)
 
     chat_payload = _get_chat_payload(current_profile)
     expected_channel = chat_payload["channel_number"]

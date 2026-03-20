@@ -4,109 +4,81 @@
 
 {% block content %}
 <div class="row">
-    <!-- Mobile-optimized profile controls -->
-    <div class="col-12 d-md-none mb-2">
-        <!-- Mobile compact profile bar -->
-        <div class="d-flex gap-2 align-items-center" style="flex-wrap: nowrap;">
-            <select id="profileSelect" class="form-select form-select-sm" style="min-width: 120px; flex: 1;">
-                <option value="">Select profile...</option>
-                {% for profile_id, profile in profiles.items() %}
-                    <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
-                        {{ profile.long_name }}
-                    </option>
-                {% endfor %}
-            </select>
-            <button id="setProfileBtn" class="btn btn-primary btn-sm" style="white-space: nowrap;">Set</button>
-            <a href="{{ url_for('profiles') }}" class="btn btn-outline-secondary btn-sm" style="white-space: nowrap;">Manage</a>
+    <div class="offcanvas offcanvas-bottom profile-selector-sheet" tabindex="-1" id="mobileSettingsSheet" aria-labelledby="mobileSettingsSheetLabel">
+        <div class="offcanvas-header">
+            <div>
+                <h5 class="offcanvas-title mb-0" id="mobileSettingsSheetLabel">Profiles</h5>
+                <small class="text-muted">Profiles and connection status</small>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+            <div class="mb-3">
+                <label for="profileSelect" class="form-label small text-uppercase text-muted">Profile</label>
+                <div class="d-flex gap-2 align-items-center">
+                    <select id="profileSelect" class="form-select">
+                        <option value="">Select profile...</option>
+                        {% for profile_id, profile in profiles.items() %}
+                            <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
+                                {{ profile.long_name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <button id="setProfileBtn" class="btn btn-primary" type="button">Set</button>
+                </div>
+            </div>
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="small text-muted">WebSocket</span>
+                        <span id="connectionStatusMobile" class="badge bg-secondary">Connecting...</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="small text-muted">Mesh Interface</span>
+                        <span id="interfaceStatusMobile" class="badge bg-warning">Not Started</span>
+                    </div>
+                </div>
+            </div>
+            <a href="{{ url_for('profiles') }}" class="btn btn-outline-secondary w-100 profile-selector-manage-link">Manage Profiles</a>
         </div>
     </div>
-    
-    <!-- Desktop sidebar -->
-    <div class="col-lg-3 col-md-4 mb-3 d-none d-md-block">
-        <div class="card">
-            <div class="card-header">
-                <h5>Profile Selection</h5>
-            </div>
-            <div class="card-body">
-                <select id="profileSelectDesktop" class="form-select mb-2">
-                    <option value="">Select a profile...</option>
-                    {% for profile_id, profile in profiles.items() %}
-                        <option value="{{ profile_id }}" {{ 'selected' if current_profile and current_profile.id == profile_id else '' }}>
-                            {{ profile.long_name }}
-                        </option>
-                    {% endfor %}
-                </select>
-                
-                <div class="d-grid gap-2">
-                    <button id="setProfileBtnDesktop" class="btn btn-primary btn-sm">Set Profile</button>
-                    <a href="{{ url_for('profiles') }}" class="btn btn-outline-secondary btn-sm">Manage Profiles</a>
-                </div>
-            </div>
-        </div>
-        
-        <div class="card mt-3">
-            <div class="card-header">
-                <h6>Connection Status</h6>
-            </div>
-            <div class="card-body">
-                <div class="mb-2">
-                    <strong>WebSocket:</strong> <span id="connectionStatus" class="badge bg-secondary">Connecting...</span>
-                </div>
-                <div class="mb-2">
-                    <strong>MUDP Interface:</strong> <span id="interfaceStatus" class="badge bg-warning">Not Started</span>
-                </div>
-                <div class="mt-2">
-                    <small class="text-muted">Multicast: 224.0.0.69 • Port: 4403</small>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Main chat area -->
-    <div class="col-12 col-md-8 col-lg-9">
-        <!-- Current Profile Banner - Mobile Compact -->
-        <div id="currentProfileBanner" class="card mb-2 border-primary" style="display: none;">
-            <div class="card-body bg-light py-2">
-                <!-- Mobile compact layout -->
-                <div class="d-md-none">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <strong class="text-primary" id="bannerProfileName">No Profile Selected</strong>
-                        <span id="bannerInterfaceStatus" class="badge bg-warning">Not Connected</span>
-                    </div>
-                    <div class="small text-muted">
-                        <span id="bannerChannel">-</span> • <span id="bannerNodeId">-</span> • <span id="bannerKey">-</span>
-                    </div>
-                </div>
-                
-                <!-- Desktop layout -->
-                <div class="d-none d-md-block">
-                    <div class="row align-items-center">
-                        <div class="col-md-9">
-                            <div class="d-flex flex-wrap align-items-center">
-                                <strong class="text-primary me-3" id="bannerProfileNameDesktop">No Profile Selected</strong>
-                                <div class="d-flex flex-wrap gap-2 small text-muted">
-                                    <span>Node: <code class="bg-white px-1 rounded" id="bannerNodeIdDesktop">-</code></span>
-                                    <span>•</span>
-                                    <span>Channel: <strong id="bannerChannelDesktop">-</strong></span>
-                                    <span>•</span>
-                                    <span>Key: <code class="bg-white px-1 rounded" id="bannerKeyDesktop">-</code></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3 text-end">
-                            <div class="d-flex align-items-center justify-content-end">
-                                <small class="text-muted me-2">Status:</small>
-                                <span id="bannerInterfaceStatusDesktop" class="badge bg-warning">Not Connected</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="card" style="overflow: hidden;">
+    <div class="col-12">
+        <div class="card chat-shell-card" style="overflow: hidden;">
             <div class="card-body p-0 d-flex flex-column" style="height: calc(100vh - 250px);">
-                <div class="border-bottom px-3 pt-3 pb-2">
+                <div class="desktop-chat-header d-none d-md-flex border-bottom px-4 py-3">
+                    <div>
+                        <div class="fw-semibold" id="desktopProfileName">No Profile Selected</div>
+                        <div class="small text-muted" id="desktopProfileSubline">Use Profiles to choose a profile</div>
+                    </div>
+                    <div class="desktop-connect-panel">
+                        <div class="desktop-status-lights" aria-label="Connection status">
+                            <span class="desktop-status-light is-idle" id="desktopSocketLight" title="WebSocket"></span>
+                            <span class="desktop-status-light is-warning" id="desktopInterfaceLight" title="Mesh interface"></span>
+                        </div>
+                        <button id="desktopConnectBtn" class="btn btn-sm btn-outline-primary" type="button">Connect</button>
+                    </div>
+                </div>
+                <div class="mobile-chat-header d-md-none border-bottom px-3 py-3">
+                    <div class="mobile-chat-brand mb-2">
+                        <img id="mobile-logo-dark" src="{{ url_for('static', filename='images/firefly-logo-dark.png') }}" alt="Firefly" height="22">
+                        <img id="mobile-logo-light" src="{{ url_for('static', filename='images/firefly-logo-light.png') }}" alt="Firefly" height="22">
+                        <span>Firefly</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-start gap-3">
+                        <div>
+                            <div class="fw-semibold" id="mobileProfileName">No Profile Selected</div>
+                            <div class="small text-muted" id="mobileProfileSubline">Use the bottom bar to choose a section</div>
+                        </div>
+                        <div class="mobile-connect-panel">
+                            <div class="mobile-status-lights" aria-label="Connection status">
+                                <span class="mobile-status-light is-idle" id="mobileSocketLight" title="WebSocket"></span>
+                                <span class="mobile-status-light is-warning" id="mobileInterfaceLight" title="Mesh interface"></span>
+                            </div>
+                            <button id="mobileConnectBtn" class="btn btn-sm btn-outline-primary" type="button">Connect</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="chatTabBar" class="border-bottom px-3 pt-3 pb-2">
                     <div class="d-flex flex-column gap-2">
                         <ul class="nav nav-tabs card-header-tabs" id="chatTabs" role="tablist">
                             <li class="nav-item" role="presentation">
@@ -115,26 +87,20 @@
                             <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="dmTabBtn" type="button" data-chat-tab="dm">DMs</button>
                             </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="nodesTabBtn" type="button">Nodes</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="desktopProfilesTabBtn" type="button">Profiles</button>
+                            </li>
                         </ul>
-                        <div id="dmToolbar" class="d-none">
-                            <div class="row g-2 align-items-center">
-                                <div class="col-12 col-md-7">
-                                    <select id="dmTargetSelect" class="form-select form-select-sm">
-                                        <option value="">Select a node to message...</option>
-                                    </select>
-                                </div>
-                                <div class="col-12 col-md-5">
-                                    <div id="dmThreadLabel" class="small text-muted">Choose a node to open a DM thread.</div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
                 <div id="messagesContainer" class="flex-grow-1 p-3" style="overflow-y: auto; overflow-x: hidden; min-height: 200px;">
                     <!-- Messages will be populated here -->
                 </div>
                 
-                <div class="p-3" style="border-top: 1px solid var(--bs-border-color-translucent);">
+                <div id="composerBar" class="p-3" style="border-top: 1px solid var(--bs-border-color-translucent);">
                     <div id="replyComposerBar" class="alert alert-secondary py-2 px-3 mb-2 d-none">
                         <div class="d-flex justify-content-between align-items-start gap-3">
                             <div class="small">
@@ -146,19 +112,61 @@
                     </div>
                     <div class="input-group mb-2">
                         <textarea id="messageInput" class="form-control" placeholder="Type a channel message..." maxlength="220" rows="2" style="resize: none;"></textarea>
-                        <button id="sendBtn" class="btn btn-primary" type="button">Send Channel</button>
+                        <button id="sendBtn" class="btn btn-primary" type="button">Send</button>
                     </div>
                     <div class="d-flex justify-content-between align-items-center">
                         <div class="form-text">Press Enter to send, Shift+Enter for new line.</div>
                         <small class="text-muted" id="charCount">0/220</small>
                     </div>
                 </div>
+                <div class="mobile-bottom-nav d-md-none">
+                    <button id="mobileChannelsBtn" class="mobile-bottom-nav__button active" type="button">
+                        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 7h16"></path>
+                                <path d="M7 12h10"></path>
+                                <path d="M10 17h4"></path>
+                            </svg>
+                        </span>
+                        <span>Channels</span>
+                    </button>
+                    <button id="mobileDmsBtn" class="mobile-bottom-nav__button" type="button">
+                        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                        </span>
+                        <span>DMs</span>
+                    </button>
+                    <button id="mobileNodesBtn" class="mobile-bottom-nav__button" type="button">
+                        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="6" r="2"></circle>
+                                <circle cx="6" cy="18" r="2"></circle>
+                                <circle cx="18" cy="18" r="2"></circle>
+                                <path d="M12 8v4"></path>
+                                <path d="M10.5 13 7.5 16"></path>
+                                <path d="M13.5 13 16.5 16"></path>
+                            </svg>
+                        </span>
+                        <span>Nodes</span>
+                    </button>
+                    <button class="mobile-bottom-nav__button" type="button" data-bs-toggle="offcanvas" data-bs-target="#mobileSettingsSheet" aria-controls="mobileSettingsSheet">
+                        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3"></circle>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                            </svg>
+                        </span>
+                        <span>Profiles</span>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="mt-4">
+<div class="mt-4 d-none d-md-block">
     <div class="card">
         <div class="card-header">
             <h6 class="mb-0">
@@ -173,9 +181,24 @@
                     <li>Select or create a profile to start chatting</li>
                     <li>Use the `Channels` tab for mesh-wide chat and the `DMs` tab for direct messages</li>
                     <li>Messages are sent over UDP multicast on port 4403</li>
-                    <li>Use the Nodes page to jump straight into a DM with a discovered node</li>
+                    <li>Use the Nodes tab to jump straight into a DM with a discovered node</li>
                     <li><strong>Mobile tip:</strong> Rotate your device to landscape for better chat experience</li>
                 </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="nodeDetailsModal" tabindex="-1" aria-labelledby="nodeDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="nodeDetailsModalLabel">Node Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="nodeDetailsContent"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
@@ -184,6 +207,45 @@
 
 {% block scripts %}
 <style>
+:root {
+    --firefly-chat-accent: #1f5d96;
+    --firefly-chat-accent-strong: #17476f;
+    --firefly-chat-accent-soft: #d8e7f4;
+    --firefly-chat-surface: rgba(255, 255, 255, 0.92);
+    --firefly-chat-surface-muted: rgba(244, 248, 251, 0.9);
+    --firefly-chat-border: rgba(175, 191, 205, 0.68);
+}
+
+[data-bs-theme="dark"] {
+    --firefly-chat-accent: #68a6de;
+    --firefly-chat-accent-strong: #87bae8;
+    --firefly-chat-accent-soft: rgba(70, 108, 142, 0.35);
+    --firefly-chat-surface: rgba(18, 31, 45, 0.9);
+    --firefly-chat-surface-muted: rgba(24, 38, 55, 0.92);
+    --firefly-chat-border: rgba(71, 97, 123, 0.9);
+}
+
+.text-primary {
+    color: var(--firefly-chat-accent) !important;
+}
+
+.bg-primary,
+.badge.bg-primary {
+    background-color: var(--firefly-chat-accent) !important;
+}
+
+.btn-primary {
+    background: var(--firefly-chat-accent) !important;
+    border-color: var(--firefly-chat-accent) !important;
+}
+
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-primary:active {
+    background: var(--firefly-chat-accent-strong) !important;
+    border-color: var(--firefly-chat-accent-strong) !important;
+}
+
 /* Message text wrapping and overflow prevention */
 #messagesContainer {
     overflow-x: hidden !important;
@@ -290,10 +352,173 @@
     min-height: 350px;
 }
 
+.desktop-chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    background: var(--firefly-chat-surface-muted);
+}
+
+.desktop-connect-panel {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    flex-shrink: 0;
+}
+
+.desktop-status-lights {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.desktop-status-light {
+    width: 0.68rem;
+    height: 0.68rem;
+    border-radius: 999px;
+    background: #95a5b5;
+    box-shadow: 0 0 0 0.15rem rgba(149, 165, 181, 0.18);
+}
+
+.desktop-status-light.is-online {
+    background: #2f9e72;
+    box-shadow: 0 0 0 0.15rem rgba(47, 158, 114, 0.18);
+}
+
+.desktop-status-light.is-warning {
+    background: #d3922e;
+    box-shadow: 0 0 0 0.15rem rgba(211, 146, 46, 0.18);
+}
+
+.desktop-status-light.is-offline {
+    background: #c65353;
+    box-shadow: 0 0 0 0.15rem rgba(198, 83, 83, 0.18);
+}
+
+.desktop-status-light.is-idle {
+    background: #95a5b5;
+    box-shadow: 0 0 0 0.15rem rgba(149, 165, 181, 0.18);
+}
+
+#desktopConnectBtn.is-connected {
+    background: var(--firefly-chat-accent);
+    color: #ffffff;
+    border-color: var(--firefly-chat-accent);
+}
+
 #messagesContainer {
     background: inherit;
     border: none;
     border-radius: 0;
+}
+
+.dm-thread-card {
+    width: 100%;
+    border: 1px solid var(--firefly-chat-border);
+    background: var(--firefly-chat-surface);
+    border-radius: 1rem;
+    padding: 0.9rem 1rem;
+    margin-bottom: 0.75rem;
+    text-align: left;
+    box-shadow: 0 10px 24px rgba(44, 64, 82, 0.07);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.dm-thread-card:hover {
+    border-color: var(--firefly-chat-accent);
+    box-shadow: 0 14px 28px rgba(31, 93, 150, 0.12);
+    transform: translateY(-1px);
+}
+
+.node-list {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.node-card {
+    border: 1px solid var(--firefly-chat-border);
+    border-radius: 0.95rem;
+    padding: 0.75rem 0.85rem;
+    background: var(--firefly-chat-surface);
+    box-shadow: 0 10px 24px rgba(44, 64, 82, 0.07);
+}
+
+.node-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.45rem;
+}
+
+.node-card__title {
+    min-width: 0;
+}
+
+.node-card__name {
+    font-weight: 700;
+    line-height: 1.2;
+    font-size: 0.98rem;
+}
+
+.node-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 0.55rem;
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+    margin-top: 0.12rem;
+}
+
+.node-card__facts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.45rem 0.65rem;
+    margin-bottom: 0.55rem;
+}
+
+.node-card__fact {
+    min-width: 0;
+}
+
+.node-card__label {
+    display: block;
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--bs-secondary-color);
+    margin-bottom: 0.1rem;
+    line-height: 1.1;
+}
+
+.node-card__value {
+    font-size: 0.84rem;
+    line-height: 1.15;
+}
+
+.node-card__value .small {
+    font-size: 0.74rem !important;
+}
+
+.node-card__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.4rem;
+}
+
+.node-card__actions .btn {
+    padding: 0.28rem 0.6rem;
+    border-radius: 0.7rem;
+}
+
+.node-card .badge {
+    font-size: 0.7rem;
+    padding: 0.28rem 0.42rem;
+}
+
+.node-card code {
+    font-size: 0.78rem;
 }
 
 /* Remove default margins that might cause issues */
@@ -309,72 +534,370 @@
 
 /* Mobile compact profile controls */
 @media (max-width: 767.98px) {
-    .container {
+    body > .navbar {
+        display: none;
+    }
+
+    body {
+        background: var(--mudp-light-bg);
+        min-height: 100vh;
+    }
+
+    body[data-bs-theme="dark"] {
+        background: var(--mudp-dark-bg) !important;
+    }
+
+    body > .container.mt-4 {
+        max-width: 100%;
+        margin-top: 0 !important;
         padding-left: 0.5rem;
         padding-right: 0.5rem;
+        padding-bottom: 0.5rem;
+        padding-top: 0;
     }
-    
-    /* Compact profile banner on mobile */
-    #currentProfileBanner .card-body {
-        padding: 0.5rem !important;
+
+    .row {
+        --bs-gutter-x: 0;
     }
-    
-    #currentProfileBanner {
-        margin-bottom: 0.5rem !important;
+
+    .chat-shell-card {
+        border: none;
+        border-radius: 1.75rem 1.75rem 0 0;
+        background: var(--firefly-chat-surface);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 24px 60px rgba(32, 54, 76, 0.16);
+        margin-bottom: 0;
+        position: fixed;
+        left: 0.5rem;
+        right: 0.5rem;
+        top: 0;
+        bottom: 0;
     }
-    
-    /* Mobile chat container - leave space for text entry */
+
     .card-body.d-flex.flex-column {
-        height: calc(100vh - 200px) !important;
-        min-height: 200px !important;
+        height: 100% !important;
+        min-height: 0 !important;
     }
-    
-    .card {
-        margin-bottom: 0.5rem;
+
+    .mobile-chat-header {
+        background: var(--firefly-chat-surface-muted);
     }
-    
-    /* Extra aggressive text wrapping on mobile */
+
+    .mobile-chat-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+    }
+
+    .mobile-chat-brand img {
+        display: block;
+    }
+
+    #mobile-logo-light {
+        display: none;
+    }
+
+    [data-bs-theme="dark"] #mobile-logo-light {
+        display: none !important;
+    }
+
+    [data-bs-theme="light"] #mobile-logo-dark {
+        display: none !important;
+    }
+
+    [data-bs-theme="light"] #mobile-logo-light {
+        display: block !important;
+    }
+
+    .mobile-connect-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.45rem;
+        flex-shrink: 0;
+    }
+
+    .mobile-status-lights {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+
+    .mobile-status-light {
+        width: 0.62rem;
+        height: 0.62rem;
+        border-radius: 999px;
+        background: #95a5b5;
+        box-shadow: 0 0 0 0.14rem rgba(149, 165, 181, 0.18);
+    }
+
+    .mobile-status-light.is-online {
+        background: #2f9e72;
+        box-shadow: 0 0 0 0.14rem rgba(47, 158, 114, 0.18);
+    }
+
+    .mobile-status-light.is-warning {
+        background: #d3922e;
+        box-shadow: 0 0 0 0.14rem rgba(211, 146, 46, 0.18);
+    }
+
+    .mobile-status-light.is-offline {
+        background: #c65353;
+        box-shadow: 0 0 0 0.14rem rgba(198, 83, 83, 0.18);
+    }
+
+    .mobile-status-light.is-idle {
+        background: #95a5b5;
+        box-shadow: 0 0 0 0.14rem rgba(149, 165, 181, 0.18);
+    }
+
+    #mobileConnectBtn {
+        min-width: 5.6rem;
+    }
+
+    #mobileConnectBtn.is-connected {
+        background: var(--firefly-chat-accent);
+        color: #ffffff;
+        border-color: var(--firefly-chat-accent);
+    }
+
+    #chatTabs {
+        display: none !important;
+    }
+
+    #chatTabBar {
+        display: none !important;
+    }
+
+    #messagesContainer {
+        background: var(--firefly-chat-surface-muted);
+        padding-bottom: 1rem !important;
+        min-height: 0;
+    }
+
+    .message {
+        background: var(--firefly-chat-surface);
+        border: 1px solid var(--firefly-chat-border);
+        border-radius: 1.1rem;
+        box-shadow: 0 10px 24px rgba(44, 64, 82, 0.07);
+        margin-bottom: 0.75rem !important;
+    }
+
+    .message.border-bottom {
+        border-bottom: 1px solid var(--firefly-chat-border) !important;
+    }
+
+    .reply-preview {
+        border-left-color: var(--firefly-chat-accent);
+    }
+
+    .mobile-bottom-nav {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.5rem;
+        padding: 0.4rem 0.85rem calc(0.7rem + env(safe-area-inset-bottom)) 0.85rem;
+        background: var(--firefly-chat-surface);
+        border-top: 1px solid var(--firefly-chat-border);
+    }
+
+    .mobile-bottom-nav__button {
+        border: none;
+        background: transparent;
+        color: #516170;
+        border-radius: 1.1rem;
+        padding: 0.55rem 0.4rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.28rem;
+        font-size: 0.72rem;
+        font-weight: 600;
+        transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+        text-decoration: none;
+    }
+
+    .mobile-bottom-nav__button.active {
+        background: var(--firefly-chat-accent);
+        color: #ffffff;
+        transform: translateY(-1px);
+    }
+
+    .mobile-bottom-nav__icon {
+        width: 1.35rem;
+        height: 1.35rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .mobile-bottom-nav__icon svg {
+        width: 100%;
+        height: 100%;
+    }
+
+    #mobileSettingsSheet {
+        --bs-offcanvas-height: min(72vh, 34rem);
+        border-radius: 1.5rem 1.5rem 0 0;
+        background: var(--firefly-chat-surface-muted);
+        backdrop-filter: blur(16px);
+    }
+
+    #mobileSettingsSheet .offcanvas-header {
+        border-bottom: 1px solid var(--firefly-chat-border);
+    }
+
+    #mobileSettingsSheet .card {
+        border-radius: 1rem;
+    }
+
+    @media (min-width: 768px) {
+        #mobileSettingsSheet.profile-selector-sheet {
+            --bs-offcanvas-height: min(88vh, 44rem);
+            top: 0;
+            right: 0;
+            left: auto !important;
+            bottom: 0;
+            width: min(25rem, 92vw) !important;
+            height: 100% !important;
+            max-height: none !important;
+            border-top: none !important;
+            border-left: 1px solid var(--firefly-chat-border);
+            border-radius: 1.5rem 0 0 1.5rem !important;
+            background: var(--firefly-chat-surface-muted);
+            transform: translateX(100%);
+        }
+
+        #mobileSettingsSheet.profile-selector-sheet.show,
+        #mobileSettingsSheet.profile-selector-sheet.showing {
+            transform: none;
+        }
+
+        #mobileSettingsSheet.profile-selector-sheet .offcanvas-body {
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        #mobileSettingsSheet.profile-selector-sheet .profile-selector-manage-link {
+            margin-top: auto;
+            position: sticky;
+            bottom: 0;
+            background: inherit;
+        }
+    }
+
+    #composerBar {
+        padding: 0.85rem 0.85rem 0.75rem 0.85rem !important;
+        background: var(--firefly-chat-surface);
+        border-top: 1px solid var(--firefly-chat-border) !important;
+    }
+
+    .input-group {
+        align-items: stretch;
+    }
+
+    .input-group .btn {
+        border-top-right-radius: 1rem;
+        border-bottom-right-radius: 1rem;
+    }
+
+    #messageInput {
+        max-height: 6.5rem;
+        min-height: 2.8rem;
+        line-height: 1.3;
+        font-size: 0.95rem;
+        border-radius: 1rem 0 0 1rem;
+    }
+
     .message .mt-1 {
         word-break: break-word;
         overflow-wrap: anywhere;
         line-break: anywhere;
     }
-    
-    /* Compact mobile profile controls */
+
     .d-flex.gap-2.align-items-center {
         gap: 0.5rem !important;
     }
-    
-    /* Make buttons more compact */
+
     .btn-sm {
         padding: 0.25rem 0.5rem;
         font-size: 0.775rem;
     }
-    
-    /* Message input area styling - more compact on mobile */
-    #messageInput {
-        max-height: 60px;
-        min-height: 34px;
-        line-height: 1.2;
-        font-size: 0.9rem;
-    }
-    
-    /* Compact input group on mobile */
-    .input-group .btn {
-        padding: 0.375rem 0.75rem;
-    }
-    
-    /* Reduce padding in input area */
+
     .card-body > div:last-child {
         padding: 0.75rem !important;
     }
-    
+
     .input-group.mb-2 {
         margin-bottom: 0.5rem !important;
     }
 }
 
 /* Extra small screens - make buttons even more compact */
+@media (max-width: 991.98px) {
+    .node-card__facts {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 575.98px) {
+    .node-card {
+        padding: 0.55rem 0.6rem;
+        border-radius: 0.75rem;
+    }
+
+    .node-card__header {
+        gap: 0.45rem;
+        margin-bottom: 0.35rem;
+    }
+
+    .node-card__facts {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.35rem 0.5rem;
+        margin-bottom: 0.45rem;
+    }
+
+    .node-card__actions {
+        justify-content: stretch;
+        gap: 0.35rem;
+    }
+
+    .node-card__actions .btn {
+        flex: 1 1 0;
+        padding: 0.24rem 0.4rem;
+        font-size: 0.76rem;
+    }
+
+    .node-card__name {
+        font-size: 0.9rem;
+    }
+
+    .node-card__meta {
+        font-size: 0.74rem;
+        gap: 0.08rem 0.4rem;
+    }
+
+    .node-card__label {
+        font-size: 0.58rem;
+    }
+
+    .node-card__value {
+        font-size: 0.78rem;
+    }
+
+    .node-card .badge {
+        font-size: 0.64rem;
+        padding: 0.22rem 0.34rem;
+    }
+
+    .node-card code {
+        font-size: 0.72rem;
+    }
+}
+
 @media (max-width: 375px) {
     .d-md-none .btn-sm {
         padding: 0.2rem 0.4rem;
@@ -408,12 +931,17 @@ let socket = null;
 let currentChannelRoom = null;
 let currentProfileRoom = null;
 let activeChatTab = 'channel';
+let activeChannelIndex = null;
 let activeDmTargetNodeNum = null;
+let pendingChannelIndex = null;
 let pendingDmTargetNodeNum = null;
+let meshNodes = [];
 let channelMessages = [];
 let dmMessages = [];
 let dmTargets = [];
 let replyingToPacketId = null;
+let currentSocketStatusClass = 'bg-secondary';
+let currentInterfaceStatusClass = 'bg-warning';
 
 document.addEventListener('DOMContentLoaded', async function() {
     initializePendingChatContext();
@@ -426,28 +954,24 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     } catch (e) {
         console.error('[socket] init failed:', e);
-        const badge = document.getElementById('connectionStatus');
-        if (badge) {
-            badge.className = 'badge bg-danger';
-            badge.textContent = 'Socket error';
-        }
+        updateConnectionStatus('bg-danger', 'Socket error');
     }
 
     document.getElementById('setProfileBtn').addEventListener('click', setProfile);
-    const desktopBtn = document.getElementById('setProfileBtnDesktop');
-    if (desktopBtn) {
-        desktopBtn.addEventListener('click', setProfile);
-    }
+    document.getElementById('mobileConnectBtn').addEventListener('click', handleMobileConnectClick);
+    document.getElementById('desktopConnectBtn').addEventListener('click', handleDesktopConnectClick);
     document.getElementById('sendBtn').addEventListener('click', sendMessage);
     document.getElementById('cancelReplyBtn').addEventListener('click', clearReplyComposer);
-    document.getElementById('channelTabBtn').addEventListener('click', () => setActiveChatTab('channel'));
-    document.getElementById('dmTabBtn').addEventListener('click', () => setActiveChatTab('dm'));
-    document.getElementById('dmTargetSelect').addEventListener('change', function() {
-        const value = this.value ? parseInt(this.value, 10) : null;
-        setActiveDmTarget(value);
-    });
+    document.getElementById('channelTabBtn').addEventListener('click', openChannelInbox);
+    document.getElementById('dmTabBtn').addEventListener('click', openDmInbox);
+    document.getElementById('nodesTabBtn').addEventListener('click', () => { void openNodesInbox(); });
+    document.getElementById('desktopProfilesTabBtn').addEventListener('click', openProfileSelector);
+    document.getElementById('mobileChannelsBtn').addEventListener('click', openChannelInbox);
+    document.getElementById('mobileDmsBtn').addEventListener('click', openDmInbox);
+    document.getElementById('mobileNodesBtn').addEventListener('click', () => { void openNodesInbox(); });
 
     const messageInput = document.getElementById('messageInput');
+    const messagesContainer = document.getElementById('messagesContainer');
     messageInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -455,6 +979,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
     messageInput.addEventListener('input', updateCharacterCounter);
+    if (messagesContainer) {
+        messagesContainer.addEventListener('click', handleThreadCardClick);
+    }
 
     const instructionsCollapse = document.getElementById('instructionsCollapse');
     const instructionsIcon = document.getElementById('instructionsIcon');
@@ -468,19 +995,56 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     await loadCurrentProfileAndStatus();
-    await Promise.all([loadMessages(), loadDmTargets()]);
-    applyPendingChatContext();
+    await loadMessages();
+    await loadDmTargets();
+    await applyPendingChatContext();
     renderActiveMessages();
     updateComposerState();
 
-    setInterval(refreshProfileBanner, 30000);
+    openProfileSelectorIfRequested();
+    setInterval(async () => {
+        refreshProfileBanner();
+        if (activeChatTab === 'nodes') {
+            await loadNodes();
+            renderActiveMessages();
+        }
+    }, 30000);
 });
+
+function openProfileSelectorIfRequested() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('open_profiles') !== '1') {
+        return;
+    }
+    openProfileSelector();
+    params.delete('open_profiles');
+    const query = params.toString();
+    const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+    window.history.replaceState({}, '', nextUrl);
+}
+
+function openProfileSelector() {
+    const sheet = document.getElementById('mobileSettingsSheet');
+    if (sheet && typeof bootstrap !== 'undefined' && bootstrap.Offcanvas) {
+        bootstrap.Offcanvas.getOrCreateInstance(sheet).show();
+    }
+}
 
 function initializePendingChatContext() {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get('tab');
     if (tab === 'dm' || tab === 'dms') {
         activeChatTab = 'dm';
+    } else if (tab === 'nodes') {
+        activeChatTab = 'nodes';
+    }
+    const channelParam = params.get('channel');
+    if (channelParam !== null) {
+        const parsedChannelIndex = parseInt(channelParam, 10);
+        if (!Number.isNaN(parsedChannelIndex)) {
+            pendingChannelIndex = parsedChannelIndex;
+            activeChatTab = 'channel';
+        }
     }
     const dmParam = params.get('dm');
     if (dmParam) {
@@ -492,12 +1056,21 @@ function initializePendingChatContext() {
     }
 }
 
+function getProfileChannels() {
+    return Array.isArray(currentProfile?.channels) ? currentProfile.channels : [];
+}
+
+function getActiveChannel() {
+    const channels = getProfileChannels();
+    if (activeChannelIndex === null || activeChannelIndex === undefined) return null;
+    return channels[Number(activeChannelIndex)] || null;
+}
+
 function initializeSocket() {
     socket = io();
 
     socket.on('connect', function() {
-        document.getElementById('connectionStatus').className = 'badge bg-success';
-        document.getElementById('connectionStatus').textContent = 'Connected';
+        updateConnectionStatus('bg-success', 'Connected');
         if (currentChannelRoom) {
             joinChannelRoom(currentChannelRoom);
         }
@@ -508,18 +1081,15 @@ function initializeSocket() {
 
     socket.on('connect_error', function(err) {
         console.error('[socket] connect_error', err);
-        document.getElementById('connectionStatus').className = 'badge bg-danger';
-        document.getElementById('connectionStatus').textContent = 'Connect error';
+        updateConnectionStatus('bg-danger', 'Connect error');
     });
 
     socket.on('reconnect_attempt', function() {
-        document.getElementById('connectionStatus').className = 'badge bg-warning';
-        document.getElementById('connectionStatus').textContent = 'Reconnecting…';
+        updateConnectionStatus('bg-warning', 'Reconnecting…');
     });
 
     socket.on('disconnect', function() {
-        document.getElementById('connectionStatus').className = 'badge bg-danger';
-        document.getElementById('connectionStatus').textContent = 'Disconnected';
+        updateConnectionStatus('bg-danger', 'Disconnected');
     });
 
     socket.on('new_message', function(message) {
@@ -535,9 +1105,8 @@ async function loadCurrentProfileAndStatus() {
 
         if (profile) {
             const mobileSelect = document.getElementById('profileSelect');
-            const desktopSelect = document.getElementById('profileSelectDesktop');
             if (mobileSelect) mobileSelect.value = profile.id;
-            if (desktopSelect) desktopSelect.value = profile.id;
+            activeChannelIndex = Number.isInteger(profile.selected_channel_index) ? profile.selected_channel_index : 0;
 
             currentChannelRoom = profile.channel_number ?? null;
             currentProfileRoom = profile.id;
@@ -560,6 +1129,7 @@ async function loadCurrentProfileAndStatus() {
         } else {
             currentChannelRoom = null;
             currentProfileRoom = null;
+            activeChannelIndex = null;
             updateInterfaceStatus('bg-warning', 'Not Started');
         }
 
@@ -570,51 +1140,45 @@ async function loadCurrentProfileAndStatus() {
     }
 }
 
-function updateInterfaceStatus(status, statusText) {
-    const sidebarStatus = document.getElementById('interfaceStatus');
-    const bannerStatus = document.getElementById('bannerInterfaceStatus');
-    const bannerStatusDesktop = document.getElementById('bannerInterfaceStatusDesktop');
-    const statusClass = `badge ${status}`;
+function updateConnectionStatus(status, statusText) {
+    const mobileStatus = document.getElementById('connectionStatusMobile');
+    currentSocketStatusClass = status;
 
-    if (sidebarStatus) {
-        sidebarStatus.className = statusClass;
-        sidebarStatus.textContent = statusText;
+    if (mobileStatus) {
+        mobileStatus.className = `badge ${status}`;
+        mobileStatus.textContent = statusText;
     }
-    if (bannerStatus) {
-        bannerStatus.className = statusClass;
-        bannerStatus.textContent = statusText;
+    updateStatusLight('mobileSocketLight', status);
+    updateStatusLight('desktopSocketLight', status);
+    updateConnectButtons();
+}
+
+function updateInterfaceStatus(status, statusText) {
+    const mobileStatus = document.getElementById('interfaceStatusMobile');
+    currentInterfaceStatusClass = status;
+
+    if (mobileStatus) {
+        mobileStatus.className = `badge ${status}`;
+        mobileStatus.textContent = statusText;
     }
-    if (bannerStatusDesktop) {
-        bannerStatusDesktop.className = statusClass;
-        bannerStatusDesktop.textContent = statusText;
-    }
+    updateStatusLight('mobileInterfaceLight', status);
+    updateStatusLight('desktopInterfaceLight', status);
+    updateConnectButtons();
 }
 
 function updateProfileBanner(profile) {
-    const banner = document.getElementById('currentProfileBanner');
-    const profileName = document.getElementById('bannerProfileName');
-    const nodeId = document.getElementById('bannerNodeId');
-    const channel = document.getElementById('bannerChannel');
-    const key = document.getElementById('bannerKey');
-    const profileNameDesktop = document.getElementById('bannerProfileNameDesktop');
-    const nodeIdDesktop = document.getElementById('bannerNodeIdDesktop');
-    const channelDesktop = document.getElementById('bannerChannelDesktop');
-    const keyDesktop = document.getElementById('bannerKeyDesktop');
+    const mobileProfileName = document.getElementById('mobileProfileName');
+    const desktopProfileName = document.getElementById('desktopProfileName');
 
     if (profile) {
-        banner.style.display = 'block';
-        const truncatedKey = profile.key && profile.key.length > 8 ? profile.key.substring(0, 8) + '...' : (profile.key || 'No Key');
-        if (profileName) profileName.textContent = profile.long_name || 'Unknown Profile';
-        if (nodeId) nodeId.textContent = profile.node_id || 'Unknown';
-        if (channel) channel.textContent = profile.channel || 'Unknown';
-        if (key) key.textContent = truncatedKey;
-        if (profileNameDesktop) profileNameDesktop.textContent = profile.long_name || 'Unknown Profile';
-        if (nodeIdDesktop) nodeIdDesktop.textContent = profile.node_id || 'Unknown';
-        if (channelDesktop) channelDesktop.textContent = profile.channel || 'Unknown';
-        if (keyDesktop) keyDesktop.textContent = truncatedKey;
+        if (mobileProfileName) mobileProfileName.textContent = profile.long_name || 'Unknown Profile';
+        if (desktopProfileName) desktopProfileName.textContent = profile.long_name || 'Unknown Profile';
     } else {
-        banner.style.display = 'none';
+        if (mobileProfileName) mobileProfileName.textContent = 'No Profile Selected';
+        if (desktopProfileName) desktopProfileName.textContent = 'No Profile Selected';
     }
+    updateHeaderState();
+    updateConnectButtons();
 }
 
 function refreshProfileBanner() {
@@ -645,9 +1209,12 @@ function leaveCurrentProfileRoom() {
     currentProfileRoom = null;
 }
 
-async function loadMessages() {
+async function loadMessages(channelIndex = activeChannelIndex) {
     try {
-        const response = await fetch('/api/messages');
+        const query = (channelIndex === null || channelIndex === undefined)
+            ? ''
+            : `?channel_index=${encodeURIComponent(channelIndex)}`;
+        const response = await fetch(`/api/messages${query}`);
         const payload = await response.json();
         if (Array.isArray(payload)) {
             channelMessages = payload;
@@ -655,6 +1222,9 @@ async function loadMessages() {
         } else {
             channelMessages = payload.channel_messages || [];
             dmMessages = payload.dm_messages || [];
+            if (Number.isInteger(payload.selected_channel_index)) {
+                activeChannelIndex = payload.selected_channel_index;
+            }
         }
         syncDmTargetsFromMessages();
     } catch (err) {
@@ -662,26 +1232,65 @@ async function loadMessages() {
     }
 }
 
-async function loadDmTargets() {
+async function loadNodes() {
     if (!currentProfile) {
-        dmTargets = [];
-        renderDmTargetOptions();
+        meshNodes = [];
         return;
     }
 
     try {
         const response = await fetch('/api/nodes');
         const payload = await response.json();
-        dmTargets = (payload.nodes || []).map(node => ({
-            node_num: node.node_num,
-            node_id: node.node_id,
-            label: node.long_name || node.short_name || node.node_id,
-            short_name: node.short_name || '',
-        }));
-        syncDmTargetsFromMessages();
-    } catch (err) {
-        console.error('Error loading DM targets:', err);
+        if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+        }
+        meshNodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+    } catch (error) {
+        console.error('Error loading nodes:', error);
+        meshNodes = [];
     }
+}
+
+async function loadDmTargets() {
+    if (!currentProfile) {
+        dmTargets = [];
+        renderActiveMessages();
+        return;
+    }
+
+    const requestedNodeNums = new Set(
+        dmMessages
+            .map(message => getPeerNodeNum(message))
+            .filter(nodeNum => !!nodeNum)
+            .map(nodeNum => Number(nodeNum))
+    );
+    if (pendingDmTargetNodeNum) {
+        requestedNodeNums.add(Number(pendingDmTargetNodeNum));
+    }
+
+    const loadedTargets = await Promise.all(
+        Array.from(requestedNodeNums).map(async nodeNum => {
+            try {
+                const response = await fetch(`/api/nodes/${nodeNum}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const node = await response.json();
+                return {
+                    node_num: node.node_num,
+                    node_id: node.node_id,
+                    label: node.long_name || node.short_name || node.node_id || `!${nodeNum.toString(16).padStart(8, '0')}`,
+                    short_name: node.short_name || '',
+                };
+            } catch (err) {
+                console.error(`Error loading DM target ${nodeNum}:`, err);
+                return null;
+            }
+        })
+    );
+
+    dmTargets = loadedTargets.filter(target => target !== null);
+    syncDmTargetsFromMessages();
 }
 
 function syncDmTargetsFromMessages() {
@@ -697,51 +1306,69 @@ function syncDmTargetsFromMessages() {
         });
     });
     dmTargets = Array.from(targetMap.values()).sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-    renderDmTargetOptions();
 }
 
-function renderDmTargetOptions() {
-    const select = document.getElementById('dmTargetSelect');
-    if (!select) return;
-
-    const currentValue = activeDmTargetNodeNum ? String(activeDmTargetNodeNum) : '';
-    select.innerHTML = '<option value="">Select a node to message...</option>';
-    dmTargets.forEach(target => {
-        const option = document.createElement('option');
-        option.value = String(target.node_num);
-        option.textContent = target.short_name ? `${target.label} (${target.short_name})` : target.label;
-        select.appendChild(option);
-    });
-    if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
-        select.value = currentValue;
-    }
-}
-
-function applyPendingChatContext() {
+async function applyPendingChatContext() {
     if (pendingDmTargetNodeNum) {
         setActiveChatTab('dm');
         setActiveDmTarget(pendingDmTargetNodeNum, false);
         pendingDmTargetNodeNum = null;
         return;
     }
+    if (activeChatTab === 'nodes') {
+        await loadNodes();
+        setActiveChatTab('nodes');
+        return;
+    }
+    if (activeChatTab === 'channel') {
+        if (pendingChannelIndex !== null) {
+            await setActiveChannel(pendingChannelIndex, false);
+            pendingChannelIndex = null;
+            return;
+        }
 
-    if (activeChatTab === 'dm' && !activeDmTargetNodeNum) {
-        const latestDm = [...dmMessages].reverse().find(message => getPeerNodeNum(message));
-        if (latestDm) {
-            setActiveDmTarget(getPeerNodeNum(latestDm), false);
+        const channels = getProfileChannels();
+        if (channels.length <= 1) {
+            activeChannelIndex = channels.length ? (currentProfile?.selected_channel_index ?? 0) : null;
+        } else {
+            activeChannelIndex = null;
         }
     }
+
     setActiveChatTab(activeChatTab);
 }
 
+function openDmInbox() {
+    setActiveChatTab('dm');
+    setActiveDmTarget(null);
+}
+
+async function openNodesInbox() {
+    await loadNodes();
+    setActiveChatTab('nodes');
+}
+
+function openChannelInbox() {
+    setActiveChatTab('channel');
+    const channels = getProfileChannels();
+    activeChannelIndex = channels.length <= 1 ? 0 : null;
+    updateComposerState();
+    renderActiveMessages();
+    updateChatUrl();
+}
+
 function setActiveChatTab(tab) {
-    if (activeChatTab !== (tab === 'dm' ? 'dm' : 'channel')) {
+    const nextTab = tab === 'dm' ? 'dm' : (tab === 'nodes' ? 'nodes' : 'channel');
+    if (activeChatTab !== nextTab) {
         replyingToPacketId = null;
     }
-    activeChatTab = tab === 'dm' ? 'dm' : 'channel';
+    activeChatTab = nextTab;
     document.getElementById('channelTabBtn').classList.toggle('active', activeChatTab === 'channel');
     document.getElementById('dmTabBtn').classList.toggle('active', activeChatTab === 'dm');
-    document.getElementById('dmToolbar').classList.toggle('d-none', activeChatTab !== 'dm');
+    document.getElementById('nodesTabBtn').classList.toggle('active', activeChatTab === 'nodes');
+    document.getElementById('mobileChannelsBtn').classList.toggle('active', activeChatTab === 'channel');
+    document.getElementById('mobileDmsBtn').classList.toggle('active', activeChatTab === 'dm');
+    document.getElementById('mobileNodesBtn').classList.toggle('active', activeChatTab === 'nodes');
     updateComposerState();
     renderActiveMessages();
     updateChatUrl();
@@ -752,33 +1379,104 @@ function setActiveDmTarget(nodeNum, updateUrl = true) {
         replyingToPacketId = null;
     }
     activeDmTargetNodeNum = nodeNum ? Number(nodeNum) : null;
-    const select = document.getElementById('dmTargetSelect');
-    if (select) {
-        select.value = activeDmTargetNodeNum ? String(activeDmTargetNodeNum) : '';
+    updateComposerState();
+    renderActiveMessages();
+    if (updateUrl) updateChatUrl();
+}
+
+async function setActiveChannel(channelIndex, updateUrl = true) {
+    const channels = getProfileChannels();
+    if (!channels.length) {
+        activeChannelIndex = null;
+        updateComposerState();
+        renderActiveMessages();
+        if (updateUrl) updateChatUrl();
+        return;
     }
+
+    const normalizedIndex = Number(channelIndex);
+    if (!Number.isInteger(normalizedIndex) || normalizedIndex < 0 || normalizedIndex >= channels.length) {
+        return;
+    }
+
+    if (
+        activeChannelIndex !== null &&
+        activeChannelIndex !== undefined &&
+        Number(activeChannelIndex) === normalizedIndex &&
+        activeChatTab === 'channel'
+    ) {
+        if (updateUrl) updateChatUrl();
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/current-channel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel_index: normalizedIndex })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}`);
+        }
+
+        leaveCurrentChannelRoom();
+        currentProfile = data.profile || currentProfile;
+        channelMessages = data.channel_messages || [];
+        dmMessages = data.dm_messages || dmMessages;
+        activeChannelIndex = Number.isInteger(data.selected_channel_index) ? data.selected_channel_index : normalizedIndex;
+        currentChannelRoom = data.channel_number ?? null;
+
+        if (socket && socket.connected && currentChannelRoom !== null) {
+            joinChannelRoom(currentChannelRoom);
+        }
+
+        if (data.interface_status === 'started') {
+            updateInterfaceStatus('bg-success', 'Connected');
+        } else if (data.interface_status === 'failed') {
+            updateInterfaceStatus('bg-danger', 'Failed to Start');
+        }
+    } catch (error) {
+        console.error('Error selecting channel:', error);
+        alert('Error selecting channel: ' + error.message);
+        return;
+    }
+
+    setActiveChatTab('channel');
     updateComposerState();
     renderActiveMessages();
     if (updateUrl) updateChatUrl();
 }
 
 function updateComposerState() {
+    const composerBar = document.getElementById('composerBar');
     const input = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
-    const dmThreadLabel = document.getElementById('dmThreadLabel');
     const replyBar = document.getElementById('replyComposerBar');
     const replyAuthor = document.getElementById('replyComposerAuthor');
     const replyPreview = document.getElementById('replyComposerPreview');
 
+    if (activeChatTab === 'nodes') {
+        if (composerBar) composerBar.classList.add('d-none');
+        if (replyBar) replyBar.classList.add('d-none');
+        updateHeaderState();
+        return;
+    }
+
+    if (composerBar) composerBar.classList.remove('d-none');
+
     if (activeChatTab === 'dm') {
         const activeTarget = dmTargets.find(target => Number(target.node_num) === Number(activeDmTargetNodeNum));
-        input.placeholder = activeTarget ? `Message ${activeTarget.label}...` : 'Select a node to start a DM...';
-        sendBtn.textContent = 'Send DM';
-        dmThreadLabel.textContent = activeTarget ? `Direct message thread with ${activeTarget.label}` : 'Choose a node to open a DM thread.';
+        input.placeholder = activeTarget ? `Message ${activeTarget.label}...` : 'Open a DM thread to reply...';
     } else {
-        input.placeholder = 'Type a channel message...';
-        sendBtn.textContent = 'Send Channel';
-        dmThreadLabel.textContent = 'Choose a node to open a DM thread.';
+        const activeChannel = getActiveChannel();
+        input.placeholder = activeChannel ? `Message ${activeChannel.name}...` : 'Open a channel to reply...';
     }
+
+    sendBtn.textContent = 'Send';
+
+    input.disabled = (activeChatTab === 'dm' && !activeDmTargetNodeNum) || (activeChatTab === 'channel' && !getActiveChannel());
+    sendBtn.disabled = (activeChatTab === 'dm' && !activeDmTargetNodeNum) || (activeChatTab === 'channel' && !getActiveChannel());
 
     const replyMessage = getMessageByPacketId(replyingToPacketId);
     if (replyMessage && replyBar && replyAuthor && replyPreview) {
@@ -788,6 +1486,8 @@ function updateComposerState() {
     } else if (replyBar) {
         replyBar.classList.add('d-none');
     }
+
+    updateHeaderState();
 }
 
 function updateCharacterCounter() {
@@ -806,6 +1506,9 @@ function updateCharacterCounter() {
 
 function getVisibleMessages() {
     if (activeChatTab === 'channel') {
+        if (activeChannelIndex === null || activeChannelIndex === undefined) {
+            return [];
+        }
         return channelMessages;
     }
     if (!activeDmTargetNodeNum) {
@@ -818,11 +1521,22 @@ function renderActiveMessages() {
     const container = document.getElementById('messagesContainer');
     if (!container) return;
 
-    const visibleMessages = getVisibleMessages();
-    if (activeChatTab === 'dm' && !activeDmTargetNodeNum) {
-        container.innerHTML = '<div class="text-muted small">Select a node above to view or send direct messages.</div>';
+    if (activeChatTab === 'nodes') {
+        renderNodesList(container);
         return;
     }
+
+    if (activeChatTab === 'channel' && (activeChannelIndex === null || activeChannelIndex === undefined)) {
+        renderChannelThreadList(container);
+        return;
+    }
+
+    if (activeChatTab === 'dm' && !activeDmTargetNodeNum) {
+        renderDmThreadList(container);
+        return;
+    }
+
+    const visibleMessages = getVisibleMessages();
     if (!visibleMessages.length) {
         container.innerHTML = `<div class="text-muted small">${activeChatTab === 'channel' ? 'No channel messages yet.' : 'No direct messages in this thread yet.'}</div>`;
         return;
@@ -832,11 +1546,187 @@ function renderActiveMessages() {
     container.scrollTop = container.scrollHeight;
 }
 
+function renderChannelThreadList(container) {
+    const channels = getProfileChannels();
+    if (!channels.length) {
+        container.innerHTML = '<div class="text-muted small">No channels configured yet. Add one from Profiles.</div>';
+        return;
+    }
+
+    container.innerHTML = channels.map((channel, index) => renderChannelThreadCardHtml(channel, index)).join('');
+}
+
+function renderChannelThreadCardHtml(channel, index) {
+    const keyPreview = truncateText(channel.key || '', 18);
+    return `
+        <button class="dm-thread-card channel-thread-card" type="button" data-channel-index="${Number(index)}">
+            <div class="d-flex justify-content-between align-items-start gap-3">
+                <div class="flex-grow-1 text-start">
+                    <div class="fw-semibold text-primary">${escapeHtml(channel.name || `Channel ${index + 1}`)}</div>
+                    <div class="small text-muted mt-1">${escapeHtml(keyPreview ? `Key ${keyPreview}` : 'Configured channel')}</div>
+                </div>
+                <div class="small text-muted text-nowrap">Tap to open</div>
+            </div>
+        </button>
+    `;
+}
+
+function handleThreadCardClick(event) {
+    const channelCard = event.target.closest('.channel-thread-card');
+    if (channelCard) {
+        const channelIndex = Number(channelCard.dataset.channelIndex);
+        if (Number.isInteger(channelIndex)) {
+            void setActiveChannel(channelIndex);
+        }
+        return;
+    }
+
+    const nodeDmTrigger = event.target.closest('.node-dm-trigger');
+    if (nodeDmTrigger) {
+        const nodeNum = Number(nodeDmTrigger.dataset.nodeNum);
+        if (Number.isInteger(nodeNum)) {
+            setActiveChatTab('dm');
+            setActiveDmTarget(nodeNum);
+        }
+        return;
+    }
+
+    const nodeDetailsTrigger = event.target.closest('.node-details-trigger');
+    if (nodeDetailsTrigger) {
+        const nodeNum = Number(nodeDetailsTrigger.dataset.nodeNum);
+        if (Number.isInteger(nodeNum)) {
+            void showNodeDetails(nodeNum);
+        }
+    }
+}
+
+function renderDmThreadList(container) {
+    const threads = getDmThreads();
+    if (!threads.length) {
+        container.innerHTML = '<div class="text-muted small">No DM threads yet. Start one from the Nodes tab.</div>';
+        return;
+    }
+
+    container.innerHTML = threads.map(renderDmThreadCardHtml).join('');
+}
+
+function renderNodesList(container) {
+    if (!currentProfile) {
+        container.innerHTML = '<div class="alert alert-warning mb-0"><h5>No Profile Selected</h5><p class="mb-0">Use Profiles to choose a profile before viewing nodes.</p></div>';
+        return;
+    }
+
+    if (!meshNodes.length) {
+        container.innerHTML = '<div class="alert alert-info mb-0"><h5>No Nodes Seen Yet</h5><p class="mb-0">No nodes have been detected on the mesh network for this profile yet.</p></div>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Recently Seen Nodes (${meshNodes.length})</h5>
+            </div>
+            <div class="card-body">
+                <div class="node-list">
+                    ${meshNodes.map(renderNodeCardHtml).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function getDmThreads() {
+    return dmTargets
+        .map(target => {
+            const threadMessages = dmMessages.filter(message => Number(getPeerNodeNum(message)) === Number(target.node_num));
+            const latestMessage = threadMessages.length ? threadMessages[threadMessages.length - 1] : null;
+            return {
+                target,
+                latestMessage,
+            };
+        })
+        .sort((a, b) => {
+            const aTime = getMessageSortTimestamp(a.latestMessage);
+            const bTime = getMessageSortTimestamp(b.latestMessage);
+            return bTime - aTime;
+        });
+}
+
+function renderDmThreadCardHtml(thread) {
+    const target = thread.target;
+    const latestMessage = thread.latestMessage;
+    const preview = latestMessage ? truncateText(latestMessage.content || '', 110) : 'No messages yet.';
+    const timestamp = latestMessage ? formatTimestamp(latestMessage.timestamp) : '';
+
+    return `
+        <button class="dm-thread-card" type="button" onclick="setActiveDmTarget(${Number(target.node_num)})">
+            <div class="d-flex justify-content-between align-items-start gap-3">
+                <div class="flex-grow-1 text-start">
+                    <div class="fw-semibold text-primary">${escapeHtml(target.label || target.node_id || 'Unknown')}</div>
+                    <div class="small text-muted mt-1">${escapeHtml(preview)}</div>
+                </div>
+                <div class="small text-muted text-nowrap">${escapeHtml(timestamp)}</div>
+            </div>
+        </button>
+    `;
+}
+
+function renderNodeCardHtml(node) {
+    const lastSeen = formatNodeLastSeen(node.last_seen);
+    const nodeId = escapeHtml(node.node_id || `!${Number(node.node_num).toString(16).padStart(8, '0')}`);
+    return `
+        <div class="node-card">
+            <div class="node-card__header">
+                <div class="node-card__title">
+                    <div class="node-card__name">${escapeHtml(node.long_name || 'Unknown')}</div>
+                    <div class="node-card__meta">
+                        <code class="text-primary">${nodeId}</code>
+                        <span>${escapeHtml(node.short_name || '?')}</span>
+                        <span>${escapeHtml(node.hw_model || 'Unknown')}</span>
+                    </div>
+                </div>
+                <span class="badge bg-info">${escapeHtml(node.role || 'CLIENT')}</span>
+            </div>
+            <div class="node-card__facts">
+                <div class="node-card__fact">
+                    <span class="node-card__label">Last Heard</span>
+                    <div class="node-card__value text-muted">${lastSeen}</div>
+                </div>
+                <div class="node-card__fact">
+                    <span class="node-card__label">SNR</span>
+                    <div class="node-card__value">${formatNodeSnrBadge(node.snr)}</div>
+                </div>
+                <div class="node-card__fact">
+                    <span class="node-card__label">Hops</span>
+                    <div class="node-card__value">${formatNodeHopsBadge(node.hops_away)}</div>
+                </div>
+                <div class="node-card__fact">
+                    <span class="node-card__label">Node Num</span>
+                    <div class="node-card__value"><code>${escapeHtml(String(node.node_num || 'Unknown'))}</code></div>
+                </div>
+            </div>
+            <div class="node-card__actions">
+                <button class="btn btn-sm btn-outline-success node-dm-trigger" type="button" data-node-num="${Number(node.node_num)}">DM</button>
+                <button class="btn btn-sm btn-outline-primary node-details-trigger" type="button" data-node-num="${Number(node.node_num)}">Details</button>
+            </div>
+        </div>
+    `;
+}
+
+function getMessageSortTimestamp(message) {
+    if (!message || !message.timestamp) return 0;
+    const rawTimestamp = message.timestamp;
+    if (typeof rawTimestamp === 'number') {
+        return rawTimestamp > 1e10 ? rawTimestamp : rawTimestamp * 1000;
+    }
+    const parsed = Date.parse(rawTimestamp);
+    return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 function renderMessageHtml(message) {
     const isOwnMessage = currentProfile && message.sender === currentProfile.node_id;
     const timestamp = formatTimestamp(message.timestamp);
     const dmBadge = message.message_type === 'dm' ? '<span class="badge bg-secondary ms-1">DM</span>' : '';
-    const peerLabel = message.message_type === 'dm' && isOwnMessage && message.target ? `<small class="text-muted">to ${escapeHtml(message.target)}</small>` : '';
     const replyPreview = renderReplyPreview(message);
     const replyButton = message.packet_id ? `<button class="reply-trigger text-decoration-none text-muted" type="button" onclick="startReply(${message.packet_id})">Reply</button>` : '';
 
@@ -848,7 +1738,6 @@ function renderMessageHtml(message) {
                     <small class="text-muted">(${escapeHtml(message.sender || 'Unknown')})</small>
                     ${isOwnMessage ? '<span class="badge bg-primary ms-1">You</span>' : ''}
                     ${dmBadge}
-                    ${peerLabel}
                     ${replyPreview}
                     <div class="mt-1">${escapeHtml(message.content || '').replace(/\n/g, '<br>')}</div>
                     <div class="mt-2">${replyButton}</div>
@@ -864,6 +1753,7 @@ function addIncomingMessage(message) {
     if (messageType === 'dm') {
         upsertMessage(dmMessages, message);
         syncDmTargetsFromMessages();
+        void loadDmTargets();
     } else {
         upsertMessage(channelMessages, message);
     }
@@ -886,16 +1776,22 @@ function upsertMessage(list, message) {
 
 async function setProfile(event) {
     const clickedButton = event ? event.target : null;
-    const isDesktopButton = clickedButton && clickedButton.id === 'setProfileBtnDesktop';
-    const profileId = isDesktopButton
-        ? (document.getElementById('profileSelectDesktop')?.value || '')
-        : (document.getElementById('profileSelect')?.value || '');
-    const setBtn = isDesktopButton ? document.getElementById('setProfileBtnDesktop') : document.getElementById('setProfileBtn');
+    const isDesktopConnectButton = clickedButton && clickedButton.id === 'desktopConnectBtn';
+    const isMobileConnectButton = clickedButton && clickedButton.id === 'mobileConnectBtn';
+    const isConnectButton = isDesktopConnectButton || isMobileConnectButton;
+    const profileId = isDesktopConnectButton
+        ? (currentProfile?.id || '')
+        : (isMobileConnectButton
+            ? (document.getElementById('profileSelect')?.value || currentProfile?.id || '')
+            : (document.getElementById('profileSelect')?.value || ''));
+    const setBtn = isDesktopConnectButton
+        ? document.getElementById('desktopConnectBtn')
+        : (isMobileConnectButton ? document.getElementById('mobileConnectBtn') : document.getElementById('setProfileBtn'));
 
     if (!setBtn) return;
 
     setBtn.disabled = true;
-    setBtn.textContent = 'Setting Profile...';
+    setBtn.textContent = isConnectButton ? 'Connecting...' : 'Setting Profile...';
 
     try {
         const response = await fetch('/api/current-profile', {
@@ -914,6 +1810,7 @@ async function setProfile(event) {
         currentProfile = data.profile || null;
         channelMessages = data.channel_messages || data.messages || [];
         dmMessages = data.dm_messages || [];
+        activeChannelIndex = Number.isInteger(data.selected_channel_index) ? data.selected_channel_index : 0;
         activeDmTargetNodeNum = null;
         replyingToPacketId = null;
 
@@ -928,7 +1825,8 @@ async function setProfile(event) {
 
         updateProfileBanner(currentProfile);
         await loadDmTargets();
-        applyPendingChatContext();
+        await loadNodes();
+        await applyPendingChatContext();
 
         if (data.interface_status === 'started') {
             updateInterfaceStatus('bg-success', 'Connected');
@@ -949,13 +1847,13 @@ async function setProfile(event) {
         if (currentProfile && data.unread_count !== undefined) {
             if (data.unread_count > 0) {
                 showNotification(
-                    `Switched to ${currentProfile.long_name} (${currentProfile.channel}). ${data.unread_count} unread channel message${data.unread_count === 1 ? '' : 's'} loaded.`,
+                    `Switched to ${currentProfile.long_name}. ${data.unread_count} unread channel message${data.unread_count === 1 ? '' : 's'} loaded.`,
                     'success',
                     5000
                 );
             } else {
                 showNotification(
-                    `Switched to ${currentProfile.long_name} (${currentProfile.channel}). No unread channel messages.`,
+                    `Switched to ${currentProfile.long_name}. No unread channel messages.`,
                     'info',
                     3000
                 );
@@ -966,7 +1864,11 @@ async function setProfile(event) {
         alert('Error setting profile: ' + error.message);
     } finally {
         setBtn.disabled = false;
-        setBtn.textContent = setBtn.id === 'setProfileBtnDesktop' ? 'Set Profile' : 'Set';
+        if (setBtn.id === 'setProfileBtn') {
+            setBtn.textContent = 'Set';
+        } else {
+            updateConnectButtons();
+        }
     }
 }
 
@@ -990,10 +1892,13 @@ async function sendMessage() {
     };
     if (payload.message_type === 'dm') {
         if (!activeDmTargetNodeNum) {
-            alert('Select a node before sending a DM.');
+            alert('Select a DM thread before sending a DM.');
             return;
         }
         payload.target_node_num = activeDmTargetNodeNum;
+    } else if (activeChannelIndex === null || activeChannelIndex === undefined) {
+        alert('Select a channel before sending a message.');
+        return;
     }
     if (replyingToPacketId) {
         payload.reply_packet_id = replyingToPacketId;
@@ -1074,6 +1979,104 @@ function clearReplyComposer() {
     updateComposerState();
 }
 
+function updateHeaderState() {
+    const mobileSubline = document.getElementById('mobileProfileSubline');
+    const desktopSubline = document.getElementById('desktopProfileSubline');
+
+    let mobileText = 'Use the bottom bar to choose a section';
+    let desktopText = 'Use Profiles to choose a profile';
+
+    if (currentProfile) {
+        if (activeChatTab === 'dm') {
+            const activeTarget = dmTargets.find(target => Number(target.node_num) === Number(activeDmTargetNodeNum));
+            const dmText = activeTarget
+                ? `Direct thread with ${activeTarget.label}`
+                : (dmTargets.length ? 'Direct messages' : 'No DM threads yet');
+            mobileText = dmText;
+            desktopText = dmText;
+        } else if (activeChatTab === 'nodes') {
+            const nodesText = meshNodes.length ? `Seen nodes (${meshNodes.length})` : 'Seen nodes';
+            mobileText = nodesText;
+            desktopText = nodesText;
+        } else {
+            const activeChannel = getActiveChannel();
+            const channelText = activeChannel
+                ? `Channel ${activeChannel.name}`
+                : (getProfileChannels().length ? 'Channels' : 'No channels configured');
+            mobileText = channelText;
+            desktopText = channelText;
+        }
+    }
+
+    if (mobileSubline) mobileSubline.textContent = mobileText;
+    if (desktopSubline) desktopSubline.textContent = desktopText;
+}
+
+function updateStatusLight(elementId, status) {
+    const light = document.getElementById(elementId);
+    if (!light) return;
+    light.classList.remove('is-online', 'is-warning', 'is-offline', 'is-idle');
+
+    if (status === 'bg-success') {
+        light.classList.add('is-online');
+    } else if (status === 'bg-warning') {
+        light.classList.add('is-warning');
+    } else if (status === 'bg-danger') {
+        light.classList.add('is-offline');
+    } else {
+        light.classList.add('is-idle');
+    }
+}
+
+function updateConnectButton(buttonId, noProfileText) {
+    const btn = document.getElementById(buttonId);
+    if (!btn) return;
+
+    btn.classList.remove('is-connected');
+
+    if (!currentProfile) {
+        btn.textContent = noProfileText;
+        return;
+    }
+
+    if (currentInterfaceStatusClass === 'bg-success') {
+        btn.textContent = 'Connected';
+        btn.classList.add('is-connected');
+        return;
+    }
+
+    if (currentInterfaceStatusClass === 'bg-danger') {
+        btn.textContent = 'Retry';
+        return;
+    }
+
+    btn.textContent = 'Connect';
+}
+
+function updateConnectButtons() {
+    updateConnectButton('mobileConnectBtn', 'Select');
+    updateConnectButton('desktopConnectBtn', 'Connect');
+}
+
+function handleMobileConnectClick() {
+    if (!currentProfile && !(document.getElementById('profileSelect')?.value)) {
+        const sheet = document.getElementById('mobileSettingsSheet');
+        if (sheet && typeof bootstrap !== 'undefined' && bootstrap.Offcanvas) {
+            bootstrap.Offcanvas.getOrCreateInstance(sheet).show();
+        }
+        return;
+    }
+    setProfile({ target: document.getElementById('mobileConnectBtn') });
+}
+
+function handleDesktopConnectClick() {
+    if (!currentProfile) {
+        window.location.href = '{{ url_for("profiles") }}';
+        return;
+    }
+    setProfile({ target: document.getElementById('desktopConnectBtn') });
+}
+
 function getPeerLabel(message, peerNodeNum) {
     const knownTarget = dmTargets.find(target => Number(target.node_num) === Number(peerNodeNum));
     if (knownTarget) return knownTarget.label;
@@ -1086,6 +2089,26 @@ function getPeerLabel(message, peerNodeNum) {
 function parseNodeId(nodeId) {
     if (!nodeId || typeof nodeId !== 'string' || !nodeId.startsWith('!')) return null;
     return parseInt(nodeId.slice(1), 16);
+}
+
+function formatNodeLastSeen(lastSeen) {
+    if (!lastSeen) return 'Unknown';
+    const parts = String(lastSeen).split('T');
+    if (parts.length > 1) {
+        return `${escapeHtml(parts[0])}<span class="d-block small">${escapeHtml(parts[1].slice(0, 8))}</span>`;
+    }
+    return escapeHtml(String(lastSeen));
+}
+
+function formatNodeSnrBadge(value) {
+    if (value === null || value === undefined) return '<span class="text-muted">Unknown</span>';
+    const badgeClass = Number(value) > 0 ? 'bg-success' : 'bg-warning text-dark';
+    return `<span class="badge ${badgeClass}">${escapeHtml(String(value))} dB</span>`;
+}
+
+function formatNodeHopsBadge(value) {
+    if (value === null || value === undefined) return '<span class="text-muted">Unknown</span>';
+    return `<span class="badge bg-success">${escapeHtml(String(value))}</span>`;
 }
 
 function formatTimestamp(rawTimestamp) {
@@ -1131,13 +2154,80 @@ function updateChatUrl() {
         } else {
             params.delete('dm');
         }
-    } else {
-        params.delete('tab');
+        params.delete('channel');
+    } else if (activeChatTab === 'nodes') {
+        params.set('tab', 'nodes');
         params.delete('dm');
+        params.delete('channel');
+    } else {
+        params.delete('dm');
+        params.delete('tab');
+        if (activeChannelIndex !== null && activeChannelIndex !== undefined) {
+            params.set('channel', String(activeChannelIndex));
+        } else {
+            params.delete('channel');
+        }
     }
     const query = params.toString();
     const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
     window.history.replaceState({}, '', nextUrl);
+}
+
+function showNodeDetails(nodeNum) {
+    fetch(`/api/nodes/${nodeNum}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert(`Error: ${data.error}`);
+                return;
+            }
+
+            const content = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Basic Information</h6>
+                        <table class="table table-sm">
+                            <tr><td><strong>Node Number:</strong></td><td><code>${escapeHtml(String(data.node_num))}</code></td></tr>
+                            <tr><td><strong>Node ID:</strong></td><td><code>${escapeHtml(data.node_id || 'Unknown')}</code></td></tr>
+                            <tr><td><strong>Long Name:</strong></td><td>${escapeHtml(data.long_name || 'Unknown')}</td></tr>
+                            <tr><td><strong>Short Name:</strong></td><td>${escapeHtml(data.short_name || 'Unknown')}</td></tr>
+                            <tr><td><strong>Hardware Model:</strong></td><td>${escapeHtml(data.hw_model || 'Unknown')}</td></tr>
+                            <tr><td><strong>Role:</strong></td><td><span class="badge bg-info">${escapeHtml(data.role || 'CLIENT')}</span></td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Network Information</h6>
+                        <table class="table table-sm">
+                            <tr><td><strong>Last Heard:</strong></td><td>${formatDateTime(data.last_seen)}</td></tr>
+                            <tr><td><strong>SNR:</strong></td><td>${data.snr === null || data.snr === undefined ? 'Unknown' : `${escapeHtml(String(data.snr))} dB`}</td></tr>
+                            <tr><td><strong>Hops Away:</strong></td><td>${data.hops_away === null || data.hops_away === undefined ? 'Unknown' : escapeHtml(String(data.hops_away))}</td></tr>
+                            ${data.macaddr ? `<tr><td><strong>MAC Address:</strong></td><td><code>${escapeHtml(data.macaddr)}</code></td></tr>` : ''}
+                            ${data.public_key ? `<tr><td><strong>Public Key:</strong></td><td><code>${escapeHtml(data.public_key)}</code></td></tr>` : ''}
+                        </table>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('nodeDetailsContent').innerHTML = content;
+            document.getElementById('nodeDetailsModalLabel').textContent =
+                `Node Details - ${data.long_name || data.short_name || data.node_id || data.node_num}`;
+
+            new bootstrap.Modal(document.getElementById('nodeDetailsModal')).show();
+        })
+        .catch(error => {
+            console.error('Error fetching node details:', error);
+            alert('Error fetching node details');
+        });
+}
+
+function formatDateTime(dateTimeStr) {
+    if (!dateTimeStr) return 'Unknown';
+    try {
+        const date = new Date(dateTimeStr);
+        return date.toLocaleString();
+    } catch (_error) {
+        return dateTimeStr;
+    }
 }
 
 function showNodeNotification(message, type = 'info') {

@@ -96,6 +96,12 @@ class Database:
                 # Column already exists, which is fine
                 pass
 
+            try:
+                conn.execute("ALTER TABLE profiles ADD COLUMN channels_json TEXT")
+                print("[DB] Added channels_json column to profiles table")
+            except sqlite3.OperationalError:
+                pass
+
             for column_sql, column_name in [
                 ("ALTER TABLE messages ADD COLUMN message_type TEXT DEFAULT 'channel'", "message_type"),
                 ("ALTER TABLE messages ADD COLUMN reply_packet_id INTEGER", "reply_packet_id"),
@@ -121,6 +127,31 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_last_seen ON profile_last_seen (profile_id)")
             
             conn.commit()
+
+    @staticmethod
+    def _normalize_channels(channels=None, legacy_channel: str = "", legacy_key: str = "") -> List[Dict]:
+        normalized = []
+
+        if isinstance(channels, str):
+            try:
+                channels = json.loads(channels)
+            except Exception:
+                channels = None
+
+        if isinstance(channels, list):
+            for channel in channels:
+                if not isinstance(channel, dict):
+                    continue
+                name = (channel.get("name") or channel.get("channel") or "").strip()
+                key = (channel.get("key") or "").strip()
+                if not name or not key:
+                    continue
+                normalized.append({"name": name, "key": key})
+
+        if not normalized and legacy_channel and legacy_key:
+            normalized.append({"name": legacy_channel, "key": legacy_key})
+
+        return normalized
 
     def migrate_profiles_from_json(self, json_file: str = "profiles.json"):
         """Migrate existing profiles from JSON file to database (only if not already migrated)"""
@@ -148,17 +179,25 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 migrated_count = 0
                 for profile_id, profile in profiles_data.items():
+                    channels = self._normalize_channels(
+                        profile.get("channels"),
+                        profile.get("channel", ""),
+                        profile.get("key", ""),
+                    )
+                    primary_channel = channels[0]["name"] if channels else profile.get("channel", "")
+                    primary_key = channels[0]["key"] if channels else profile.get("key", "")
                     conn.execute("""
                         INSERT OR IGNORE INTO profiles 
-                        (id, node_id, long_name, short_name, channel, key, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, node_id, long_name, short_name, channel, key, channels_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         profile_id,
                         profile.get('node_id', ''),
                         profile.get('long_name', ''),
                         profile.get('short_name', ''),
-                        profile.get('channel', ''),
-                        profile.get('key', ''),
+                        primary_channel,
+                        primary_key,
+                        json.dumps(channels),
                         profile.get('created_at', datetime.now().isoformat()),
                         profile.get('updated_at', datetime.now().isoformat())
                     ))
@@ -184,18 +223,22 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
-                SELECT id, node_id, long_name, short_name, channel, key, hop_limit, 
+                SELECT id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
                        created_at, updated_at FROM profiles ORDER BY created_at DESC
             """)
             profiles = {}
             for row in cursor:
+                channels = self._normalize_channels(row["channels_json"], row["channel"], row["key"])
+                primary_channel = channels[0]["name"] if channels else row["channel"]
+                primary_key = channels[0]["key"] if channels else row["key"]
                 profiles[row['id']] = {
                     'id': row['id'],
                     'node_id': row['node_id'],
                     'long_name': row['long_name'],
                     'short_name': row['short_name'],
-                    'channel': row['channel'],
-                    'key': row['key'],
+                    'channel': primary_channel,
+                    'key': primary_key,
+                    'channels': channels,
                     'hop_limit': row['hop_limit'] or 3,  # Default to 3 if null
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
@@ -207,57 +250,87 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
-                SELECT id, node_id, long_name, short_name, channel, key, hop_limit, 
+                SELECT id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
                        created_at, updated_at FROM profiles WHERE id = ?
             """, (profile_id,))
             row = cursor.fetchone()
             if row:
+                channels = self._normalize_channels(row["channels_json"], row["channel"], row["key"])
+                primary_channel = channels[0]["name"] if channels else row["channel"]
+                primary_key = channels[0]["key"] if channels else row["key"]
                 return {
                     'id': row['id'],
                     'node_id': row['node_id'],
                     'long_name': row['long_name'],
                     'short_name': row['short_name'],
-                    'channel': row['channel'],
-                    'key': row['key'],
+                    'channel': primary_channel,
+                    'key': primary_key,
+                    'channels': channels,
                     'hop_limit': row['hop_limit'] or 3,  # Default to 3 if null
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
                 }
             return None
 
-    def create_profile(self, profile_id: str, node_id: str, long_name: str, 
-                      short_name: str, channel: str, key: str, hop_limit: int = 3) -> bool:
+    def create_profile(self, profile_id: str, node_id: str, long_name: str,
+                      short_name: str, channels: List[Dict], hop_limit: int = 3) -> bool:
         """Create a new profile"""
         # Validate hop_limit range (0-7)
         if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
             hop_limit = 3  # Default to 3 if invalid
+        channels = self._normalize_channels(channels)
+        if not channels:
+            return False
+        primary = channels[0]
             
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
-                    INSERT INTO profiles (id, node_id, long_name, short_name, channel, key, hop_limit)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (profile_id, node_id, long_name, short_name, channel, key, hop_limit))
+                    INSERT INTO profiles (id, node_id, long_name, short_name, channel, key, channels_json, hop_limit)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    profile_id,
+                    node_id,
+                    long_name,
+                    short_name,
+                    primary["name"],
+                    primary["key"],
+                    json.dumps(channels),
+                    hop_limit,
+                ))
                 conn.commit()
                 return True
         except Exception as e:
             print(f"Error creating profile: {e}")
             return False
 
-    def update_profile(self, profile_id: str, node_id: str, long_name: str, 
-                      short_name: str, channel: str, key: str, hop_limit: int = 3) -> bool:
+    def update_profile(self, profile_id: str, node_id: str, long_name: str,
+                      short_name: str, channels: List[Dict], hop_limit: int = 3) -> bool:
         """Update an existing profile"""
         # Validate hop_limit range (0-7)
         if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
             hop_limit = 3  # Default to 3 if invalid
+        channels = self._normalize_channels(channels)
+        if not channels:
+            return False
+        primary = channels[0]
             
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute("""
                     UPDATE profiles SET node_id = ?, long_name = ?, short_name = ?, 
-                                      channel = ?, key = ?, hop_limit = ?, updated_at = CURRENT_TIMESTAMP
+                                      channel = ?, key = ?, channels_json = ?, hop_limit = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                """, (node_id, long_name, short_name, channel, key, hop_limit, profile_id))
+                """, (
+                    node_id,
+                    long_name,
+                    short_name,
+                    primary["name"],
+                    primary["key"],
+                    json.dumps(channels),
+                    hop_limit,
+                    profile_id,
+                ))
                 return cursor.rowcount > 0
         except Exception as e:
             print(f"Error updating profile: {e}")

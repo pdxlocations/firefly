@@ -91,6 +91,34 @@
             display: block !important;
         }
 
+        .mobile-header-auth {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+
+        .mobile-header-auth__username {
+            min-width: 0;
+            font-size: 0.9rem;
+            font-weight: 700;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .mobile-header-auth__form {
+            flex: 0 0 auto;
+            margin: 0;
+        }
+
+        .mobile-header-auth__button {
+            min-height: 2.35rem;
+            padding: 0.45rem 0.85rem;
+            border: 1px solid rgba(31, 93, 150, 0.24);
+        }
+
         @media (max-width: 767.98px) {
             body.mobile-fixed-nav-page > .navbar {
                 display: none;
@@ -444,6 +472,22 @@
                 margin: 0.5rem 1rem;
                 align-self: flex-start;
             }
+
+            .navbar-nav.navbar-auth {
+                flex-direction: row;
+                align-items: center;
+                gap: 0.5rem;
+            }
+
+            .navbar-nav.navbar-auth .nav-link {
+                padding: 0.25rem 0;
+                border-bottom: none;
+            }
+
+            .navbar-nav.navbar-auth .btn {
+                margin: 0;
+                align-self: center;
+            }
         }
         
         /* Dark theme navbar */
@@ -489,6 +533,46 @@
         
         .navbar-brand:hover img {
             transform: scale(1.1);
+        }
+
+        .navbar-auth {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            flex-wrap: nowrap;
+            gap: 0.65rem;
+        }
+
+        .navbar-auth__username {
+            margin: 0;
+            padding: 0.25rem 0;
+            color: inherit !important;
+            opacity: 0.78;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .navbar-auth__form {
+            display: flex;
+            align-items: center;
+            margin: 0;
+        }
+
+        .navbar-auth__button {
+            margin: 0 !important;
+            white-space: nowrap;
+        }
+
+        @media (max-width: 575.98px) {
+            .navbar-auth {
+                gap: 0.45rem;
+            }
+
+            .navbar-auth__username {
+                max-width: 9.5rem;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
         }
         
         /* Theme-specific logo visibility */
@@ -601,7 +685,13 @@
                 Firefly
             </a>
 
-            <div class="navbar-nav ms-auto">
+            <div class="navbar-nav ms-auto navbar-auth">
+                {% if current_user %}
+                    <span class="nav-link navbar-auth__username">{{ current_user.username }}</span>
+                    <form method="post" action="{{ url_for('logout') }}" class="navbar-auth__form">
+                        <button class="btn btn-outline-light btn-sm navbar-auth__button" type="submit">Logout</button>
+                    </form>
+                {% endif %}
                 <button class="btn btn-outline-light btn-sm" id="themeToggle" title="Toggle Dark/Light Mode">
                     <span id="themeIcon">☀️</span>
                 </button>

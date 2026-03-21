@@ -3,6 +3,7 @@
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -182,6 +183,17 @@ class MeshNodeStore:
         self.channel_num = self.channel_nums[0] if self.channel_nums else generate_hash(profile["channel"], profile["key"])
         self.node_db = meshdb.NodeDB(self.owner_node_num, self.db_path)
         self.node_db.ensure_table()
+
+    def ensure_owner_node(self) -> None:
+        self.node_db.upsert(
+            node_num=self.owner_node_num,
+            long_name=self.profile.get("long_name") or None,
+            short_name=self.profile.get("short_name") or None,
+            hw_model="PRIVATE_HW",
+            role="CLIENT",
+            last_heard=int(time.time()),
+            hops_away=0,
+        )
 
     def record_packet(self, packet) -> Dict[str, bool]:
         packet_dict = meshdb.normalize_packet(packet, "mudp")

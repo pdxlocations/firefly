@@ -3,15 +3,18 @@
 from collections import deque
 
 from datetime import datetime
+from functools import wraps
 from google.protobuf import text_format
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for, has_request_context
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, has_request_context, flash
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 import uuid
 import os
 import socketio as py_socketio
 import engineio
 import meshtastic
+import meshtastic
 from pubsub import pub
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
 from mudp import node
@@ -55,7 +58,11 @@ def _get_session_profile():
     """Get the current profile from session storage"""
     if not has_request_context():
         return None
-    return session.get("current_profile")
+    profile = session.get("current_profile")
+    current_user = _get_session_user()
+    if profile and current_user and profile.get("user_id") == current_user.get("id"):
+        return profile
+    return None
 
 
 def _set_session_profile(profile):
@@ -89,6 +96,65 @@ def _set_session_channel_index(channel_index):
         session["current_channel_index"] = max(0, int(channel_index))
     except (TypeError, ValueError):
         session["current_channel_index"] = 0
+
+
+def _get_session_user():
+    if not has_request_context():
+        return None
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+    return db.get_user_by_id(user_id)
+
+
+def _set_session_user(user):
+    if not has_request_context():
+        return
+    session["user_id"] = user["id"]
+
+
+def _clear_session_user():
+    if not has_request_context():
+        return
+    session.pop("user_id", None)
+    _clear_session_profile()
+
+
+def _unregister_current_session_transport():
+    if not has_request_context():
+        return
+    if not session.get("current_profile"):
+        return
+    session_id = f"flask_session_{id(session)}"
+    try:
+        udp_server.unregister_session(session_id)
+    except Exception as e:
+        print(f"[SESSION] Failed to unregister UDP session {session_id}: {e}")
+
+
+def _wants_json_response():
+    if not has_request_context():
+        return False
+    if request.path.startswith("/api/"):
+        return True
+    best = request.accept_mimetypes.best
+    return best == "application/json" and request.accept_mimetypes[best] >= request.accept_mimetypes["text/html"]
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if _get_session_user():
+            return view(*args, **kwargs)
+        if _wants_json_response():
+            return jsonify({"error": "Authentication required"}), 401
+        return redirect(url_for("index"))
+    return wrapped
+
+
+def _normalize_node_id(node_id):
+    value = (node_id or "").strip()
+    return value.lower() if value.startswith("!") else value
 
 
 def _profile_channels(profile):
@@ -333,6 +399,18 @@ def _get_mesh_store(profile=None):
     except Exception as e:
         print(f"[MESHDB] Failed to create node store: {e}")
         return None
+
+
+def _seed_profile_mesh_identity(profile):
+    mesh_store = _get_mesh_store(profile)
+    if not mesh_store:
+        return False
+    try:
+        mesh_store.ensure_owner_node()
+        return True
+    except Exception as e:
+        print(f"[MESHDB] Failed to seed owner node for profile {profile.get('id')}: {e}")
+        return False
 
 
 def _get_chat_payload(profile):
@@ -784,6 +862,7 @@ def inject_versions():
         "socketio_client_version": SOCKETIO_CLIENT_VERSION,
         "python_socketio_version": getattr(py_socketio, "__version__", "unknown"),
         "python_engineio_version": getattr(engineio, "__version__", "unknown"),
+        "current_user": _get_session_user(),
     }
 
 
@@ -793,25 +872,25 @@ class ProfileManager:
         self.profiles_file = PROFILES_FILE
         # Note: Migration is handled by startup script, not automatically here
 
-    def get_all_profiles(self):
+    def get_all_profiles(self, user_id=None):
         """Get all profiles"""
-        return self.db.get_all_profiles()
+        return self.db.get_all_profiles(user_id=user_id)
 
-    def get_profile(self, profile_id):
+    def get_profile(self, profile_id, user_id=None):
         """Get a specific profile"""
-        return self.db.get_profile(profile_id)
+        return self.db.get_profile(profile_id, user_id=user_id)
 
-    def create_profile(self, profile_id, node_id, long_name, short_name, channels, hop_limit=3):
+    def create_profile(self, profile_id, user_id, node_id, long_name, short_name, channels, hop_limit=3):
         """Create a new profile"""
-        return self.db.create_profile(profile_id, node_id, long_name, short_name, channels, hop_limit)
+        return self.db.create_profile(profile_id, user_id, node_id, long_name, short_name, channels, hop_limit)
 
-    def update_profile(self, profile_id, node_id, long_name, short_name, channels, hop_limit=3):
+    def update_profile(self, profile_id, user_id, node_id, long_name, short_name, channels, hop_limit=3):
         """Update an existing profile"""
-        return self.db.update_profile(profile_id, node_id, long_name, short_name, channels, hop_limit)
+        return self.db.update_profile(profile_id, user_id, node_id, long_name, short_name, channels, hop_limit)
 
-    def delete_profile(self, profile_id):
+    def delete_profile(self, profile_id, user_id):
         """Delete a profile"""
-        return self.db.delete_profile(profile_id)
+        return self.db.delete_profile(profile_id, user_id)
 
 
 def create_interface_for_profile(profile):
@@ -993,6 +1072,7 @@ class UDPChatServer:
         try:
             hop_limit = sender_profile.get("hop_limit", 3)
             ack_requested = message_type == "dm"
+            sender_channel = generate_hash(sender_profile.get("channel", ""), sender_profile.get("key", ""))
             if message_type == "dm":
                 if target_node_num in (None, 0, BROADCAST_NODE_NUM):
                     print("[SEND] Refusing to send DM without a valid target node")
@@ -1031,6 +1111,7 @@ class UDPChatServer:
                 "sender_ip": "self",  # Keep for backward compatibility but use sender for identity
                 "direction": "sent",
                 "message_type": message_type,
+                "channel": sender_channel if message_type == "channel" else None,
                 "reply_packet_id": reply_packet_id,
                 "target_node_num": int(target_node_num) if target_node_num not in (None, "", 0, BROADCAST_NODE_NUM) else None,
                 "target": _node_id_from_num(target_node_num) if target_node_num not in (None, "", 0, BROADCAST_NODE_NUM) else None,
@@ -1044,9 +1125,6 @@ class UDPChatServer:
 
             # Store sent message in database and broadcast to WebSocket
             try:
-                # Calculate channel hash from sender profile directly
-                sender_channel = generate_hash(sender_profile.get("channel", ""), sender_profile.get("key", ""))
-                
                 if sender_channel is not None:
                     print(f"[SEND] Storing sent message on channel {sender_channel}: {message_content[:50]}...")
                     db.store_message(
@@ -1098,42 +1176,113 @@ profile_manager = ProfileManager(db)
 udp_server = UDPChatServer()
 
 
+@app.route("/register", methods=["POST"])
+def register():
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+
+    if not username or not password:
+        flash("Username and password are required.", "error")
+        return redirect(url_for("index"))
+
+    if db.get_user_by_username(username):
+        flash("That username is already in use.", "error")
+        return redirect(url_for("index"))
+
+    user_id = str(uuid.uuid4())
+    password_hash = generate_password_hash(password)
+    if not db.create_user(user_id, username, password_hash):
+        flash("Unable to create account.", "error")
+        return redirect(url_for("index"))
+
+    if db.count_users() == 1:
+        claimed_profiles = db.claim_orphan_profiles(user_id)
+        if claimed_profiles:
+            print(f"[AUTH] Claimed {claimed_profiles} orphan profiles for first user {username}")
+
+    user = db.get_user_by_id(user_id)
+    _unregister_current_session_transport()
+    _clear_session_user()
+    _set_session_user(user)
+    flash("Account created.", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+
+    user = db.get_user_by_username(username)
+    if not user or not check_password_hash(user["password_hash"], password):
+        flash("Invalid username or password.", "error")
+        return redirect(url_for("index"))
+
+    _unregister_current_session_transport()
+    _clear_session_user()
+    _set_session_user(user)
+    return redirect(url_for("index"))
+
+
+@app.route("/logout", methods=["POST"])
+@login_required
+def logout():
+    _unregister_current_session_transport()
+    _clear_session_user()
+    flash("Signed out.", "success")
+    return redirect(url_for("index"))
+
+
 @app.route("/")
 def index():
     """Main chat interface"""
-    profiles = profile_manager.get_all_profiles()
+    current_user = _get_session_user()
+    if not current_user:
+        return render_template("auth.html")
+
+    profiles = profile_manager.get_all_profiles(user_id=current_user["id"])
     current_profile = _get_session_profile()
     return render_template("index.html", profiles=profiles, current_profile=current_profile)
 
 
 @app.route("/profiles")
+@login_required
 def profiles():
     """Profile management page"""
-    profiles = profile_manager.get_all_profiles()
+    current_user = _get_session_user()
+    profiles = profile_manager.get_all_profiles(user_id=current_user["id"])
     return render_template("profiles.html", profiles=profiles)
 
 
 @app.route("/nodes")
+@login_required
 def nodes():
     """Legacy nodes route redirects into the unified index tab view."""
     return redirect(url_for("index", tab="nodes"))
 
 
 @app.route("/api/profiles", methods=["GET"])
+@login_required
 def get_profiles():
     """Get all profiles"""
-    return jsonify(profile_manager.get_all_profiles())
+    current_user = _get_session_user()
+    return jsonify(profile_manager.get_all_profiles(user_id=current_user["id"]))
 
 
 @app.route("/api/profiles", methods=["POST"])
+@login_required
 def create_profile():
     """Create a new profile"""
     data = request.get_json()
+    current_user = _get_session_user()
 
+    normalized_node_id = _normalize_node_id((data or {}).get("node_id"))
     channels = _profile_channels(data)
     required = ["node_id", "long_name", "short_name"]
     if not data or any(not data.get(k) for k in required) or not channels:
         return jsonify({"error": "node_id, long_name, short_name, and at least one channel are required"}), 400
+    if db.node_id_in_use(normalized_node_id):
+        return jsonify({"error": "Node ID is already in use."}), 409
 
     # Validate hop_limit if provided
     hop_limit = data.get("hop_limit", 3)
@@ -1143,24 +1292,35 @@ def create_profile():
     # Create and store the profile
     profile_id = str(uuid.uuid4())
     success = profile_manager.create_profile(
-        profile_id, data["node_id"], data["long_name"], data["short_name"], channels, hop_limit
+        profile_id, current_user["id"], normalized_node_id, data["long_name"], data["short_name"], channels, hop_limit
     )
 
     if success:
+        created_profile = profile_manager.get_profile(profile_id, user_id=current_user["id"])
+        if created_profile:
+            _seed_profile_mesh_identity(created_profile)
         return jsonify({"profile_id": profile_id, "message": "Profile created successfully"})
     else:
-        return jsonify({"error": "Failed to create profile"}), 500
+        return jsonify({"error": "Failed to create profile. Node ID may already be in use."}), 409
 
 
 @app.route("/api/profiles/<profile_id>", methods=["PUT"])
+@login_required
 def update_profile(profile_id):
     """Update an existing profile"""
     data = request.get_json()
+    current_user = _get_session_user()
+    existing_profile = profile_manager.get_profile(profile_id, user_id=current_user["id"])
+    if not existing_profile:
+        return jsonify({"error": "Profile not found"}), 404
 
+    normalized_node_id = _normalize_node_id((data or {}).get("node_id"))
     channels = _profile_channels(data)
     required = ["node_id", "long_name", "short_name"]
     if not data or any(not data.get(k) for k in required) or not channels:
         return jsonify({"error": "node_id, long_name, short_name, and at least one channel are required"}), 400
+    if db.node_id_in_use(normalized_node_id, exclude_profile_id=profile_id):
+        return jsonify({"error": "Node ID is already in use."}), 409
 
     # Validate hop_limit if provided
     hop_limit = data.get("hop_limit", 3)
@@ -1168,20 +1328,25 @@ def update_profile(profile_id):
         return jsonify({"error": "hop_limit must be an integer between 0 and 7"}), 400
 
     success = profile_manager.update_profile(
-        profile_id, data["node_id"], data["long_name"], data["short_name"], channels, hop_limit
+        profile_id, current_user["id"], normalized_node_id, data["long_name"], data["short_name"], channels, hop_limit
     )
 
     if success:
+        updated_profile = profile_manager.get_profile(profile_id, user_id=current_user["id"])
+        if updated_profile:
+            _seed_profile_mesh_identity(updated_profile)
         return jsonify({"message": "Profile updated successfully"})
     else:
-        return jsonify({"error": "Profile not found"}), 404
+        return jsonify({"error": "Failed to update profile"}), 500
 
 
 @app.route("/api/profiles/<profile_id>", methods=["DELETE"])
+@login_required
 def delete_profile(profile_id):
     """Delete a profile"""
     current_profile = _get_session_profile()
-    success = profile_manager.delete_profile(profile_id)
+    current_user = _get_session_user()
+    success = profile_manager.delete_profile(profile_id, current_user["id"])
 
     if success:
         # If this was the current profile, unset it
@@ -1193,6 +1358,7 @@ def delete_profile(profile_id):
 
 
 @app.route("/api/current-profile", methods=["GET"])
+@login_required
 def get_current_profile():
     """Get the current active profile with interface status and channel number"""
     current_profile = _get_session_profile()
@@ -1220,6 +1386,7 @@ def get_current_profile():
 
 
 @app.route("/api/current-profile", methods=["POST"])
+@login_required
 def set_current_profile():
     """Set the current active profile and restart interface with new key"""
 
@@ -1229,19 +1396,15 @@ def set_current_profile():
 
     if not profile_id:
         # Unset profile and unregister session
-        old_profile = _get_session_profile()
-        if old_profile:
-            # Use a consistent session identifier
-            session_id = f"flask_session_{id(session)}"
-            udp_server.unregister_session(session_id)
-        
+        _unregister_current_session_transport()
         _clear_session_profile()
         print("[PROFILE] Profile unset, session unregistered")
         return jsonify(
             {"message": "Profile unset", "profile": None, "channel_messages": [], "dm_messages": []}
         )
 
-    profile = profile_manager.get_profile(profile_id)
+    current_user = _get_session_user()
+    profile = profile_manager.get_profile(profile_id, user_id=current_user["id"])
     print(f"[API] set_current_profile -> requested id={profile_id} exists={bool(profile)}")
 
     if profile:
@@ -1373,6 +1536,7 @@ def set_current_profile():
 
 
 @app.route("/api/current-channel", methods=["POST"])
+@login_required
 def set_current_channel():
     """Switch the active channel within the current profile."""
     current_profile = _get_session_profile()
@@ -1415,6 +1579,7 @@ def set_current_channel():
 
 
 @app.route("/api/messages", methods=["GET"])
+@login_required
 def get_messages():
     """Get channel and direct messages for the current profile."""
     current_profile = _get_session_profile()
@@ -1441,6 +1606,7 @@ def get_messages():
 
 
 @app.route("/api/threads/channel", methods=["DELETE"])
+@login_required
 def delete_channel_thread():
     """Delete channel message history for the selected profile channel."""
     current_profile = _get_session_profile()
@@ -1467,6 +1633,7 @@ def delete_channel_thread():
 
 
 @app.route("/api/threads/dm", methods=["DELETE"])
+@login_required
 def delete_dm_thread():
     """Delete a DM thread for the current profile."""
     current_profile = _get_session_profile()
@@ -1485,6 +1652,7 @@ def delete_dm_thread():
 
 
 @app.route("/api/nodes", methods=["GET"])
+@login_required
 def get_nodes():
     """Get nodes seen by current profile in meshdb."""
     current_profile = _get_session_profile()
@@ -1497,6 +1665,7 @@ def get_nodes():
 
 
 @app.route("/api/nodes/<int:node_num>", methods=["GET"])
+@login_required
 def get_node_details(node_num):
     """Get detailed information about a specific node"""
     current_profile = _get_session_profile()
@@ -1513,12 +1682,14 @@ def get_node_details(node_num):
 
 
 @app.route("/api/stats", methods=["GET"])
+@login_required
 def get_stats():
     """Get database statistics"""
-    profiles = profile_manager.get_all_profiles()
+    current_user = _get_session_user()
+    profiles = profile_manager.get_all_profiles(user_id=current_user["id"])
     base_stats = db.get_stats()
     global_stats = {
-        "profiles": base_stats["profiles"],
+        "profiles": len(profiles),
         "total_messages": base_stats["total_messages"],
         "total_nodes": count_nodes_for_profiles(profiles),
     }
@@ -1536,6 +1707,7 @@ def get_stats():
 
 
 @app.route("/api/send-message", methods=["POST"])
+@login_required
 def send_message():
     """Send a message"""
     current_profile = _get_session_profile()
@@ -1616,6 +1788,10 @@ def add_no_cache_headers(response):
 @socketio.on("connect")
 def handle_connect():
     """Handle WebSocket connection"""
+    if not _get_session_user():
+        print(f"[WEBSOCKET] Rejecting unauthenticated connection: {request.sid}")
+        return False
+
     print(f"Client connected with WebSocket session ID: {request.sid}")
     
     # Get current profile to establish session mapping if one exists
@@ -1632,16 +1808,28 @@ def handle_connect():
 def handle_join_channel(data):
     """Join a WebSocket room for a specific channel"""
     channel = data.get("channel")
+    current_profile = _get_session_profile()
     print(f"[WEBSOCKET] join_channel request received: {data}")
-    if channel is not None:
-        room_name = f"channel_{channel}"
+    if channel is not None and current_profile:
+        allowed_channel = _current_profile_channel_num()
+        try:
+            requested_channel = int(channel)
+        except (TypeError, ValueError):
+            print(f"[WEBSOCKET] ❌ join_channel denied for invalid channel: {channel}")
+            emit("status", {"msg": "Join denied"})
+            return
+        if allowed_channel is not None and requested_channel != int(allowed_channel):
+            print(f"[WEBSOCKET] ❌ join_channel denied for {channel}; active profile channel is {allowed_channel}")
+            emit("status", {"msg": "Join denied"})
+            return
+        room_name = f"channel_{requested_channel}"
         for existing_room in rooms():
             if existing_room.startswith("channel_") and existing_room != room_name:
                 leave_room(existing_room)
                 print(f"[WEBSOCKET] Left stale channel room: {existing_room}")
         join_room(room_name)
         print(f"[WEBSOCKET] ✅ Client {request.sid} joined room: {room_name}")
-        emit("status", {"msg": f"Joined channel {channel}"})
+        emit("status", {"msg": f"Joined channel {requested_channel}"})
     else:
         print(f"[WEBSOCKET] ❌ join_channel called with no channel: {data}")
 
@@ -1650,13 +1838,14 @@ def handle_join_channel(data):
 def handle_join_profile(data):
     """Join a WebSocket room for a specific profile."""
     profile_id = data.get("profile_id")
-    if profile_id:
+    current_user = _get_session_user()
+    if profile_id and current_user and profile_manager.get_profile(profile_id, user_id=current_user["id"]):
         room_name = f"profile_{profile_id}"
         join_room(room_name)
         print(f"[WEBSOCKET] ✅ Client {request.sid} joined room: {room_name}")
         emit("status", {"msg": f"Joined profile {profile_id}"})
     else:
-        print(f"[WEBSOCKET] ❌ join_profile called with no profile_id: {data}")
+        print(f"[WEBSOCKET] ❌ join_profile denied: {data}")
 
 
 @socketio.on("leave_channel")

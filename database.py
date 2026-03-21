@@ -16,11 +16,21 @@ class Database:
         """Initialize the database with required tables"""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("PRAGMA foreign_keys = ON")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             # Profiles table (migrate from JSON file)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS profiles (
                     id TEXT PRIMARY KEY,
+                    user_id TEXT,
                     node_id TEXT NOT NULL,
                     long_name TEXT NOT NULL,
                     short_name TEXT NOT NULL,
@@ -28,7 +38,8 @@ class Database:
                     key TEXT NOT NULL,
                     hop_limit INTEGER DEFAULT 3,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
                 )
             """)
             
@@ -106,6 +117,12 @@ class Database:
             except sqlite3.OperationalError:
                 pass
 
+            try:
+                conn.execute("ALTER TABLE profiles ADD COLUMN user_id TEXT")
+                print("[DB] Added user_id column to profiles table")
+            except sqlite3.OperationalError:
+                pass
+
             for column_sql, column_name in [
                 ("ALTER TABLE messages ADD COLUMN message_type TEXT DEFAULT 'channel'", "message_type"),
                 ("ALTER TABLE messages ADD COLUMN reply_packet_id INTEGER", "reply_packet_id"),
@@ -133,6 +150,12 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages (timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_timestamp ON messages (channel, timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_last_seen ON profile_last_seen (profile_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles (user_id)")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users (username COLLATE NOCASE)")
+            try:
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_node_id_unique ON profiles (node_id)")
+            except sqlite3.IntegrityError as e:
+                print(f"[DB] Could not create unique node_id index: {e}")
             
             conn.commit()
 
@@ -226,14 +249,129 @@ class Database:
             print(f"Error migrating profiles: {e}")
             return False
 
-    def get_all_profiles(self) -> Dict:
+    def create_user(self, user_id: str, username: str, password_hash: str) -> bool:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO users (id, username, password_hash)
+                    VALUES (?, ?, ?)
+                    """,
+                    (user_id, username.strip(), password_hash),
+                )
+                conn.commit()
+                return True
+        except sqlite3.IntegrityError as e:
+            print(f"Error creating user: {e}")
+            return False
+        except Exception as e:
+            print(f"Error creating user: {e}")
+            return False
+
+    def get_user_by_username(self, username: str) -> Optional[Dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT id, username, password_hash, created_at
+                FROM users
+                WHERE username = ? COLLATE NOCASE
+                """,
+                (username.strip(),),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row["id"],
+                "username": row["username"],
+                "password_hash": row["password_hash"],
+                "created_at": row["created_at"],
+            }
+
+    def get_user_by_id(self, user_id: str) -> Optional[Dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT id, username, password_hash, created_at
+                FROM users
+                WHERE id = ?
+                """,
+                (user_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row["id"],
+                "username": row["username"],
+                "password_hash": row["password_hash"],
+                "created_at": row["created_at"],
+            }
+
+    def count_users(self) -> int:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM users")
+            return int(cursor.fetchone()[0] or 0)
+
+    def claim_orphan_profiles(self, user_id: str) -> int:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE profiles
+                    SET user_id = ?
+                    WHERE user_id IS NULL
+                    """,
+                    (user_id,),
+                )
+                conn.commit()
+                return int(cursor.rowcount or 0)
+        except Exception as e:
+            print(f"Error claiming orphan profiles: {e}")
+            return 0
+
+    def node_id_in_use(self, node_id: str, exclude_profile_id: Optional[str] = None) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            if exclude_profile_id:
+                cursor = conn.execute(
+                    """
+                    SELECT 1 FROM profiles
+                    WHERE node_id = ? AND id != ?
+                    LIMIT 1
+                    """,
+                    (node_id, exclude_profile_id),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT 1 FROM profiles
+                    WHERE node_id = ?
+                    LIMIT 1
+                    """,
+                    (node_id,),
+                )
+            return cursor.fetchone() is not None
+
+    def get_all_profiles(self, user_id: Optional[str] = None) -> Dict:
         """Get all profiles as dictionary (compatible with existing code)"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
-                SELECT id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
-                       created_at, updated_at FROM profiles ORDER BY created_at DESC
-            """)
+            if user_id:
+                cursor = conn.execute("""
+                    SELECT id, user_id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
+                           created_at, updated_at
+                    FROM profiles
+                    WHERE user_id = ?
+                    ORDER BY created_at DESC
+                """, (user_id,))
+            else:
+                cursor = conn.execute("""
+                    SELECT id, user_id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
+                           created_at, updated_at
+                    FROM profiles ORDER BY created_at DESC
+                """)
             profiles = {}
             for row in cursor:
                 channels = self._normalize_channels(row["channels_json"], row["channel"], row["key"])
@@ -241,6 +379,7 @@ class Database:
                 primary_key = channels[0]["key"] if channels else row["key"]
                 profiles[row['id']] = {
                     'id': row['id'],
+                    'user_id': row['user_id'],
                     'node_id': row['node_id'],
                     'long_name': row['long_name'],
                     'short_name': row['short_name'],
@@ -253,14 +392,23 @@ class Database:
                 }
             return profiles
 
-    def get_profile(self, profile_id: str) -> Optional[Dict]:
+    def get_profile(self, profile_id: str, user_id: Optional[str] = None) -> Optional[Dict]:
         """Get a specific profile"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
-                SELECT id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
-                       created_at, updated_at FROM profiles WHERE id = ?
-            """, (profile_id,))
+            if user_id:
+                cursor = conn.execute("""
+                    SELECT id, user_id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
+                           created_at, updated_at
+                    FROM profiles
+                    WHERE id = ? AND user_id = ?
+                """, (profile_id, user_id))
+            else:
+                cursor = conn.execute("""
+                    SELECT id, user_id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
+                           created_at, updated_at
+                    FROM profiles WHERE id = ?
+                """, (profile_id,))
             row = cursor.fetchone()
             if row:
                 channels = self._normalize_channels(row["channels_json"], row["channel"], row["key"])
@@ -268,6 +416,7 @@ class Database:
                 primary_key = channels[0]["key"] if channels else row["key"]
                 return {
                     'id': row['id'],
+                    'user_id': row['user_id'],
                     'node_id': row['node_id'],
                     'long_name': row['long_name'],
                     'short_name': row['short_name'],
@@ -280,7 +429,7 @@ class Database:
                 }
             return None
 
-    def create_profile(self, profile_id: str, node_id: str, long_name: str,
+    def create_profile(self, profile_id: str, user_id: str, node_id: str, long_name: str,
                       short_name: str, channels: List[Dict], hop_limit: int = 3) -> bool:
         """Create a new profile"""
         # Validate hop_limit range (0-7)
@@ -290,14 +439,17 @@ class Database:
         if not channels:
             return False
         primary = channels[0]
+        if self.node_id_in_use(node_id):
+            return False
             
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
-                    INSERT INTO profiles (id, node_id, long_name, short_name, channel, key, channels_json, hop_limit)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO profiles (id, user_id, node_id, long_name, short_name, channel, key, channels_json, hop_limit)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     profile_id,
+                    user_id,
                     node_id,
                     long_name,
                     short_name,
@@ -308,11 +460,14 @@ class Database:
                 ))
                 conn.commit()
                 return True
+        except sqlite3.IntegrityError as e:
+            print(f"Error creating profile: {e}")
+            return False
         except Exception as e:
             print(f"Error creating profile: {e}")
             return False
 
-    def update_profile(self, profile_id: str, node_id: str, long_name: str,
+    def update_profile(self, profile_id: str, user_id: str, node_id: str, long_name: str,
                       short_name: str, channels: List[Dict], hop_limit: int = 3) -> bool:
         """Update an existing profile"""
         # Validate hop_limit range (0-7)
@@ -322,13 +477,15 @@ class Database:
         if not channels:
             return False
         primary = channels[0]
+        if self.node_id_in_use(node_id, exclude_profile_id=profile_id):
+            return False
             
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute("""
                     UPDATE profiles SET node_id = ?, long_name = ?, short_name = ?, 
                                       channel = ?, key = ?, channels_json = ?, hop_limit = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
+                    WHERE id = ? AND user_id = ?
                 """, (
                     node_id,
                     long_name,
@@ -338,17 +495,21 @@ class Database:
                     json.dumps(channels),
                     hop_limit,
                     profile_id,
+                    user_id,
                 ))
                 return cursor.rowcount > 0
+        except sqlite3.IntegrityError as e:
+            print(f"Error updating profile: {e}")
+            return False
         except Exception as e:
             print(f"Error updating profile: {e}")
             return False
 
-    def delete_profile(self, profile_id: str) -> bool:
+    def delete_profile(self, profile_id: str, user_id: str) -> bool:
         """Delete a profile and all associated data"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
+                cursor = conn.execute("DELETE FROM profiles WHERE id = ? AND user_id = ?", (profile_id, user_id))
                 return cursor.rowcount > 0
         except Exception as e:
             print(f"Error deleting profile: {e}")

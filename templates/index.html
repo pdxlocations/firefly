@@ -39,7 +39,7 @@
                     </div>
                 </div>
             </div>
-            <a href="{{ url_for('profiles') }}" class="btn btn-outline-secondary w-100 profile-selector-manage-link">Manage Profiles</a>
+            <a href="{{ url_for('profiles') }}" class="btn w-100 profile-selector-manage-link">Manage Profiles</a>
         </div>
     </div>
     <div class="col-12">
@@ -58,14 +58,30 @@
                         <button id="desktopConnectBtn" class="btn btn-sm btn-outline-primary" type="button">Connect</button>
                     </div>
                 </div>
-                <div class="mobile-chat-header d-md-none border-bottom px-3 py-3">
-                    <div class="mobile-chat-brand mb-2">
-                        <img id="mobile-logo-dark" src="{{ url_for('static', filename='images/firefly-logo-dark.png') }}" alt="Firefly" height="22">
-                        <img id="mobile-logo-light" src="{{ url_for('static', filename='images/firefly-logo-light.png') }}" alt="Firefly" height="22">
-                        <span>Firefly</span>
+                <div class="mobile-chat-header d-md-none border-bottom px-3 py-2">
+                    <div class="mobile-chat-header__top">
+                        <div class="mobile-chat-brand">
+                            <img id="mobile-logo-dark" src="{{ url_for('static', filename='images/firefly-logo-dark.png') }}" alt="Firefly" height="22">
+                            <img id="mobile-logo-light" src="{{ url_for('static', filename='images/firefly-logo-light.png') }}" alt="Firefly" height="22">
+                            <span>Firefly</span>
+                        </div>
+                        {% if current_user %}
+                            <div class="mobile-chat-auth">
+                                <span class="mobile-chat-auth__username">{{ current_user.username }}</span>
+                                <form method="post" action="{{ url_for('logout') }}" class="mobile-chat-auth__form">
+                                    <button class="btn btn-outline-primary btn-sm mobile-chat-auth__button" type="submit" aria-label="Logout" title="Logout">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                                            <path d="M16 17l5-5-5-5"></path>
+                                            <path d="M21 12H9"></path>
+                                        </svg>
+                                    </button>
+                                </form>
+                            </div>
+                        {% endif %}
                     </div>
-                    <div class="d-flex justify-content-between align-items-start gap-3">
-                        <div>
+                    <div class="mobile-chat-header__main">
+                        <div class="mobile-chat-profile">
                             <div class="fw-semibold" id="mobileProfileName">No Profile Selected</div>
                             <div class="small text-muted" id="mobileProfileSubline">Use the bottom bar to choose a section</div>
                         </div>
@@ -658,6 +674,28 @@
 
     .mobile-chat-header {
         background: var(--firefly-chat-surface-muted);
+        padding-top: 0.75rem !important;
+        padding-bottom: 0.75rem !important;
+    }
+
+    .mobile-chat-header__top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.85rem;
+        margin-bottom: 0.55rem;
+    }
+
+    .mobile-chat-header__main {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.9rem;
+    }
+
+    .mobile-chat-profile {
+        min-width: 0;
+        flex: 1 1 auto;
     }
 
     .mobile-chat-brand {
@@ -691,10 +729,50 @@
 
     .mobile-connect-panel {
         display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 0.45rem;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.55rem;
         flex-shrink: 0;
+    }
+
+    .mobile-chat-auth {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.45rem;
+        min-width: 0;
+        flex: 0 1 auto;
+    }
+
+    .mobile-chat-auth__username {
+        min-width: 0;
+        font-size: 0.86rem;
+        font-weight: 700;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: right;
+    }
+
+    .mobile-chat-auth__form {
+        flex: 0 0 auto;
+        margin: 0;
+    }
+
+    .mobile-chat-auth__button {
+        width: 2.1rem;
+        height: 2.1rem;
+        min-height: 2.1rem;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+    }
+
+    .mobile-chat-auth__button svg {
+        width: 1rem;
+        height: 1rem;
     }
 
     .mobile-status-lights {
@@ -732,7 +810,7 @@
     }
 
     #mobileConnectBtn {
-        min-width: 5.6rem;
+        min-width: 5.2rem;
     }
 
     #mobileConnectBtn.is-connected {
@@ -828,6 +906,35 @@
 
     #mobileSettingsSheet .card {
         border-radius: 1rem;
+    }
+
+    #mobileSettingsSheet.profile-selector-sheet .profile-selector-manage-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 3rem;
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--firefly-chat-accent);
+        border-radius: 1rem;
+        color: #fff;
+        background: var(--firefly-chat-accent);
+        box-shadow: 0 8px 18px rgba(31, 93, 150, 0.2);
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        text-align: center;
+    }
+
+    #mobileSettingsSheet.profile-selector-sheet .profile-selector-manage-link:hover,
+    #mobileSettingsSheet.profile-selector-sheet .profile-selector-manage-link:focus,
+    #mobileSettingsSheet.profile-selector-sheet .profile-selector-manage-link:active {
+        color: #fff;
+        background: var(--firefly-chat-accent-strong);
+        border-color: var(--firefly-chat-accent-strong);
+    }
+
+    [data-bs-theme="dark"] #mobileSettingsSheet.profile-selector-sheet .profile-selector-manage-link {
+        border-color: var(--firefly-chat-accent);
+        box-shadow: 0 14px 28px rgba(5, 12, 20, 0.42);
     }
 
     @media (min-width: 768px) {
@@ -1901,8 +2008,17 @@ function handleThreadCardClick(event) {
 
 function handleThreadListInput(event) {
     if (event.target && event.target.id === 'nodeSearchInput') {
-        nodeSearchQuery = event.target.value || '';
+        const nextValue = event.target.value || '';
+        const selectionStart = event.target.selectionStart ?? nextValue.length;
+        const selectionEnd = event.target.selectionEnd ?? nextValue.length;
+        nodeSearchQuery = nextValue;
         renderActiveMessages();
+        requestAnimationFrame(() => {
+            const refreshedInput = document.getElementById('nodeSearchInput');
+            if (!refreshedInput) return;
+            refreshedInput.focus();
+            refreshedInput.setSelectionRange(selectionStart, selectionEnd);
+        });
     }
 }
 

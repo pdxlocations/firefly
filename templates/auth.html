@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Sign In - Firefly{% endblock %}
+
+{% block content %}
+<style>
+.auth-panel {
+    max-width: 32rem;
+    margin: 0 auto;
+}
+
+.auth-panel__secondary {
+    border-top: 1px solid var(--bs-border-color);
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+}
+</style>
+<div class="row justify-content-center">
+    <div class="col-12 col-lg-8">
+        <div class="auth-panel card shadow-sm mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Sign In</h5>
+            </div>
+            <div class="card-body p-4 p-lg-5">
+                <form method="post" action="{{ url_for('login') }}">
+                    <div class="mb-3">
+                        <label class="form-label" for="loginUsername">Username</label>
+                        <input class="form-control" id="loginUsername" name="username" type="text" maxlength="64" required autocomplete="username">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="loginPassword">Password</label>
+                        <input class="form-control" id="loginPassword" name="password" type="password" minlength="1" required autocomplete="current-password">
+                    </div>
+                    <button class="btn btn-primary w-100" type="submit">Sign In</button>
+                </form>
+
+                <div class="auth-panel__secondary text-center">
+                    <button class="btn btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#createAccountPanel" aria-expanded="false" aria-controls="createAccountPanel">
+                        Create Account
+                    </button>
+                </div>
+
+                <div class="collapse mt-4" id="createAccountPanel">
+                    <div class="card border">
+                        <div class="card-header">
+                            <h5 class="mb-0">Create Account</h5>
+                        </div>
+                        <div class="card-body">
+                            <form method="post" action="{{ url_for('register') }}">
+                                <div class="mb-3">
+                                    <label class="form-label" for="registerUsername">Username</label>
+                                    <input class="form-control" id="registerUsername" name="username" type="text" maxlength="64" required autocomplete="username">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label" for="registerPassword">Password</label>
+                                    <input class="form-control" id="registerPassword" name="password" type="password" minlength="1" required autocomplete="new-password">
+                                </div>
+                                <button class="btn btn-outline-primary w-100" type="submit">Create Account</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

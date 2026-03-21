@@ -43,6 +43,14 @@
             </div>
             <div class="fw-semibold">Profiles</div>
             <div class="small text-muted">Create, edit, and manage your identities</div>
+            {% if current_user %}
+                <div class="mobile-header-auth">
+                    <span class="mobile-header-auth__username">{{ current_user.username }}</span>
+                    <form method="post" action="{{ url_for('logout') }}" class="mobile-header-auth__form">
+                        <button class="btn btn-outline-primary btn-sm mobile-header-auth__button" type="submit">Logout</button>
+                    </form>
+                </div>
+            {% endif %}
         </div>
     </div>
     <div class="col-md-6">

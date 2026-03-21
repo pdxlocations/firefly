@@ -1958,6 +1958,13 @@ function applyMessageUpdate(message) {
     if (messageType === 'dm') {
         upsertMessage(dmMessages, message);
     } else {
+        if (
+            currentChannelRoom !== null &&
+            currentChannelRoom !== undefined &&
+            Number(message.channel) !== Number(currentChannelRoom)
+        ) {
+            return;
+        }
         upsertMessage(channelMessages, message);
     }
     renderActiveMessages();
@@ -1973,6 +1980,13 @@ function addIncomingMessage(message) {
         syncDmTargetsFromMessages();
         void loadDmTargets();
     } else {
+        if (
+            currentChannelRoom !== null &&
+            currentChannelRoom !== undefined &&
+            Number(message.channel) !== Number(currentChannelRoom)
+        ) {
+            return;
+        }
         upsertMessage(channelMessages, message);
     }
     renderActiveMessages();

@@ -4,7 +4,7 @@ from collections import deque
 
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, has_request_context
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 import uuid
 import os
 import socketio as py_socketio
@@ -1541,6 +1541,10 @@ def handle_join_channel(data):
     print(f"[WEBSOCKET] join_channel request received: {data}")
     if channel is not None:
         room_name = f"channel_{channel}"
+        for existing_room in rooms():
+            if existing_room.startswith("channel_") and existing_room != room_name:
+                leave_room(existing_room)
+                print(f"[WEBSOCKET] Left stale channel room: {existing_room}")
         join_room(room_name)
         print(f"[WEBSOCKET] ✅ Client {request.sid} joined room: {room_name}")
         emit("status", {"msg": f"Joined channel {channel}"})

@@ -1596,7 +1596,10 @@ function getVisibleMessages() {
         if (activeChannelIndex === null || activeChannelIndex === undefined) {
             return [];
         }
-        return channelMessages;
+        if (currentChannelRoom === null || currentChannelRoom === undefined) {
+            return channelMessages;
+        }
+        return channelMessages.filter(message => Number(message.channel) === Number(currentChannelRoom));
     }
     if (!activeDmTargetNodeNum) {
         return [];
@@ -1958,13 +1961,6 @@ function applyMessageUpdate(message) {
     if (messageType === 'dm') {
         upsertMessage(dmMessages, message);
     } else {
-        if (
-            currentChannelRoom !== null &&
-            currentChannelRoom !== undefined &&
-            Number(message.channel) !== Number(currentChannelRoom)
-        ) {
-            return;
-        }
         upsertMessage(channelMessages, message);
     }
     renderActiveMessages();
@@ -1980,13 +1976,6 @@ function addIncomingMessage(message) {
         syncDmTargetsFromMessages();
         void loadDmTargets();
     } else {
-        if (
-            currentChannelRoom !== null &&
-            currentChannelRoom !== undefined &&
-            Number(message.channel) !== Number(currentChannelRoom)
-        ) {
-            return;
-        }
         upsertMessage(channelMessages, message);
     }
     renderActiveMessages();

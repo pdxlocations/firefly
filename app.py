@@ -12,7 +12,6 @@ import os
 import socketio as py_socketio
 import engineio
 import meshtastic
-import meshtastic
 from pubsub import pub
 from werkzeug.security import generate_password_hash, check_password_hash
 

@@ -82,10 +82,16 @@
                     <div class="d-flex flex-column gap-2">
                         <ul class="nav nav-tabs card-header-tabs" id="chatTabs" role="tablist">
                             <li class="nav-item" role="presentation">
-                                <button class="nav-link active" id="channelTabBtn" type="button" data-chat-tab="channel">Channels</button>
+                                <button class="nav-link active chat-tab-button" id="channelTabBtn" type="button" data-chat-tab="channel">
+                                    <span>Channels</span>
+                                    <span id="channelTabBadge" class="chat-tab-badge d-none" aria-label="Unread channel messages">0</span>
+                                </button>
                             </li>
                             <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="dmTabBtn" type="button" data-chat-tab="dm">DMs</button>
+                                <button class="nav-link chat-tab-button" id="dmTabBtn" type="button" data-chat-tab="dm">
+                                    <span>DMs</span>
+                                    <span id="dmTabBadge" class="chat-tab-badge d-none" aria-label="Unread direct messages">0</span>
+                                </button>
                             </li>
                             <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="nodesTabBtn" type="button">Nodes</button>
@@ -128,7 +134,10 @@
                                 <path d="M10 17h4"></path>
                             </svg>
                         </span>
-                        <span>Channels</span>
+                        <span class="mobile-bottom-nav__label">
+                            <span>Channels</span>
+                            <span id="mobileChannelsBadge" class="chat-tab-badge chat-tab-badge--mobile d-none" aria-label="Unread channel messages">0</span>
+                        </span>
                     </button>
                     <button id="mobileDmsBtn" class="mobile-bottom-nav__button" type="button">
                         <span class="mobile-bottom-nav__icon" aria-hidden="true">
@@ -136,7 +145,10 @@
                                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                             </svg>
                         </span>
-                        <span>DMs</span>
+                        <span class="mobile-bottom-nav__label">
+                            <span>DMs</span>
+                            <span id="mobileDmsBadge" class="chat-tab-badge chat-tab-badge--mobile d-none" aria-label="Unread direct messages">0</span>
+                        </span>
                     </button>
                     <button id="mobileNodesBtn" class="mobile-bottom-nav__button" type="button">
                         <span class="mobile-bottom-nav__icon" aria-hidden="true">
@@ -462,6 +474,38 @@
 
 .thread-card__delete {
     flex-shrink: 0;
+}
+
+.chat-tab-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.chat-tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.2rem;
+    padding: 0.08rem 0.38rem;
+    border-radius: 999px;
+    background: #c84d4d;
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.chat-tab-badge.chat-tab-badge--mobile {
+    min-width: 1.1rem;
+    padding: 0.06rem 0.34rem;
+    font-size: 0.64rem;
+}
+
+.mobile-bottom-nav__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
 }
 
 .node-list {
@@ -976,6 +1020,8 @@ let dmTargets = [];
 let replyingToPacketId = null;
 let currentSocketStatusClass = 'bg-secondary';
 let currentInterfaceStatusClass = 'bg-warning';
+let unreadChannelMessageCounts = new Map();
+let unreadDmMessageCounts = new Map();
 
 document.addEventListener('DOMContentLoaded', async function() {
     initializePendingChatContext();
@@ -1090,6 +1136,107 @@ function getActiveChannel() {
     return channels[Number(activeChannelIndex)] || null;
 }
 
+function normalizeNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const normalized = Number(value);
+    return Number.isFinite(normalized) ? normalized : null;
+}
+
+function getChannelNumberByIndex(channelIndex) {
+    if (channelIndex === null || channelIndex === undefined) return null;
+    const channel = getProfileChannels()[Number(channelIndex)];
+    if (!channel) return null;
+
+    const configuredChannelNumber = normalizeNumber(channel.channel_number);
+    if (configuredChannelNumber !== null) {
+        return configuredChannelNumber;
+    }
+
+    if (Number(activeChannelIndex) === Number(channelIndex)) {
+        return normalizeNumber(currentChannelRoom);
+    }
+
+    return null;
+}
+
+function getUnreadTotal(unreadMap) {
+    let total = 0;
+    unreadMap.forEach(count => {
+        total += Number(count) || 0;
+    });
+    return total;
+}
+
+function setUnreadBadge(elementId, count) {
+    const badge = document.getElementById(elementId);
+    if (!badge) return;
+
+    if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.classList.remove('d-none');
+    } else {
+        badge.textContent = '0';
+        badge.classList.add('d-none');
+    }
+}
+
+function updateNavigationBadges() {
+    const unreadChannelCount = getUnreadTotal(unreadChannelMessageCounts);
+    const unreadDmCount = getUnreadTotal(unreadDmMessageCounts);
+    setUnreadBadge('channelTabBadge', unreadChannelCount);
+    setUnreadBadge('dmTabBadge', unreadDmCount);
+    setUnreadBadge('mobileChannelsBadge', unreadChannelCount);
+    setUnreadBadge('mobileDmsBadge', unreadDmCount);
+}
+
+function incrementUnreadCount(unreadMap, key) {
+    const normalizedKey = normalizeNumber(key);
+    if (normalizedKey === null) return;
+    unreadMap.set(normalizedKey, (unreadMap.get(normalizedKey) || 0) + 1);
+    updateNavigationBadges();
+}
+
+function clearUnreadCount(unreadMap, key) {
+    const normalizedKey = normalizeNumber(key);
+    if (normalizedKey === null) return;
+    if (unreadMap.delete(normalizedKey)) {
+        updateNavigationBadges();
+    }
+}
+
+function resetUnreadState() {
+    unreadChannelMessageCounts = new Map();
+    unreadDmMessageCounts = new Map();
+    updateNavigationBadges();
+}
+
+function isViewingChannelThread(channelNumber) {
+    const activeChannelNumber = getChannelNumberByIndex(activeChannelIndex);
+    return activeChatTab === 'channel'
+        && activeChannelIndex !== null
+        && activeChannelIndex !== undefined
+        && activeChannelNumber !== null
+        && Number(activeChannelNumber) === Number(channelNumber);
+}
+
+function isViewingDmThread(nodeNum) {
+    return activeChatTab === 'dm'
+        && activeDmTargetNodeNum !== null
+        && activeDmTargetNodeNum !== undefined
+        && Number(activeDmTargetNodeNum) === Number(nodeNum);
+}
+
+function clearVisibleUnread() {
+    if (activeChatTab === 'channel' && activeChannelIndex !== null && activeChannelIndex !== undefined) {
+        clearUnreadCount(unreadChannelMessageCounts, getChannelNumberByIndex(activeChannelIndex));
+        return;
+    }
+
+    if (activeChatTab === 'dm' && activeDmTargetNodeNum) {
+        clearUnreadCount(unreadDmMessageCounts, activeDmTargetNodeNum);
+    }
+}
+
 function initializeSocket() {
     socket = io();
 
@@ -1161,6 +1308,7 @@ async function loadCurrentProfileAndStatus() {
             updateInterfaceStatus('bg-warning', 'Not Started');
         }
 
+        resetUnreadState();
         updateProfileBanner(profile);
     } catch (error) {
         console.error('Error loading profile and status:', error);
@@ -1562,10 +1710,11 @@ function getVisibleMessages() {
         if (activeChannelIndex === null || activeChannelIndex === undefined) {
             return [];
         }
-        if (currentChannelRoom === null || currentChannelRoom === undefined) {
+        const activeChannelNumber = getChannelNumberByIndex(activeChannelIndex);
+        if (activeChannelNumber === null) {
             return channelMessages;
         }
-        return channelMessages.filter(message => Number(message.channel) === Number(currentChannelRoom));
+        return channelMessages.filter(message => normalizeNumber(message.channel) === activeChannelNumber);
     }
     if (!activeDmTargetNodeNum) {
         return [];
@@ -1593,6 +1742,7 @@ function renderActiveMessages() {
     }
 
     const visibleMessages = getVisibleMessages();
+    clearVisibleUnread();
     if (!visibleMessages.length) {
         container.innerHTML = `<div class="text-muted small">${activeChatTab === 'channel' ? 'No channel messages yet.' : 'No direct messages in this thread yet.'}</div>`;
         return;
@@ -1609,20 +1759,73 @@ function renderChannelThreadList(container) {
         return;
     }
 
-    container.innerHTML = channels.map((channel, index) => renderChannelThreadCardHtml(channel, index)).join('');
+    const threads = getChannelThreads();
+    container.innerHTML = threads.map(renderChannelThreadCardHtml).join('');
 }
 
-function renderChannelThreadCardHtml(channel, index) {
-    const keyPreview = truncateText(channel.key || '', 18);
+function getChannelThreads() {
+    return getProfileChannels().map((channel, index) => {
+        const channelNumber = getChannelNumberByIndex(index);
+        let latestMessage = null;
+
+        if (channelNumber !== null) {
+            channelMessages.forEach(message => {
+                if (normalizeNumber(message.channel) !== channelNumber) return;
+                if (!latestMessage || getMessageSortTimestamp(message) >= getMessageSortTimestamp(latestMessage)) {
+                    latestMessage = message;
+                }
+            });
+        }
+
+        return {
+            channel,
+            index,
+            channelNumber,
+            latestMessage,
+        };
+    });
+}
+
+function getMessageSenderShortName(message) {
+    if (!message) return '';
+
+    const explicitShortName = (message.sender_short_name || '').trim();
+    if (explicitShortName) {
+        return explicitShortName;
+    }
+
+    if (currentProfile && message.sender === currentProfile.node_id) {
+        return (currentProfile.short_name || '').trim();
+    }
+
+    return '';
+}
+
+function formatThreadPreview(message, maxLength = 110, includeSenderShortName = false) {
+    if (!message) return 'No messages yet.';
+
+    const content = (message.content || '').trim();
+    const senderShortName = includeSenderShortName ? getMessageSenderShortName(message) : '';
+    const previewText = senderShortName ? `${senderShortName}: ${content}` : content;
+
+    return truncateText(previewText || 'No messages yet.', maxLength);
+}
+
+function renderChannelThreadCardHtml(thread) {
+    const channel = thread.channel;
+    const index = thread.index;
+    const latestMessage = thread.latestMessage;
+    const preview = formatThreadPreview(latestMessage, 110, true);
+    const timestamp = latestMessage ? formatTimestamp(latestMessage.timestamp) : '';
     return `
         <div class="dm-thread-card channel-thread-card thread-card__shell" role="button" tabindex="0" data-channel-index="${Number(index)}">
             <div class="d-flex justify-content-between align-items-start gap-3">
                 <div class="flex-grow-1 text-start thread-card__content">
                     <div class="fw-semibold text-primary">${escapeHtml(channel.name || `Channel ${index + 1}`)}</div>
-                    <div class="small text-muted mt-1">${escapeHtml(keyPreview ? `Key ${keyPreview}` : 'Configured channel')}</div>
+                    <div class="small text-muted mt-1">${escapeHtml(preview)}</div>
                 </div>
                 <div class="thread-card__actions">
-                    <div class="small text-muted text-nowrap">Tap to open</div>
+                    <div class="small text-muted text-nowrap">${escapeHtml(timestamp)}</div>
                     <button
                         class="btn btn-sm btn-outline-danger thread-card__delete"
                         type="button"
@@ -1816,7 +2019,7 @@ function getDmThreads() {
 function renderDmThreadCardHtml(thread) {
     const target = thread.target;
     const latestMessage = thread.latestMessage;
-    const preview = latestMessage ? truncateText(latestMessage.content || '', 110) : 'No messages yet.';
+    const preview = formatThreadPreview(latestMessage, 110, true);
     const timestamp = latestMessage ? formatTimestamp(latestMessage.timestamp) : '';
 
     return `
@@ -1935,14 +2138,31 @@ function applyMessageUpdate(message) {
 
 function addIncomingMessage(message) {
     const messageType = message.message_type || 'channel';
+    const isOwnMessage = Boolean(
+        ((message.direction || '').toLowerCase() === 'sent')
+        || (currentProfile && message.sender === currentProfile.node_id)
+    );
+
     if (messageType === 'dm') {
-        upsertMessage(dmMessages, message);
+        const inserted = upsertMessage(dmMessages, message);
         const fallbackTarget = createDmTargetFromMessage(message);
         if (fallbackTarget) upsertDmTarget(fallbackTarget);
         syncDmTargetsFromMessages();
         void loadDmTargets();
+        if (inserted && !isOwnMessage) {
+            const peerNodeNum = getPeerNodeNum(message);
+            if (peerNodeNum && !isViewingDmThread(peerNodeNum)) {
+                incrementUnreadCount(unreadDmMessageCounts, peerNodeNum);
+            }
+        }
     } else {
-        upsertMessage(channelMessages, message);
+        const inserted = upsertMessage(channelMessages, message);
+        if (inserted && !isOwnMessage) {
+            const channelNumber = normalizeNumber(message.channel);
+            if (channelNumber !== null && !isViewingChannelThread(channelNumber)) {
+                incrementUnreadCount(unreadChannelMessageCounts, channelNumber);
+            }
+        }
     }
     renderActiveMessages();
     updateComposerState();
@@ -1963,9 +2183,11 @@ async function deleteChannelThread(channelIndex) {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
-        if (Number(activeChannelIndex) === Number(channelIndex)) {
-            channelMessages = [];
+        const channelNumber = getChannelNumberByIndex(channelIndex);
+        if (channelNumber !== null) {
+            channelMessages = channelMessages.filter(message => normalizeNumber(message.channel) !== channelNumber);
         }
+        clearUnreadCount(unreadChannelMessageCounts, channelNumber);
         renderActiveMessages();
         updateComposerState();
     } catch (error) {
@@ -1990,6 +2212,7 @@ async function deleteDmThread(nodeNum) {
 
         dmMessages = dmMessages.filter(message => Number(getPeerNodeNum(message)) !== Number(nodeNum));
         dmTargets = dmTargets.filter(item => Number(item.node_num) !== Number(nodeNum));
+        clearUnreadCount(unreadDmMessageCounts, nodeNum);
         if (Number(activeDmTargetNodeNum) === Number(nodeNum)) {
             setActiveDmTarget(null);
         }
@@ -2004,13 +2227,15 @@ async function deleteDmThread(nodeNum) {
 function upsertMessage(list, message) {
     if (!message || !message.id) {
         list.push(message);
-        return;
+        return true;
     }
     const existingIndex = list.findIndex(item => item.id === message.id);
     if (existingIndex >= 0) {
         list[existingIndex] = message;
+        return false;
     } else {
         list.push(message);
+        return true;
     }
 }
 
@@ -2053,6 +2278,7 @@ async function setProfile(event) {
         activeChannelIndex = Number.isInteger(data.selected_channel_index) ? data.selected_channel_index : 0;
         activeDmTargetNodeNum = null;
         replyingToPacketId = null;
+        resetUnreadState();
 
         if (currentProfile) {
             currentChannelRoom = data.channel_number ?? null;

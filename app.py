@@ -182,6 +182,52 @@ def _profile_channel_num(profile):
         return None
 
 
+def _channel_number_for_config(channel):
+    if not isinstance(channel, dict):
+        return None
+    name = (channel.get("name") or "").strip()
+    key = (channel.get("key") or "").strip()
+    if not name or not key:
+        return None
+    try:
+        return generate_hash(name, key)
+    except Exception:
+        return None
+
+
+def _profile_channels_with_numbers(profile):
+    channels = []
+    for channel in _profile_channels(profile):
+        channel_data = dict(channel)
+        channel_data["channel_number"] = _channel_number_for_config(channel)
+        channels.append(channel_data)
+    return channels
+
+
+def _serialize_profile_for_client(profile, interface_status=None):
+    if not profile:
+        return None
+
+    channels = _profile_channels_with_numbers(profile)
+    response_data = dict(profile)
+    response_data["channels"] = channels
+
+    if channels:
+        selected_channel_index = min(max(_selected_channel_index(profile), 0), len(channels) - 1)
+        response_data["selected_channel_index"] = selected_channel_index
+        response_data["selected_channel"] = channels[selected_channel_index]
+        response_data["channel_number"] = channels[selected_channel_index].get("channel_number")
+    else:
+        response_data["selected_channel_index"] = 0
+        response_data["selected_channel"] = None
+        response_data["channel_number"] = None
+
+    if interface_status is not None:
+        response_data["interface_status"] = interface_status
+
+    return response_data
+
+
 def _profile_node_num(profile):
     try:
         node_id = profile.get("node_id") if profile else None
@@ -290,7 +336,14 @@ def _get_mesh_store(profile=None):
 def _get_chat_payload(profile):
     effective_profile = _effective_profile(profile)
     channel_number = _profile_channel_num(effective_profile)
-    channel_messages = db.get_messages_for_channel(channel_number) if channel_number is not None else []
+    channel_messages = []
+    seen_channel_numbers = set()
+    for channel in _profile_channels(profile):
+        channel_hash = _channel_number_for_config(channel)
+        if channel_hash is None or channel_hash in seen_channel_numbers:
+            continue
+        seen_channel_numbers.add(channel_hash)
+        channel_messages.extend(db.get_messages_for_channel(channel_hash))
     dm_messages = db.get_dm_messages_for_profile(effective_profile["id"]) if effective_profile else []
     return {
         "channel_messages": channel_messages,
@@ -302,33 +355,7 @@ def _get_chat_payload(profile):
 
 def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
     print(f"\n[RECV] Packet received from {addr}")
-    print("from:", getattr(packet, "from", None))
-    print("to:", packet.to)
-    print("channel:", packet.channel or None)
-
-    if packet.HasField("decoded"):
-        port_name = portnums_pb2.PortNum.Name(packet.decoded.portnum) if packet.decoded.portnum else "N/A"
-        print("decoded {")
-        print("  portnum:", port_name)
-        try:
-            print("  payload:", packet.decoded.payload.decode("utf-8", "ignore"))
-        except Exception:
-            print("  payload (raw bytes):", packet.decoded.payload)
-        print("  bitfield:", packet.decoded.bitfield or None)
-        print("}")
-    else:
-        print(f"encrypted: { {packet.encrypted} }")
-
-    print("id:", packet.id or None)
-    print("rx_time:", packet.rx_time or None)
-    print("rx_snr:", packet.rx_snr or None)
-    print("hop_limit:", packet.hop_limit or None)
-    priority_name = mesh_pb2.MeshPacket.Priority.Name(packet.priority) if packet.priority else "N/A"
-    print("priority:", priority_name or None)
-    print("rx_rssi:", packet.rx_rssi or None)
-    print("hop_start:", packet.hop_start or None)
-    print("next_hop:", packet.next_hop or None)
-    print("relay_node:", packet.relay_node or None)
+    print(packet)
 
     active_profile = udp_server.get_active_profile()
     mesh_store = _get_mesh_store(active_profile) if active_profile else None
@@ -395,6 +422,7 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
         # Look up node name from database if available
         # Note: We can't access session in UDP packet handler, so we'll look across all profiles
         sender_display = f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else "Unknown"
+        sender_short_name = None
 
         if sender_num:
             try:
@@ -403,6 +431,8 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
                 if mesh_store:
                     found_node = mesh_store.get_node(sender_num)
 
+                if found_node:
+                    sender_short_name = found_node.get("short_name") or None
                 if found_node and found_node.get("long_name"):
                     sender_display = found_node["long_name"]
                     print(f"[MESSAGE] Using node name: {sender_display} for {sender_num}")
@@ -417,6 +447,7 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
             "sender_num": sender_num,
             "sender": f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else "Unknown",
             "sender_display": sender_display,
+            "sender_short_name": sender_short_name,
             "content": msg,
             "timestamp": datetime.now().isoformat(),
             "sender_ip": (addr[0] if isinstance(addr, tuple) and len(addr) >= 1 else "mesh"),
@@ -890,6 +921,7 @@ class UDPChatServer:
                 "sender": sender_node_id,
                 "sender_num": my_node_num,
                 "sender_display": sender_profile.get("long_name", "Unknown"),
+                "sender_short_name": sender_profile.get("short_name") or None,
                 "content": message_content,
                 "timestamp": datetime.now().isoformat(),
                 "sender_ip": "self",  # Keep for backward compatibility but use sender for identity
@@ -1076,11 +1108,8 @@ def get_current_profile():
         expected_channel = _current_profile_channel_num()
 
         # Return profile with interface status and channel number
-        response_data = dict(current_profile)
-        response_data["interface_status"] = interface_status
+        response_data = _serialize_profile_for_client(current_profile, interface_status=interface_status)
         response_data["channel_number"] = expected_channel
-        response_data["selected_channel_index"] = _selected_channel_index(current_profile)
-        response_data["selected_channel"] = _selected_channel(current_profile)
         return jsonify(response_data)
     else:
         return jsonify(None)
@@ -1139,7 +1168,7 @@ def set_current_profile():
             unread_messages = db.get_unread_messages_for_channel(current_profile["id"], expected_channel)
             unread_count = len(unread_messages)
             print(
-                f"[PROFILE] Loaded {len(chat_payload['channel_messages'])} total channel messages, {len(chat_payload['dm_messages'])} dms, {unread_count} unread for channel {expected_channel}"
+                f"[PROFILE] Loaded {len(chat_payload['channel_messages'])} channel messages across configured channels, {len(chat_payload['dm_messages'])} dms, {unread_count} unread for selected channel {expected_channel}"
             )
         else:
             unread_count = 0  # Can't determine messages without channel
@@ -1163,9 +1192,7 @@ def set_current_profile():
         else:
             print(f"[PROFILE] Profile switched - user is caught up on messages")
 
-        response_profile = dict(current_profile)
-        response_profile["selected_channel_index"] = _selected_channel_index(current_profile)
-        response_profile["selected_channel"] = _selected_channel(current_profile)
+        response_profile = _serialize_profile_for_client(current_profile)
 
         if interface_started:
             udp_server.register_session(session_id, profile.get("id"), channel_hash)
@@ -1199,7 +1226,7 @@ def set_current_profile():
                     "dm_messages": chat_payload["dm_messages"],
                     "channel_number": expected_channel,
                     "unread_count": unread_count,
-                    "selected_channel_index": _selected_channel_index(current_profile),
+                    "selected_channel_index": response_profile.get("selected_channel_index", 0),
                 }
             )
         else:
@@ -1218,7 +1245,7 @@ def set_current_profile():
                             "dm_messages": chat_payload["dm_messages"],
                             "channel_number": expected_channel,
                             "unread_count": unread_count,
-                            "selected_channel_index": _selected_channel_index(current_profile),
+                            "selected_channel_index": response_profile.get("selected_channel_index", 0),
                         }
                     )
             
@@ -1234,7 +1261,7 @@ def set_current_profile():
                     "dm_messages": chat_payload["dm_messages"],
                     "channel_number": expected_channel,
                     "unread_count": unread_count,
-                    "selected_channel_index": _selected_channel_index(current_profile),
+                    "selected_channel_index": response_profile.get("selected_channel_index", 0),
                 }
             )
     else:
@@ -1268,9 +1295,7 @@ def set_current_channel():
         udp_server.register_session(session_id, current_profile.get("id"), channel_hash)
 
     chat_payload = _get_chat_payload(current_profile)
-    response_profile = dict(current_profile)
-    response_profile["selected_channel_index"] = channel_index
-    response_profile["selected_channel"] = channels[channel_index]
+    response_profile = _serialize_profile_for_client(current_profile)
 
     return jsonify(
         {

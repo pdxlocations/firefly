@@ -630,12 +630,14 @@ class Database:
             
             # Get messages for the specific channel
             cursor = conn.execute("""
-                SELECT message_id, packet_id, sender_num, sender_display, content, 
-                       timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                       owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
-                       ack_requested, ack_status, ack_error, ack_updated_at
-                FROM messages WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel'
-                ORDER BY timestamp DESC LIMIT ?
+                SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                       m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
+                       m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
+                       m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
+                FROM messages m
+                LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
+                WHERE m.channel = ? AND COALESCE(m.message_type, 'channel') = 'channel'
+                ORDER BY m.timestamp DESC LIMIT ?
             """, (channel, limit))
             
             return self._serialize_messages(cursor)
@@ -645,13 +647,14 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
-                SELECT message_id, packet_id, sender_num, sender_display, content,
-                       timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                       owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
-                       ack_requested, ack_status, ack_error, ack_updated_at
-                FROM messages
-                WHERE owner_profile_id = ? AND COALESCE(message_type, 'channel') = 'dm'
-                ORDER BY timestamp DESC LIMIT ?
+                SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                       m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
+                       m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
+                       m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
+                FROM messages m
+                LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
+                WHERE m.owner_profile_id = ? AND COALESCE(m.message_type, 'channel') = 'dm'
+                ORDER BY m.timestamp DESC LIMIT ?
             """, (profile_id, limit))
             return self._serialize_messages(cursor)
 
@@ -675,15 +678,16 @@ class Database:
                 )
                 cursor = conn.execute(
                     """
-                    SELECT message_id, packet_id, sender_num, sender_display, content,
-                           timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
-                           ack_requested, ack_status, ack_error, ack_updated_at
-                    FROM messages
-                    WHERE packet_id = ?
-                      AND direction = 'sent'
-                      AND COALESCE(ack_requested, 0) = 1
-                    ORDER BY id DESC
+                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                           m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
+                           m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
+                           m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
+                    FROM messages m
+                    LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
+                    WHERE m.packet_id = ?
+                      AND m.direction = 'sent'
+                      AND COALESCE(m.ack_requested, 0) = 1
+                    ORDER BY m.id DESC
                     """,
                     (int(packet_id),),
                 )
@@ -827,22 +831,26 @@ class Database:
             if last_seen_row and last_seen_row['last_seen_timestamp']:
                 # Get messages newer than last seen
                 cursor = conn.execute("""
-                    SELECT message_id, packet_id, sender_num, sender_display, content, 
-                           timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
-                           ack_requested, ack_status, ack_error, ack_updated_at
-                    FROM messages WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel' AND timestamp > ?
-                    ORDER BY timestamp DESC LIMIT ?
+                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                           m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
+                           m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
+                           m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
+                    FROM messages m
+                    LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
+                    WHERE m.channel = ? AND COALESCE(m.message_type, 'channel') = 'channel' AND m.timestamp > ?
+                    ORDER BY m.timestamp DESC LIMIT ?
                 """, (channel, last_seen_row['last_seen_timestamp'], limit))
             else:
                 # No last seen timestamp - return all messages (but limit to prevent overload)
                 cursor = conn.execute("""
-                    SELECT message_id, packet_id, sender_num, sender_display, content, 
-                           timestamp, sender_ip, direction, channel, message_type, reply_packet_id, target_node_num,
-                           owner_profile_id, hop_limit, hop_start, rx_snr, rx_rssi,
-                           ack_requested, ack_status, ack_error, ack_updated_at
-                    FROM messages WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel'
-                    ORDER BY timestamp DESC LIMIT ?
+                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                           m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
+                           m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
+                           m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
+                    FROM messages m
+                    LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
+                    WHERE m.channel = ? AND COALESCE(m.message_type, 'channel') = 'channel'
+                    ORDER BY m.timestamp DESC LIMIT ?
                 """, (channel, limit))
 
             return self._serialize_messages(cursor)
@@ -867,6 +875,7 @@ class Database:
                 'sender_num': sender_num,
                 'sender': f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else 'Unknown',
                 'sender_display': current_sender_display,
+                'sender_short_name': row['sender_short_name'],
                 'content': row['content'],
                 'timestamp': row['timestamp'],
                 'sender_ip': row['sender_ip'],

@@ -3,12 +3,14 @@
 from collections import deque
 
 from datetime import datetime
+from google.protobuf import text_format
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, has_request_context
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 import uuid
 import os
 import socketio as py_socketio
 import engineio
+import meshtastic
 from pubsub import pub
 
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
@@ -353,9 +355,111 @@ def _get_chat_payload(profile):
     }
 
 
+_EXTRA_PORTNUM_FACTORIES = {
+    int(portnums_pb2.PortNum.KEY_VERIFICATION_APP): mesh_pb2.KeyVerification,
+    int(portnums_pb2.PortNum.STORE_FORWARD_PLUSPLUS_APP): mesh_pb2.StoreForwardPlusPlus,
+    int(portnums_pb2.PortNum.NODE_STATUS_APP): mesh_pb2.StatusMessage,
+}
+
+_TEXT_PORTNUMS = {
+    int(portnums_pb2.PortNum.TEXT_MESSAGE_APP),
+    int(portnums_pb2.PortNum.RANGE_TEST_APP),
+    int(portnums_pb2.PortNum.DETECTION_SENSOR_APP),
+}
+
+
+def _payload_factory_for_portnum(portnum):
+    protocol = meshtastic.protocols.get(int(portnum or 0))
+    if protocol and protocol.protobufFactory:
+        return protocol.protobufFactory
+    return _EXTRA_PORTNUM_FACTORIES.get(int(portnum or 0))
+
+
+def _decode_payload_for_log(packet: mesh_pb2.MeshPacket):
+    if not packet.HasField("decoded"):
+        return None, None
+
+    payload = bytes(packet.decoded.payload or b"")
+    if not payload:
+        return None, None
+
+    portnum = int(packet.decoded.portnum or 0)
+    if portnum in _TEXT_PORTNUMS:
+        return "text", payload.decode("utf-8", "replace")
+
+    factory = _payload_factory_for_portnum(portnum)
+    if not factory:
+        return None, None
+
+    decoded_payload = factory()
+    try:
+        decoded_payload.ParseFromString(payload)
+    except Exception:
+        return None, None
+    return "protobuf", decoded_payload
+
+
+def _print_packet_with_decoded_payload(packet: mesh_pb2.MeshPacket):
+    payload_kind, decoded_payload = _decode_payload_for_log(packet)
+    if payload_kind is None:
+        print(packet)
+        return
+
+    print("from:", getattr(packet, "from", None))
+    print("to:", packet.to)
+    print("channel:", packet.channel or None)
+    print("decoded {")
+    port_name = portnums_pb2.PortNum.Name(packet.decoded.portnum) if packet.decoded.portnum else "N/A"
+    print("  portnum:", port_name)
+
+    if payload_kind == "text":
+        escaped_text = decoded_payload.encode("unicode_escape").decode("ascii")
+        print(f'  payload: "{escaped_text}"')
+    else:
+        print("  payload: {")
+        decoded_text = text_format.MessageToString(decoded_payload, as_utf8=True).rstrip()
+        for line in decoded_text.splitlines():
+            print(f"    {line}")
+        print("  }")
+
+    if packet.decoded.dest:
+        print("  dest:", packet.decoded.dest)
+    if packet.decoded.source:
+        print("  source:", packet.decoded.source)
+    if packet.decoded.request_id:
+        print("  request_id:", packet.decoded.request_id)
+    if packet.decoded.reply_id:
+        print("  reply_id:", packet.decoded.reply_id)
+    if packet.decoded.emoji:
+        print("  emoji:", packet.decoded.emoji)
+    if packet.decoded.HasField("bitfield"):
+        print("  bitfield:", packet.decoded.bitfield)
+    if packet.decoded.want_response:
+        print("  want_response:", packet.decoded.want_response)
+    print("}")
+
+    print("id:", packet.id or None)
+    print("rx_time:", packet.rx_time or None)
+    print("rx_snr:", packet.rx_snr or None)
+    print("hop_limit:", packet.hop_limit or None)
+    priority_name = mesh_pb2.MeshPacket.Priority.Name(packet.priority) if packet.priority else "N/A"
+    print("priority:", priority_name or None)
+    print("rx_rssi:", packet.rx_rssi or None)
+    print("hop_start:", packet.hop_start or None)
+    print("next_hop:", packet.next_hop or None)
+    print("relay_node:", packet.relay_node or None)
+    transport_name = (
+        mesh_pb2.MeshPacket.TransportMechanism.Name(packet.transport_mechanism)
+        if packet.transport_mechanism
+        else None
+    )
+    if transport_name:
+        print("transport_mechanism:", transport_name)
+
+
 def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
     print(f"\n[RECV] Packet received from {addr}")
-    print(packet)
+    _print_packet_with_decoded_payload(packet)
 
     active_profile = udp_server.get_active_profile()
     mesh_store = _get_mesh_store(active_profile) if active_profile else None

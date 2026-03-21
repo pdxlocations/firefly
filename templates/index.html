@@ -166,29 +166,6 @@
     </div>
 </div>
 
-<div class="mt-4 d-none d-md-block">
-    <div class="card">
-        <div class="card-header">
-            <h6 class="mb-0">
-                <button class="btn btn-link p-0 text-decoration-none collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#instructionsCollapse" aria-expanded="false" aria-controls="instructionsCollapse">
-                    <i class="fas fa-chevron-right me-1" id="instructionsIcon"></i> Instructions
-                </button>
-            </h6>
-        </div>
-        <div class="collapse" id="instructionsCollapse">
-            <div class="card-body">
-                <ul class="mb-0">
-                    <li>Select or create a profile to start chatting</li>
-                    <li>Use the `Channels` tab for mesh-wide chat and the `DMs` tab for direct messages</li>
-                    <li>Messages are sent over UDP multicast on port 4403</li>
-                    <li>Use the Nodes tab to jump straight into a DM with a discovered node</li>
-                    <li><strong>Mobile tip:</strong> Rotate your device to landscape for better chat experience</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-</div>
-
 <div class="modal fade" id="nodeDetailsModal" tabindex="-1" aria-labelledby="nodeDetailsModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -1039,17 +1016,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (messagesContainer) {
         messagesContainer.addEventListener('click', handleThreadCardClick);
         messagesContainer.addEventListener('input', handleThreadListInput);
-    }
-
-    const instructionsCollapse = document.getElementById('instructionsCollapse');
-    const instructionsIcon = document.getElementById('instructionsIcon');
-    if (instructionsCollapse && instructionsIcon) {
-        instructionsCollapse.addEventListener('show.bs.collapse', function() {
-            instructionsIcon.className = 'fas fa-chevron-down me-1';
-        });
-        instructionsCollapse.addEventListener('hide.bs.collapse', function() {
-            instructionsIcon.className = 'fas fa-chevron-right me-1';
-        });
     }
 
     await loadCurrentProfileAndStatus();

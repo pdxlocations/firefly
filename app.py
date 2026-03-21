@@ -11,10 +11,6 @@ import socketio as py_socketio
 import engineio
 from pubsub import pub
 
-from mudp_compat import apply_mudp_multicast_patch
-
-apply_mudp_multicast_patch()
-
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
 from mudp import node
 from mudp.reliability import is_ack, is_nak, parse_routing
@@ -33,7 +29,7 @@ DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
 # Note: current_profile is now stored per-session in session['current_profile']
 messages = []
 
-# De-duplication cache for received packets to avoid double-display
+# Cross-source de-duplication cache for user-visible packet handling.
 _DEDUP_CACHE = set()
 _DEDUP_QUEUE = deque(maxlen=500)
 
@@ -214,7 +210,7 @@ def _is_direct_message(packet, profile=None):
 
 
 def _already_seen(key):
-    """Return True if we've already processed a message with this key; otherwise record it and return False."""
+    """Return True if we've already processed a packet with this key."""
     if key in _DEDUP_CACHE:
         return True
     _DEDUP_CACHE.add(key)
@@ -609,36 +605,6 @@ def on_max_retransmit(pending=None, error_reason=None):
     _apply_ack_update(request_id, "max_retransmit", error_name)
 
 
-def on_post_decode_compat_packet(packet, addr=None):
-    """Handle PKI-decoded packets after vnode has had a chance to decrypt them."""
-    if not packet or not packet.HasField("decoded"):
-        return
-
-    is_pki_or_channel_zero = bool(getattr(packet, "pki_encrypted", False)) or int(getattr(packet, "channel", 0) or 0) == 0
-    if not is_pki_or_channel_zero:
-        return
-
-    portnum = int(getattr(packet.decoded, "portnum", 0) or 0)
-    if portnum in (
-        int(portnums_pb2.PortNum.TEXT_MESSAGE_APP),
-        int(portnums_pb2.PortNum.TEXT_MESSAGE_COMPRESSED_APP),
-    ):
-        on_text_message(packet, addr=addr)
-        return
-
-    if portnum != int(portnums_pb2.PortNum.ROUTING_APP):
-        return
-
-    routing = parse_routing(packet)
-    if routing is None:
-        return
-
-    if is_ack(packet):
-        on_ack_message(packet, routing=routing, addr=addr, pending=None)
-    elif is_nak(packet):
-        on_nak_message(packet, routing=routing, addr=addr, pending=None)
-
-
 def on_meshtastic_text(packet, interface=None):
     del interface
     raw_packet = packet.get("raw") if isinstance(packet, dict) else None
@@ -663,8 +629,7 @@ def on_meshtastic_routing(packet, interface=None):
 
 
 pub.subscribe(on_recieve, "mesh.rx.packet")
-pub.subscribe(on_post_decode_compat_packet, "mesh.rx.unique_packet")
-pub.subscribe(on_text_message, "mesh.rx.port.1")
+pub.subscribe(on_text_message, "mesh.rx.text")
 pub.subscribe(on_meshtastic_text, "meshtastic.receive.text")
 pub.subscribe(on_meshtastic_routing, "meshtastic.receive.routing")
 pub.subscribe(on_nodeinfo, "mesh.rx.port.4")  # NODEINFO_APP

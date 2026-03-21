@@ -55,6 +55,28 @@ def node_id_from_num(node_num: int) -> str:
     return f"!{int(node_num):08x}"
 
 
+def _profile_channel_hashes(profile: Dict) -> List[int]:
+    channels = profile.get("channels")
+    if isinstance(channels, list) and channels:
+        hashes = []
+        for channel in channels:
+            if not isinstance(channel, dict):
+                continue
+            channel_name = (channel.get("name") or "").strip()
+            channel_key = (channel.get("key") or "").strip()
+            if not channel_name or not channel_key:
+                continue
+            hashes.append(generate_hash(channel_name, channel_key))
+        if hashes:
+            return hashes
+
+    channel_name = (profile.get("channel") or "").strip()
+    channel_key = (profile.get("key") or "").strip()
+    if channel_name and channel_key:
+        return [generate_hash(channel_name, channel_key)]
+    return []
+
+
 def ensure_profile_config(profile: Dict, mcast_group: str, mcast_port: int) -> Path:
     config_path = _config_path(profile)
     meshdb_root = _meshdb_root(profile)
@@ -152,16 +174,20 @@ class VirtualNodeManager:
 class MeshNodeStore:
     def __init__(self, profile: Dict):
         self.profile = profile
+        self.profile_id = str(profile["id"])
         self.owner_node_num = owner_node_num(profile)
         self.db_path = str(_meshdb_root(profile))
         self.firefly_db_path = str(_firefly_db_path())
-        self.channel_num = generate_hash(profile["channel"], profile["key"])
+        self.channel_nums = _profile_channel_hashes(profile)
+        self.channel_num = self.channel_nums[0] if self.channel_nums else generate_hash(profile["channel"], profile["key"])
         self.node_db = meshdb.NodeDB(self.owner_node_num, self.db_path)
         self.node_db.ensure_table()
 
     def record_packet(self, packet) -> Dict[str, bool]:
         packet_dict = meshdb.normalize_packet(packet, "mudp")
-        return meshdb.handle_packet(packet_dict, node_database_number=self.owner_node_num, db_path=self.db_path)
+        stored = meshdb.handle_packet(packet_dict, node_database_number=self.owner_node_num, db_path=self.db_path)
+        self._persist_hops_from_packet(packet_dict)
+        return stored
 
     def get_node(self, node_num: int) -> Optional[Dict]:
         with self.node_db.connect() as con:
@@ -203,46 +229,157 @@ class MeshNodeStore:
         return hops_map.get(int(node_num))
 
     def _get_fallback_hops_map(self, node_num: Optional[int] = None) -> Dict[int, int]:
+        hops_map = self._get_meshdb_message_hops_map(node_num=node_num)
+        if node_num is not None and int(node_num) in hops_map:
+            return hops_map
+
+        firefly_hops = self._get_firefly_message_hops_map(node_num=node_num)
+        for sender_num, hops_away in firefly_hops.items():
+            hops_map.setdefault(sender_num, hops_away)
+        return hops_map
+
+    def _persist_hops_from_packet(self, packet_dict: Dict) -> None:
+        sender_num = self._coerce_int(packet_dict.get("from"))
+        if sender_num is None or sender_num == self.owner_node_num:
+            return
+
+        hops_away = self._hops_from_metadata(packet_dict.get("hopStart"), packet_dict.get("hopLimit"))
+        if hops_away is None:
+            return
+
+        self._persist_node_hops(sender_num, hops_away)
+
+    def _persist_node_hops(self, node_num: int, hops_away: int) -> None:
+        if node_num == self.owner_node_num:
+            return
+
+        try:
+            self.node_db.upsert(node_num=node_num, hops_away=hops_away)
+        except Exception:
+            pass
+
+    def _get_meshdb_message_hops_map(self, node_num: Optional[int] = None) -> Dict[int, int]:
+        latest_hops: Dict[int, tuple[int, int]] = {}
+        node_value = str(int(node_num)) if node_num is not None else None
+
+        try:
+            with self.node_db.connect() as con:
+                con.row_factory = sqlite3.Row
+                for table_name in self._message_table_names(con):
+                    query = f"""
+                        SELECT node_num, hop_start, hop_limit, timestamp
+                        FROM "{table_name}"
+                        WHERE hop_start IS NOT NULL
+                          AND hop_limit IS NOT NULL
+                    """
+                    params: List[object] = []
+                    if node_value is not None:
+                        query += " AND node_num = ?"
+                        params.append(node_value)
+
+                    for row in con.execute(query, params):
+                        sender_num = self._coerce_int(row["node_num"])
+                        if sender_num is None or sender_num == self.owner_node_num:
+                            continue
+
+                        hops_away = self._hops_from_metadata(row["hop_start"], row["hop_limit"])
+                        if hops_away is None:
+                            continue
+
+                        timestamp = self._coerce_int(row["timestamp"]) or 0
+                        self._update_latest_hops(latest_hops, sender_num, timestamp, hops_away)
+        except Exception:
+            return {}
+
+        return {sender_num: hops_away for sender_num, (_, hops_away) in latest_hops.items()}
+
+    def _get_firefly_message_hops_map(self, node_num: Optional[int] = None) -> Dict[int, int]:
         if not os.path.exists(self.firefly_db_path):
             return {}
 
-        query = """
-            SELECT sender_num, hop_start, hop_limit
+        scope_clauses: List[str] = []
+        params: List[object] = []
+        if self.profile_id:
+            scope_clauses.append("owner_profile_id = ?")
+            params.append(self.profile_id)
+        if self.channel_nums:
+            placeholders = ", ".join("?" for _ in self.channel_nums)
+            scope_clauses.append(f"channel IN ({placeholders})")
+            params.extend(self.channel_nums)
+        if not scope_clauses:
+            return {}
+
+        query = f"""
+            SELECT sender_num, hop_start, hop_limit, timestamp
             FROM messages
-            WHERE channel = ?
-              AND sender_num IS NOT NULL
+            WHERE sender_num IS NOT NULL
               AND hop_start IS NOT NULL
               AND hop_limit IS NOT NULL
-              AND COALESCE(message_type, 'channel') = 'channel'
+              AND ({' OR '.join(scope_clauses)})
         """
-        params: List[object] = [self.channel_num]
         if node_num is not None:
             query += " AND sender_num = ?"
             params.append(int(node_num))
-        query += " ORDER BY timestamp DESC"
 
-        hops_map: Dict[int, int] = {}
+        latest_hops: Dict[int, tuple[str, int]] = {}
         try:
             with sqlite3.connect(self.firefly_db_path) as con:
                 con.row_factory = sqlite3.Row
                 cursor = con.execute(query, params)
                 for row in cursor.fetchall():
-                    sender_num = int(row["sender_num"])
-                    if sender_num in hops_map:
+                    sender_num = self._coerce_int(row["sender_num"])
+                    if sender_num is None or sender_num == self.owner_node_num:
                         continue
-                    hop_start = row["hop_start"]
-                    hop_limit = row["hop_limit"]
-                    if hop_start is None or hop_limit is None:
+
+                    hops_away = self._hops_from_metadata(row["hop_start"], row["hop_limit"])
+                    if hops_away is None:
                         continue
-                    hops_map[sender_num] = max(int(hop_start) - int(hop_limit), 0)
+                    timestamp = str(row["timestamp"] or "")
+                    self._update_latest_hops(latest_hops, sender_num, timestamp, hops_away)
         except Exception:
             return {}
 
-        return hops_map
+        return {sender_num: hops_away for sender_num, (_, hops_away) in latest_hops.items()}
+
+    def _message_table_names(self, con: sqlite3.Connection) -> List[str]:
+        prefix = f"{self.owner_node_num}_"
+        rows = con.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name LIKE ?
+            ORDER BY name
+            """,
+            (f"{prefix}%_messages",),
+        ).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def _hops_from_metadata(self, hop_start, hop_limit) -> Optional[int]:
+        hop_start_value = self._coerce_int(hop_start)
+        hop_limit_value = self._coerce_int(hop_limit)
+        if hop_start_value is None or hop_limit_value is None:
+            return None
+        return max(hop_start_value - hop_limit_value, 0)
+
+    def _coerce_int(self, value) -> Optional[int]:
+        try:
+            if value in (None, ""):
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _update_latest_hops(self, latest_hops: Dict, sender_num: int, timestamp, hops_away: int) -> None:
+        previous = latest_hops.get(sender_num)
+        if previous is None or timestamp > previous[0] or (timestamp == previous[0] and hops_away < previous[1]):
+            latest_hops[sender_num] = (timestamp, hops_away)
 
     def _row_to_dict(self, row: sqlite3.Row, fallback_hops: Optional[int] = None) -> Dict:
         node_num = int(row["node_num"])
         hops_away = row["hops_away"] if row["hops_away"] is not None else fallback_hops
+        if row["hops_away"] is None and fallback_hops is not None:
+            self._persist_node_hops(node_num, fallback_hops)
         node = {
             "node_num": node_num,
             "node_id": node_id_from_num(node_num),

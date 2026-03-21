@@ -4,12 +4,19 @@ from cryptography.hazmat.backends import default_backend
 from meshtastic.protobuf import mesh_pb2
 
 
+MESHTASTIC_ONE_BYTE_PSK_PREFIX = bytes.fromhex("d4f1bb3a20290759f0bcffabcf4e69")
+
+
 def expand_short_psk(key: str) -> str:
-    if key == "AQ==":
-        return "1PG7OiApB1nwvP+rz05pAQ=="
-    if key == "BQ==":
-        return "1PG7OiApB1nwvP+rz05pBQ=="
-    return key
+    try:
+        raw_key = base64.b64decode(key.encode("ascii"), validate=True)
+    except Exception:
+        return key
+
+    if len(raw_key) != 1 or not 0x01 <= raw_key[0] <= 0x07:
+        return key
+
+    return base64.b64encode(MESHTASTIC_ONE_BYTE_PSK_PREFIX + raw_key).decode("ascii")
 
 
 def decrypt_packet(mp: mesh_pb2.MeshPacket, key: str) -> mesh_pb2.Data | None:

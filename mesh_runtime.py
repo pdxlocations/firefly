@@ -71,7 +71,7 @@ def ensure_profile_config(profile: Dict, mcast_group: str, mcast_port: int) -> P
         "node_id": profile["node_id"],
         "long_name": profile["long_name"],
         "short_name": profile["short_name"],
-        "hw_model": "ANDROID_SIM",
+        "hw_model": "PRIVATE_HW",
         "role": "CLIENT",
         "is_licensed": False,
         "hop_limit": int(profile.get("hop_limit", 3) or 3),

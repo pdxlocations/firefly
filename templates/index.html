@@ -420,6 +420,30 @@
     margin-bottom: 0.5rem;
 }
 
+.message-unread-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.4rem 0 0.85rem;
+    color: #c84d4d;
+}
+
+.message-unread-divider::before,
+.message-unread-divider::after {
+    content: "";
+    flex: 1 1 auto;
+    height: 1px;
+    background: currentColor;
+}
+
+.message-unread-divider__label {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
 .reply-trigger {
     border: none;
     background: transparent;
@@ -603,6 +627,21 @@
 
 .thread-card__content {
     min-width: 0;
+}
+
+.thread-card__headline {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.thread-card__headline .fw-semibold {
+    min-width: 0;
+}
+
+.thread-card__unread {
+    flex: 0 0 auto;
 }
 
 .thread-card__actions {
@@ -1292,6 +1331,7 @@ let unreadDmMessageCounts = new Map();
 let managedProfiles = {{ profiles|tojson }};
 let mapInstance = null;
 let mapLayerGroup = null;
+let pendingThreadStateRefresh = null;
 
 document.addEventListener('DOMContentLoaded', async function() {
     initializePendingChatContext();
@@ -1743,6 +1783,39 @@ async function loadMessages(channelIndex = activeChannelIndex) {
     }
 }
 
+async function refreshThreadStateSnapshot() {
+    if (!currentProfile) return;
+
+    try {
+        const response = await fetch('/api/messages?skip_mark_read=1');
+        const payload = await response.json();
+        if (!response.ok || Array.isArray(payload)) {
+            return;
+        }
+
+        channelMessages = payload.channel_messages || [];
+        dmMessages = payload.dm_messages || [];
+        applyUnreadState(payload);
+        syncDmTargetsFromMessages();
+        await loadDmTargets();
+        renderActiveMessages();
+        updateComposerState();
+    } catch (error) {
+        console.error('Error refreshing thread state:', error);
+    }
+}
+
+function scheduleThreadStateRefresh() {
+    if (pendingThreadStateRefresh !== null) {
+        return;
+    }
+
+    pendingThreadStateRefresh = window.setTimeout(async () => {
+        pendingThreadStateRefresh = null;
+        await refreshThreadStateSnapshot();
+    }, 120);
+}
+
 async function loadNodes() {
     if (!currentProfile) {
         meshNodes = [];
@@ -2119,6 +2192,53 @@ function getVisibleMessages() {
     return dmMessages.filter(message => Number(getPeerNodeNum(message)) === Number(activeDmTargetNodeNum));
 }
 
+function getActiveUnreadCount() {
+    if (activeChatTab === 'channel') {
+        const activeChannelNumber = getChannelNumberByIndex(activeChannelIndex);
+        return activeChannelNumber === null ? 0 : (unreadChannelMessageCounts.get(activeChannelNumber) || 0);
+    }
+    if (activeChatTab === 'dm') {
+        return activeDmTargetNodeNum ? (unreadDmMessageCounts.get(Number(activeDmTargetNodeNum)) || 0) : 0;
+    }
+    return 0;
+}
+
+function getUnreadDividerIndex(messages, unreadCount) {
+    let remainingUnread = Number(unreadCount) || 0;
+    if (remainingUnread <= 0) return -1;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if ((message?.direction || 'received') !== 'received') {
+            continue;
+        }
+        remainingUnread -= 1;
+        if (remainingUnread <= 0) {
+            return index;
+        }
+    }
+
+    return messages.length ? 0 : -1;
+}
+
+function renderMessagesWithUnreadDivider(messages, unreadCount) {
+    const dividerIndex = getUnreadDividerIndex(messages, unreadCount);
+    const rendered = [];
+
+    messages.forEach((message, index) => {
+        if (index === dividerIndex) {
+            rendered.push(
+                '<div class="message-unread-divider" aria-label="Unread messages">' +
+                '<span class="message-unread-divider__label">Unread</span>' +
+                '</div>'
+            );
+        }
+        rendered.push(renderMessageHtml(message));
+    });
+
+    return rendered.join('');
+}
+
 function renderActiveMessages() {
     const container = document.getElementById('messagesContainer');
     if (!container) return;
@@ -2151,13 +2271,14 @@ function renderActiveMessages() {
     }
 
     const visibleMessages = getVisibleMessages();
+    const unreadCount = getActiveUnreadCount();
     clearVisibleUnread();
     if (!visibleMessages.length) {
         container.innerHTML = `<div class="text-muted small">${activeChatTab === 'channel' ? 'No channel messages yet.' : 'No direct messages in this thread yet.'}</div>`;
         return;
     }
 
-    container.innerHTML = visibleMessages.map(renderMessageHtml).join('');
+    container.innerHTML = renderMessagesWithUnreadDivider(visibleMessages, unreadCount);
     container.scrollTop = container.scrollHeight;
 }
 
@@ -2220,17 +2341,28 @@ function formatThreadPreview(message, maxLength = 110, includeSenderShortName = 
     return truncateText(previewText || 'No messages yet.', maxLength);
 }
 
+function renderThreadUnreadBadge(count, ariaLabel) {
+    const unreadCount = Number(count) || 0;
+    if (unreadCount <= 0) return '';
+    return `<span class="chat-tab-badge thread-card__unread" aria-label="${escapeHtml(ariaLabel)}">${escapeHtml(String(unreadCount))}</span>`;
+}
+
 function renderChannelThreadCardHtml(thread) {
     const channel = thread.channel;
     const index = thread.index;
     const latestMessage = thread.latestMessage;
     const preview = formatThreadPreview(latestMessage, 110, true);
     const timestamp = latestMessage ? formatTimestamp(latestMessage.timestamp) : '';
+    const unreadCount = thread.channelNumber === null ? 0 : (unreadChannelMessageCounts.get(thread.channelNumber) || 0);
+    const unreadBadge = renderThreadUnreadBadge(unreadCount, `Unread messages in ${channel.name || `Channel ${index + 1}`}`);
     return `
         <div class="dm-thread-card channel-thread-card thread-card__shell" role="button" tabindex="0" data-channel-index="${Number(index)}">
             <div class="d-flex justify-content-between align-items-start gap-3">
                 <div class="flex-grow-1 text-start thread-card__content">
-                    <div class="fw-semibold text-primary">${escapeHtml(channel.name || `Channel ${index + 1}`)}</div>
+                    <div class="thread-card__headline">
+                        <div class="fw-semibold text-primary text-truncate">${escapeHtml(channel.name || `Channel ${index + 1}`)}</div>
+                        ${unreadBadge}
+                    </div>
                     <div class="small text-muted mt-1">${escapeHtml(preview)}</div>
                 </div>
                 <div class="thread-card__actions">
@@ -3020,12 +3152,17 @@ function renderDmThreadCardHtml(thread) {
     const latestMessage = thread.latestMessage;
     const preview = formatThreadPreview(latestMessage, 110, true);
     const timestamp = latestMessage ? formatTimestamp(latestMessage.timestamp) : '';
+    const unreadCount = unreadDmMessageCounts.get(Number(target.node_num)) || 0;
+    const unreadBadge = renderThreadUnreadBadge(unreadCount, `Unread messages from ${target.label || target.node_id || 'Unknown'}`);
 
     return `
         <div class="dm-thread-card thread-card__shell" role="button" tabindex="0" data-dm-node-num="${Number(target.node_num)}">
             <div class="d-flex justify-content-between align-items-start gap-3">
                 <div class="flex-grow-1 text-start thread-card__content">
-                    <div class="fw-semibold text-primary">${escapeHtml(target.label || target.node_id || 'Unknown')}</div>
+                    <div class="thread-card__headline">
+                        <div class="fw-semibold text-primary text-truncate">${escapeHtml(target.label || target.node_id || 'Unknown')}</div>
+                        ${unreadBadge}
+                    </div>
                     <div class="small text-muted mt-1">${escapeHtml(preview)}</div>
                 </div>
                 <div class="thread-card__actions">
@@ -3133,6 +3270,7 @@ function applyMessageUpdate(message) {
     }
     renderActiveMessages();
     updateComposerState();
+    scheduleThreadStateRefresh();
 }
 
 function addIncomingMessage(message) {
@@ -3173,6 +3311,7 @@ function addIncomingMessage(message) {
     }
     renderActiveMessages();
     updateComposerState();
+    scheduleThreadStateRefresh();
 }
 
 async function deleteChannelThread(channelIndex) {

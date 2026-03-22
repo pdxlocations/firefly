@@ -452,6 +452,18 @@ def _profiles_matching_packet(packet):
     return matched_profiles
 
 
+def _emit_message_to_profile_rooms(message, profiles):
+    if not message:
+        return
+    emitted_profile_ids = set()
+    for profile in profiles or []:
+        profile_id = profile.get("id") if isinstance(profile, dict) else None
+        if not profile_id or profile_id in emitted_profile_ids:
+            continue
+        socketio.emit("new_message", message, room=f"profile_{profile_id}")
+        emitted_profile_ids.add(profile_id)
+
+
 def _get_chat_payload(profile):
     effective_profile = _effective_profile(profile)
     channel_number = _profile_channel_num(effective_profile)
@@ -902,6 +914,7 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
             print(f"[MESSAGE] From node: {sender_num} ({sender_display})")
             try:
                 socketio.emit("new_message", message, room=room_name)
+                _emit_message_to_profile_rooms(message, _profiles_matching_packet(packet))
                 print(f"[MESSAGE] ✅ Successfully broadcasted message to room {room_name}")
             except Exception as e:
                 print(f"[MESSAGE] ❌ Error broadcasting to room {room_name}: {e}")
@@ -1496,6 +1509,8 @@ class UDPChatServer:
                     room_name = f"channel_{sender_channel}" if message_type == "channel" else f"profile_{sender_profile.get('id')}"
                     try:
                         socketio.emit("new_message", message, room=room_name)
+                        if message_type == "channel":
+                            _emit_message_to_profile_rooms(message, [sender_profile])
                         print(f"[SEND] ✅ Broadcasted sent {message_type} message to room {room_name}")
                     except Exception as e:
                         print(f"[SEND] ❌ Error broadcasting sent message to room {room_name}: {e}")
@@ -2000,6 +2015,7 @@ def get_messages():
         return jsonify({"channel_messages": messages, "dm_messages": []})
 
     requested_channel_index = request.args.get("channel_index")
+    skip_mark_read = str(request.args.get("skip_mark_read", "")).strip().lower() in {"1", "true", "yes"}
     if requested_channel_index is not None:
         try:
             requested_channel_index = int(requested_channel_index)
@@ -2012,7 +2028,7 @@ def get_messages():
 
     chat_payload = _get_chat_payload(current_profile)
     expected_channel = chat_payload["channel_number"]
-    if expected_channel is not None and chat_payload["channel_messages"]:
+    if not skip_mark_read and expected_channel is not None and chat_payload["channel_messages"]:
         db.update_profile_last_seen(current_profile["id"], expected_channel)
     chat_payload.update(_unread_state_for_profile(current_profile))
     return jsonify(chat_payload)

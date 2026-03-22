@@ -1232,6 +1232,60 @@ def logout():
     return redirect(url_for("index"))
 
 
+@app.route("/account/password", methods=["POST"])
+@login_required
+def update_account_password():
+    current_user = _get_session_user()
+    current_password = request.form.get("current_password") or ""
+    new_password = request.form.get("new_password") or ""
+    confirm_password = request.form.get("confirm_password") or ""
+
+    if not current_password or not new_password or not confirm_password:
+        flash("Current password, new password, and confirmation are required.", "error")
+        return redirect(url_for("index"))
+
+    if not check_password_hash(current_user["password_hash"], current_password):
+        flash("Current password is incorrect.", "error")
+        return redirect(url_for("index"))
+
+    if new_password != confirm_password:
+        flash("New password and confirmation do not match.", "error")
+        return redirect(url_for("index"))
+
+    password_hash = generate_password_hash(new_password)
+    if not db.update_user_password(current_user["id"], password_hash):
+        flash("Unable to update password.", "error")
+        return redirect(url_for("index"))
+
+    flash("Password updated.", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/account/delete", methods=["POST"])
+@login_required
+def delete_account():
+    current_user = _get_session_user()
+    current_password = request.form.get("current_password") or ""
+
+    if not current_password:
+        flash("Current password is required to delete your account.", "error")
+        return redirect(url_for("index"))
+
+    if not check_password_hash(current_user["password_hash"], current_password):
+        flash("Current password is incorrect.", "error")
+        return redirect(url_for("index"))
+
+    _unregister_current_session_transport()
+    _clear_session_user()
+
+    if not db.delete_user(current_user["id"]):
+        flash("Unable to delete account.", "error")
+        return redirect(url_for("index"))
+
+    flash("Account deleted.", "success")
+    return redirect(url_for("index"))
+
+
 @app.route("/")
 def index():
     """Main chat interface"""

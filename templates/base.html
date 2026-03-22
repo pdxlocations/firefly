@@ -119,6 +119,27 @@
             border: 1px solid rgba(31, 93, 150, 0.24);
         }
 
+        .account-trigger {
+            appearance: none;
+            border: none;
+            background: transparent;
+            color: inherit;
+            padding: 0;
+            margin: 0;
+            font: inherit;
+            text-align: inherit;
+        }
+
+        .account-trigger:hover {
+            opacity: 0.9;
+        }
+
+        .account-trigger:focus-visible {
+            outline: 2px solid var(--mudp-primary);
+            outline-offset: 3px;
+            border-radius: 0.4rem;
+        }
+
         @media (max-width: 767.98px) {
             body.mobile-fixed-nav-page > .navbar {
                 display: none;
@@ -552,6 +573,10 @@
             white-space: nowrap;
         }
 
+        .navbar-auth__username.account-trigger {
+            opacity: 0.88;
+        }
+
         .navbar-auth__form {
             display: flex;
             align-items: center;
@@ -687,7 +712,14 @@
 
             <div class="navbar-nav ms-auto navbar-auth">
                 {% if current_user %}
-                    <span class="nav-link navbar-auth__username">{{ current_user.username }}</span>
+                    <button
+                        class="nav-link navbar-auth__username account-trigger"
+                        type="button"
+                        data-bs-toggle="modal"
+                        data-bs-target="#accountModal"
+                    >
+                        {{ current_user.username }}
+                    </button>
                     <form method="post" action="{{ url_for('logout') }}" class="navbar-auth__form">
                         <button class="btn btn-outline-light btn-sm navbar-auth__button" type="submit">Logout</button>
                     </form>
@@ -713,6 +745,52 @@
 
         {% block content %}{% endblock %}
     </div>
+
+    {% if current_user %}
+        <div class="modal fade" id="accountModal" tabindex="-1" aria-labelledby="accountModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <div>
+                            <h5 class="modal-title mb-0" id="accountModalLabel">Account</h5>
+                            <div class="small text-muted">{{ current_user.username }}</div>
+                        </div>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form method="post" action="{{ url_for('update_account_password') }}" class="mb-4">
+                            <div class="fw-semibold mb-3">Change Password</div>
+                            <div class="mb-3">
+                                <label class="form-label" for="accountCurrentPassword">Current Password</label>
+                                <input class="form-control" id="accountCurrentPassword" name="current_password" type="password" autocomplete="current-password" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label" for="accountNewPassword">New Password</label>
+                                <input class="form-control" id="accountNewPassword" name="new_password" type="password" autocomplete="new-password" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label" for="accountConfirmPassword">Confirm New Password</label>
+                                <input class="form-control" id="accountConfirmPassword" name="confirm_password" type="password" autocomplete="new-password" required>
+                            </div>
+                            <button class="btn btn-primary" type="submit">Update Password</button>
+                        </form>
+
+                        <div class="border-top pt-4">
+                            <div class="fw-semibold text-danger mb-2">Delete Account</div>
+                            <p class="small text-muted mb-3">This removes your login and all profiles owned by this account.</p>
+                            <form method="post" action="{{ url_for('delete_account') }}" onsubmit="return confirm('Delete your account permanently?');">
+                                <div class="mb-3">
+                                    <label class="form-label" for="accountDeletePassword">Current Password</label>
+                                    <input class="form-control" id="accountDeletePassword" name="current_password" type="password" autocomplete="current-password" required>
+                                </div>
+                                <button class="btn btn-danger" type="submit">Delete Account</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/socket.io-client@{{ socketio_client_version }}/dist/socket.io.min.js"></script>

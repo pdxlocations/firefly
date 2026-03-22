@@ -67,7 +67,14 @@
                         </div>
                         {% if current_user %}
                             <div class="mobile-chat-auth">
-                                <span class="mobile-chat-auth__username">{{ current_user.username }}</span>
+                                <button
+                                    class="mobile-chat-auth__username account-trigger"
+                                    type="button"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#accountModal"
+                                >
+                                    {{ current_user.username }}
+                                </button>
                                 <form method="post" action="{{ url_for('logout') }}" class="mobile-chat-auth__form">
                                     <button class="btn btn-outline-primary btn-sm mobile-chat-auth__button" type="submit" aria-label="Logout" title="Logout">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

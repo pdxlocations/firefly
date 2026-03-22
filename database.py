@@ -315,6 +315,49 @@ class Database:
             cursor = conn.execute("SELECT COUNT(*) FROM users")
             return int(cursor.fetchone()[0] or 0)
 
+    def update_user_password(self, user_id: str, password_hash: str) -> bool:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE users
+                    SET password_hash = ?
+                    WHERE id = ?
+                    """,
+                    (password_hash, user_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error updating user password: {e}")
+            return False
+
+    def delete_user(self, user_id: str) -> bool:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
+                conn.execute(
+                    """
+                    DELETE FROM messages
+                    WHERE owner_profile_id IN (
+                        SELECT id FROM profiles WHERE user_id = ?
+                    )
+                    """,
+                    (user_id,),
+                )
+                cursor = conn.execute(
+                    """
+                    DELETE FROM users
+                    WHERE id = ?
+                    """,
+                    (user_id,),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error deleting user: {e}")
+            return False
+
     def claim_orphan_profiles(self, user_id: str) -> int:
         try:
             with sqlite3.connect(self.db_path) as conn:

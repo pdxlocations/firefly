@@ -3,14 +3,23 @@
 import json
 import math
 import os
+import random
 import sqlite3
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import meshdb
+from meshtastic import mesh_pb2, portnums_pb2
+from mudp import UDPPacketStream
+from mudp.encryption import decrypt_packet, encrypt_packet
+from mudp.reliability import build_routing_ack_data, compute_reply_hop_limit, register_pending_ack
+from mudp.singleton import conn
+from pubsub import pub
 from vnode import VirtualNode, parse_node_id
+from vnode.crypto import b64_decode, decrypt_dm, derive_public_key
 from encryption import generate_hash
 
 
@@ -79,6 +88,45 @@ def _profile_channel_hashes(profile: Dict) -> List[int]:
     return []
 
 
+def _resolve_profile_channel_for_packet(
+    profile: Dict, request_packet: Optional[mesh_pb2.MeshPacket] = None
+) -> tuple[Optional[str], Optional[str]]:
+    requested_channel = None
+    if request_packet is not None:
+        try:
+            requested_channel = int(getattr(request_packet, "channel", 0) or 0)
+        except Exception:
+            requested_channel = None
+
+    channels = profile.get("channels")
+    if isinstance(channels, list):
+        fallback = None
+        for channel in channels:
+            if not isinstance(channel, dict):
+                continue
+            channel_name = (channel.get("name") or "").strip()
+            channel_key = (channel.get("key") or "").strip()
+            if not channel_name or not channel_key:
+                continue
+            if fallback is None:
+                fallback = (channel_name, channel_key)
+            if requested_channel is None:
+                continue
+            try:
+                if generate_hash(channel_name, channel_key) == requested_channel:
+                    return channel_name, channel_key
+            except Exception:
+                continue
+        if fallback is not None:
+            return fallback
+
+    channel_name = (profile.get("channel") or "").strip()
+    channel_key = (profile.get("key") or "").strip()
+    if channel_name and channel_key:
+        return channel_name, channel_key
+    return None, None
+
+
 def ensure_profile_config(profile: Dict, mcast_group: str, mcast_port: int) -> Path:
     config_path = _config_path(profile)
     meshdb_root = _meshdb_root(profile)
@@ -131,16 +179,17 @@ def ensure_profile_config(profile: Dict, mcast_group: str, mcast_port: int) -> P
 
 
 class VirtualNodeManager:
-    def __init__(self, mcast_group: str, mcast_port: int):
+    def __init__(self, mcast_group: str, mcast_port: int, shared_receiver=None):
         self.mcast_group = mcast_group
         self.mcast_port = int(mcast_port)
         self.virtual_node: Optional[VirtualNode] = None
         self.current_profile_id: Optional[str] = None
+        self.shared_receiver = shared_receiver
 
     def start(self, profile: Dict) -> VirtualNode:
         self.stop()
         config_path = ensure_profile_config(profile, self.mcast_group, self.mcast_port)
-        vnode = VirtualNode(config_path)
+        vnode = FireflyVirtualNode(config_path, shared_receiver=self.shared_receiver)
         vnode.start()
         self.virtual_node = vnode
         self.current_profile_id = str(profile["id"])
@@ -171,6 +220,181 @@ class VirtualNodeManager:
         if self.virtual_node is None:
             raise RuntimeError("Virtual node is not running")
         return self.virtual_node.send_nodeinfo(int(destination))
+
+    def get_profile_public_key(self, profile: Dict) -> Optional[bytes]:
+        private_key_b64 = self._get_profile_private_key(profile)
+        if not private_key_b64:
+            return None
+        try:
+            return derive_public_key(b64_decode(private_key_b64))
+        except Exception:
+            return None
+
+    def decode_packet_for_profile(
+        self,
+        profile: Dict,
+        packet: mesh_pb2.MeshPacket,
+        *,
+        sender_public_key: Optional[bytes] = None,
+    ) -> Optional[mesh_pb2.MeshPacket]:
+        decoded_packet = mesh_pb2.MeshPacket()
+        decoded_packet.CopyFrom(packet)
+        if decoded_packet.HasField("decoded"):
+            return decoded_packet
+
+        if int(getattr(decoded_packet, "channel", 0) or 0) == 0:
+            private_key_b64 = self._get_profile_private_key(profile)
+            if not private_key_b64 or sender_public_key is None:
+                return None
+            try:
+                plaintext = decrypt_dm(
+                    receiver_private_key=b64_decode(private_key_b64),
+                    sender_public_key=sender_public_key,
+                    packet_id=int(getattr(decoded_packet, "id", 0) or 0),
+                    from_node=int(getattr(decoded_packet, "from", 0) or 0),
+                    payload=bytes(decoded_packet.encrypted),
+                )
+                data = mesh_pb2.Data()
+                data.ParseFromString(plaintext)
+                decoded_packet.decoded.CopyFrom(data)
+                decoded_packet.pki_encrypted = True
+                decoded_packet.public_key = sender_public_key
+                return decoded_packet
+            except Exception:
+                return None
+
+        channel_name, channel_key = _resolve_profile_channel_for_packet(profile, decoded_packet)
+        if not channel_name or not channel_key:
+            return None
+        try:
+            data = decrypt_packet(decoded_packet, channel_key)
+        except Exception:
+            data = None
+        if data is None:
+            return None
+        decoded_packet.decoded.CopyFrom(data)
+        return decoded_packet
+
+    def send_ack_for_profile(self, profile: Dict, request_packet: mesh_pb2.MeshPacket) -> int:
+        channel_name, channel_key = _resolve_profile_channel_for_packet(profile, request_packet)
+        if not channel_name or not channel_key:
+            raise ValueError("Profile is missing a usable channel configuration")
+
+        profile_node_num = owner_node_num(profile)
+        destination = int(getattr(request_packet, "from", 0) or 0)
+        if destination <= 0:
+            raise ValueError("Request packet is missing a valid sender")
+
+        ack_data = build_routing_ack_data(
+            request_id=int(getattr(request_packet, "id", 0) or 0),
+            error_reason=mesh_pb2.Routing.Error.NONE,
+        )
+
+        packet = mesh_pb2.MeshPacket()
+        packet.id = random.getrandbits(32)
+        setattr(packet, "from", profile_node_num)
+        packet.to = destination
+        packet.want_ack = bool(
+            getattr(request_packet, "want_ack", False)
+            and request_packet.HasField("decoded")
+            and int(request_packet.decoded.portnum or 0) == int(portnums_pb2.PortNum.TEXT_MESSAGE_APP)
+            and int(getattr(request_packet, "to", BROADCAST_NODE_NUM) or BROADCAST_NODE_NUM) == profile_node_num
+        )
+        packet.channel = generate_hash(channel_name, channel_key)
+
+        hop_limit = int(compute_reply_hop_limit(request_packet))
+        packet.hop_limit = hop_limit
+        packet.hop_start = hop_limit
+        packet.priority = mesh_pb2.MeshPacket.Priority.ACK
+        packet.encrypted = encrypt_packet(channel_name, channel_key, packet, ack_data)
+
+        if getattr(conn, "socket", None) is None:
+            conn.setup_multicast(self.mcast_group, int(self.mcast_port))
+
+        raw_packet = packet.SerializeToString()
+        register_pending_ack(packet, raw_packet)
+        conn.sendto(raw_packet, (conn.host, conn.port))
+        return int(packet.id)
+
+    def _get_profile_private_key(self, profile: Dict) -> Optional[str]:
+        config_path = ensure_profile_config(profile, self.mcast_group, self.mcast_port)
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        private_key = str(payload.get("security", {}).get("private_key", "")).strip()
+        return private_key or None
+
+
+class SharedPacketReceiver:
+    def __init__(self, mcast_group: str, mcast_port: int):
+        self.mcast_group = mcast_group
+        self.mcast_port = int(mcast_port)
+        self.stream: Optional[UDPPacketStream] = None
+
+    @property
+    def running(self) -> bool:
+        return self.stream is not None
+
+    def start(self) -> None:
+        if self.stream is not None:
+            return
+        stream = UDPPacketStream(
+            self.mcast_group,
+            self.mcast_port,
+            key=None,
+            parse_payload=False,
+        )
+        stream.start()
+        self.stream = stream
+
+    def stop(self) -> None:
+        if self.stream is None:
+            return
+        self.stream.stop()
+        self.stream = None
+
+
+class FireflyVirtualNode(VirtualNode):
+    def __init__(self, config_path, *, shared_receiver: Optional[SharedPacketReceiver] = None) -> None:
+        super().__init__(config_path)
+        self._shared_receiver = shared_receiver
+        self._firefly_started = False
+
+    def start(self) -> None:
+        if self._firefly_started:
+            return
+        self._stop.clear()
+        pub.subscribe(self._handle_raw_packet, self.RAW_PACKET_TOPIC)
+        pub.subscribe(self._handle_unique_packet, self.PACKET_TOPIC)
+        pub.subscribe(self._handle_compat_response_packet, self.RECEIVE_TOPIC)
+        pub.subscribe(self._handle_compat_ack, self.ACK_TOPIC)
+        pub.subscribe(self._handle_compat_nak, self.NAK_TOPIC)
+
+        if self._shared_receiver is None or not self._shared_receiver.running:
+            self.stream = UDPPacketStream(
+                self.config.udp.mcast_group,
+                int(self.config.udp.mcast_port),
+                key=self.config.channel.psk,
+                parse_payload=False,
+            )
+            self.stream.start()
+
+        if self.config.broadcasts.send_startup_nodeinfo:
+            self.send_nodeinfo()
+        self._broadcast_thread = threading.Thread(
+            target=self._broadcast_loop,
+            name="vnode-nodeinfo-broadcast",
+            daemon=True,
+        )
+        self._broadcast_thread.start()
+        self._firefly_started = True
+
+    def stop(self) -> None:
+        if not self._firefly_started and self.stream is None:
+            return
+        super().stop()
+        self._firefly_started = False
 
 
 class MeshNodeStore:

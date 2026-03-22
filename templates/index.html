@@ -64,7 +64,7 @@
                             <span class="desktop-status-light is-idle" id="desktopSocketLight" title="WebSocket"></span>
                             <span class="desktop-status-light is-warning" id="desktopInterfaceLight" title="Mesh interface"></span>
                         </div>
-                        <button id="desktopConnectBtn" class="btn btn-sm btn-outline-primary" type="button">Connect</button>
+                        <button id="desktopConnectBtn" class="btn btn-sm btn-outline-primary" type="button">Reconnect</button>
                     </div>
                 </div>
                 <div class="mobile-chat-header d-md-none border-bottom px-3 py-2">
@@ -106,7 +106,7 @@
                                 <span class="mobile-status-light is-idle" id="mobileSocketLight" title="WebSocket"></span>
                                 <span class="mobile-status-light is-warning" id="mobileInterfaceLight" title="Mesh interface"></span>
                             </div>
-                            <button id="mobileConnectBtn" class="btn btn-sm btn-outline-primary" type="button">Connect</button>
+                            <button id="mobileConnectBtn" class="btn btn-sm btn-outline-primary" type="button">Reconnect</button>
                         </div>
                     </div>
                 </div>
@@ -1463,6 +1463,28 @@ function resetUnreadState() {
     updateNavigationBadges();
 }
 
+function applyUnreadState(payload) {
+    resetUnreadState();
+
+    const channelCounts = payload?.unread_channel_counts || {};
+    Object.entries(channelCounts).forEach(([channelNumber, count]) => {
+        const normalizedChannel = normalizeNumber(channelNumber);
+        if (normalizedChannel !== null && Number(count) > 0) {
+            unreadChannelMessageCounts.set(normalizedChannel, Number(count));
+        }
+    });
+
+    const dmCounts = payload?.unread_dm_counts || {};
+    Object.entries(dmCounts).forEach(([peerNodeNum, count]) => {
+        const normalizedPeer = normalizeNumber(peerNodeNum);
+        if (normalizedPeer !== null && Number(count) > 0) {
+            unreadDmMessageCounts.set(normalizedPeer, Number(count));
+        }
+    });
+
+    updateNavigationBadges();
+}
+
 function isViewingChannelThread(channelNumber) {
     const activeChannelNumber = getChannelNumberByIndex(activeChannelIndex);
     return activeChatTab === 'channel'
@@ -1487,6 +1509,40 @@ function clearVisibleUnread() {
 
     if (activeChatTab === 'dm' && activeDmTargetNodeNum) {
         clearUnreadCount(unreadDmMessageCounts, activeDmTargetNodeNum);
+    }
+}
+
+async function markCurrentChannelRead(channelIndex = activeChannelIndex) {
+    if (!currentProfile || channelIndex === null || channelIndex === undefined) return;
+    try {
+        const response = await fetch('/api/channel-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel_index: channelIndex }),
+        });
+        const payload = await response.json();
+        if (response.ok) {
+            applyUnreadState(payload);
+        }
+    } catch (error) {
+        console.error('Error marking channel read:', error);
+    }
+}
+
+async function markDmThreadRead(peerNodeNum = activeDmTargetNodeNum) {
+    if (!currentProfile || !peerNodeNum) return;
+    try {
+        const response = await fetch('/api/dm-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ peer_node_num: peerNodeNum }),
+        });
+        const payload = await response.json();
+        if (response.ok) {
+            applyUnreadState(payload);
+        }
+    } catch (error) {
+        console.error('Error marking DM read:', error);
     }
 }
 
@@ -1561,7 +1617,7 @@ async function loadCurrentProfileAndStatus() {
             updateInterfaceStatus('bg-warning', 'Not Started');
         }
 
-        resetUnreadState();
+        applyUnreadState(profile);
         updateProfileBanner(profile);
         syncProfileSelectors();
     } catch (error) {
@@ -1655,6 +1711,7 @@ async function loadMessages(channelIndex = activeChannelIndex) {
             if (Number.isInteger(payload.selected_channel_index)) {
                 activeChannelIndex = payload.selected_channel_index;
             }
+            applyUnreadState(payload);
         }
         syncDmTargetsFromMessages();
     } catch (err) {
@@ -1688,6 +1745,14 @@ async function loadDmTargets() {
         return;
     }
 
+    const fallbackTargets = [];
+    dmMessages.forEach(message => {
+        const fallbackTarget = createDmTargetFromMessage(message);
+        if (fallbackTarget) {
+            fallbackTargets.push(fallbackTarget);
+        }
+    });
+
     const requestedNodeNums = new Set(
         dmMessages
             .map(message => getPeerNodeNum(message))
@@ -1695,7 +1760,14 @@ async function loadDmTargets() {
             .map(nodeNum => Number(nodeNum))
     );
     if (pendingDmTargetNodeNum) {
-        requestedNodeNums.add(Number(pendingDmTargetNodeNum));
+        const pendingNodeNum = Number(pendingDmTargetNodeNum);
+        requestedNodeNums.add(pendingNodeNum);
+        fallbackTargets.push({
+            node_num: pendingNodeNum,
+            node_id: `!${pendingNodeNum.toString(16).padStart(8, '0')}`,
+            label: `!${pendingNodeNum.toString(16).padStart(8, '0')}`,
+            short_name: '',
+        });
     }
 
     const loadedTargets = await Promise.all(
@@ -1719,7 +1791,8 @@ async function loadDmTargets() {
         })
     );
 
-    dmTargets = loadedTargets.filter(target => target !== null);
+    dmTargets = fallbackTargets;
+    loadedTargets.filter(target => target !== null).forEach(target => upsertDmTarget(target));
     syncDmTargetsFromMessages();
 }
 
@@ -1867,6 +1940,9 @@ function setActiveDmTarget(nodeNum, updateUrl = true) {
     activeDmTargetNodeNum = nodeNum ? Number(nodeNum) : null;
     updateComposerState();
     renderActiveMessages();
+    if (activeDmTargetNodeNum) {
+        void markDmThreadRead(activeDmTargetNodeNum);
+    }
     if (updateUrl) updateChatUrl();
 }
 
@@ -1922,6 +1998,7 @@ async function setActiveChannel(channelIndex, updateUrl = true) {
         } else if (data.interface_status === 'failed') {
             updateInterfaceStatus('bg-danger', 'Failed to Start');
         }
+        applyUnreadState(data);
     } catch (error) {
         console.error('Error selecting channel:', error);
         alert('Error selecting channel: ' + error.message);
@@ -3038,16 +3115,24 @@ function addIncomingMessage(message) {
         void loadDmTargets();
         if (inserted && !isOwnMessage) {
             const peerNodeNum = getPeerNodeNum(message);
-            if (peerNodeNum && !isViewingDmThread(peerNodeNum)) {
-                incrementUnreadCount(unreadDmMessageCounts, peerNodeNum);
+            if (peerNodeNum) {
+                if (isViewingDmThread(peerNodeNum)) {
+                    void markDmThreadRead(peerNodeNum);
+                } else {
+                    incrementUnreadCount(unreadDmMessageCounts, peerNodeNum);
+                }
             }
         }
     } else {
         const inserted = upsertMessage(channelMessages, message);
         if (inserted && !isOwnMessage) {
             const channelNumber = normalizeNumber(message.channel);
-            if (channelNumber !== null && !isViewingChannelThread(channelNumber)) {
-                incrementUnreadCount(unreadChannelMessageCounts, channelNumber);
+            if (channelNumber !== null) {
+                if (isViewingChannelThread(channelNumber)) {
+                    void markCurrentChannelRead(activeChannelIndex);
+                } else {
+                    incrementUnreadCount(unreadChannelMessageCounts, channelNumber);
+                }
             }
         }
     }
@@ -3145,7 +3230,7 @@ async function setProfile(event) {
     if (!setBtn) return;
 
     setBtn.disabled = true;
-    setBtn.textContent = isConnectButton ? 'Connecting...' : 'Setting Profile...';
+    setBtn.textContent = isConnectButton ? 'Reconnecting...' : 'Setting Profile...';
 
     try {
         const response = await fetch('/api/current-profile', {
@@ -3167,7 +3252,7 @@ async function setProfile(event) {
         activeChannelIndex = Number.isInteger(data.selected_channel_index) ? data.selected_channel_index : 0;
         activeDmTargetNodeNum = null;
         replyingToPacketId = null;
-        resetUnreadState();
+        applyUnreadState(data);
 
         if (currentProfile) {
             currentChannelRoom = data.channel_number ?? null;
@@ -3225,6 +3310,66 @@ async function setProfile(event) {
         } else {
             updateConnectButtons();
         }
+    }
+}
+
+async function reconnectProfile(button) {
+    if (!button || !currentProfile) return;
+
+    button.disabled = true;
+    button.textContent = 'Reconnecting...';
+
+    try {
+        if (socket) {
+            try {
+                socket.disconnect();
+                socket.connect();
+            } catch (socketError) {
+                console.error('Error reconnecting socket:', socketError);
+            }
+        }
+
+        const response = await fetch('/api/reconnect-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}`);
+        }
+
+        currentProfile = data.profile || currentProfile;
+        channelMessages = data.channel_messages || channelMessages;
+        dmMessages = data.dm_messages || dmMessages;
+        if (Number.isInteger(data.selected_channel_index)) {
+            activeChannelIndex = data.selected_channel_index;
+        }
+        applyUnreadState(data);
+        syncProfileSelectors();
+        await loadDmTargets();
+        await loadNodes();
+
+        if (data.interface_status === 'started') {
+            updateInterfaceStatus('bg-success', 'Connected');
+        } else if (data.interface_status === 'conflict') {
+            updateInterfaceStatus('bg-warning', 'Profile Conflict');
+            if (data.warning) alert('Warning: ' + data.warning);
+        } else if (data.interface_status === 'failed') {
+            updateInterfaceStatus('bg-danger', 'Failed to Start');
+            if (data.warning) alert('Warning: ' + data.warning);
+        } else {
+            updateInterfaceStatus('bg-success', 'Connected');
+        }
+
+        renderActiveMessages();
+        updateComposerState();
+    } catch (error) {
+        console.error('Error reconnecting profile:', error);
+        updateInterfaceStatus('bg-danger', 'Failed to Start');
+        alert('Error reconnecting profile: ' + error.message);
+    } finally {
+        button.disabled = false;
+        updateConnectButtons();
     }
 }
 
@@ -3449,22 +3594,22 @@ function updateConnectButton(buttonId, noProfileText) {
     }
 
     if (currentInterfaceStatusClass === 'bg-success') {
-        btn.textContent = 'Connected';
+        btn.textContent = 'Reconnect';
         btn.classList.add('is-connected');
         return;
     }
 
     if (currentInterfaceStatusClass === 'bg-danger') {
-        btn.textContent = 'Retry';
+        btn.textContent = 'Reconnect';
         return;
     }
 
-    btn.textContent = 'Connect';
+    btn.textContent = 'Reconnect';
 }
 
 function updateConnectButtons() {
     updateConnectButton('mobileConnectBtn', 'Select');
-    updateConnectButton('desktopConnectBtn', 'Connect');
+    updateConnectButton('desktopConnectBtn', 'Select');
 }
 
 function handleMobileConnectClick() {
@@ -3475,7 +3620,7 @@ function handleMobileConnectClick() {
         }
         return;
     }
-    setProfile({ target: document.getElementById('mobileConnectBtn') });
+    reconnectProfile(document.getElementById('mobileConnectBtn'));
 }
 
 function handleDesktopConnectClick() {
@@ -3483,7 +3628,7 @@ function handleDesktopConnectClick() {
         openProfileSelector();
         return;
     }
-    setProfile({ target: document.getElementById('desktopConnectBtn') });
+    reconnectProfile(document.getElementById('desktopConnectBtn'));
 }
 
 function getPeerLabel(message, peerNodeNum) {

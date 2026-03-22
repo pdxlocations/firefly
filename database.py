@@ -2,7 +2,7 @@
 
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 import os
 
@@ -102,6 +102,16 @@ class Database:
                     FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE
                 )
             """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS profile_dm_last_seen (
+                    profile_id TEXT NOT NULL,
+                    peer_node_num INTEGER NOT NULL,
+                    last_seen_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (profile_id, peer_node_num),
+                    FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE
+                )
+            """)
             
             # Add hop_limit column to existing profiles table if it doesn't exist
             try:
@@ -150,6 +160,7 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages (timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_timestamp ON messages (channel, timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_last_seen ON profile_last_seen (profile_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_dm_last_seen ON profile_dm_last_seen (profile_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles (user_id)")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users (username COLLATE NOCASE)")
             try:
@@ -183,6 +194,14 @@ class Database:
             normalized.append({"name": legacy_channel, "key": legacy_key})
 
         return normalized
+
+    @staticmethod
+    def _current_timestamp() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    @staticmethod
+    def _sqlite_ts_expr(column_name: str) -> str:
+        return f"julianday(replace(substr({column_name}, 1, 19), 'T', ' '))"
 
     def migrate_profiles_from_json(self, json_file: str = "profiles.json"):
         """Migrate existing profiles from JSON file to database (only if not already migrated)"""
@@ -471,6 +490,43 @@ class Database:
                     'updated_at': row['updated_at']
                 }
             return None
+
+    def get_profile_by_node_num(self, node_num: int) -> Optional[Dict]:
+        """Look up a profile by its Meshtastic node number."""
+        try:
+            normalized_node_id = f"!{int(node_num):08x}"
+        except (TypeError, ValueError):
+            return None
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT id, user_id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
+                       created_at, updated_at
+                FROM profiles
+                WHERE lower(node_id) = lower(?)
+                LIMIT 1
+            """, (normalized_node_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            channels = self._normalize_channels(row["channels_json"], row["channel"], row["key"])
+            primary_channel = channels[0]["name"] if channels else row["channel"]
+            primary_key = channels[0]["key"] if channels else row["key"]
+            return {
+                'id': row['id'],
+                'user_id': row['user_id'],
+                'node_id': row['node_id'],
+                'long_name': row['long_name'],
+                'short_name': row['short_name'],
+                'channel': primary_channel,
+                'key': primary_key,
+                'channels': channels,
+                'hop_limit': row['hop_limit'] or 3,
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at']
+            }
 
     def create_profile(self, profile_id: str, user_id: str, node_id: str, long_name: str,
                       short_name: str, channels: List[Dict], hop_limit: int = 3) -> bool:
@@ -1008,12 +1064,13 @@ class Database:
         """Update the last seen timestamp for a profile+channel combination"""
         try:
             with sqlite3.connect(self.db_path) as conn:
+                now_timestamp = self._current_timestamp()
                 # Update or insert last seen record
                 conn.execute("""
                     INSERT OR REPLACE INTO profile_last_seen 
                     (profile_id, channel, last_seen_timestamp)
-                    VALUES (?, ?, CURRENT_TIMESTAMP)
-                """, (profile_id, channel))
+                    VALUES (?, ?, ?)
+                """, (profile_id, channel, now_timestamp))
                 conn.commit()
                 return True
         except Exception as e:
@@ -1041,9 +1098,15 @@ class Database:
                            m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
                     FROM messages m
                     LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
-                    WHERE m.channel = ? AND COALESCE(m.message_type, 'channel') = 'channel' AND m.timestamp > ?
+                    WHERE m.channel = ?
+                      AND COALESCE(m.message_type, 'channel') = 'channel'
+                      AND COALESCE(m.direction, 'received') = 'received'
+                      AND {message_ts_expr} > {seen_ts_expr}
                     ORDER BY m.timestamp DESC LIMIT ?
-                """, (channel, last_seen_row['last_seen_timestamp'], limit))
+                """.format(
+                    message_ts_expr=self._sqlite_ts_expr("m.timestamp"),
+                    seen_ts_expr=self._sqlite_ts_expr("?"),
+                ), (channel, last_seen_row['last_seen_timestamp'], limit))
             else:
                 # No last seen timestamp - return all messages (but limit to prevent overload)
                 cursor = conn.execute("""
@@ -1053,11 +1116,111 @@ class Database:
                            m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
                     FROM messages m
                     LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
-                    WHERE m.channel = ? AND COALESCE(m.message_type, 'channel') = 'channel'
+                    WHERE m.channel = ?
+                      AND COALESCE(m.message_type, 'channel') = 'channel'
+                      AND COALESCE(m.direction, 'received') = 'received'
                     ORDER BY m.timestamp DESC LIMIT ?
                 """, (channel, limit))
 
             return self._serialize_messages(cursor)
+
+    def get_unread_channel_counts(self, profile_id: str, channels: List[int]) -> Dict[int, int]:
+        """Count unread channel messages per channel for a profile."""
+        channel_counts: Dict[int, int] = {}
+        normalized_channels = []
+        for channel in channels or []:
+            try:
+                normalized_channels.append(int(channel))
+            except (TypeError, ValueError):
+                continue
+
+        if not normalized_channels:
+            return channel_counts
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            for channel in normalized_channels:
+                cursor = conn.execute("""
+                    SELECT last_seen_timestamp
+                    FROM profile_last_seen
+                    WHERE profile_id = ? AND channel = ?
+                """, (profile_id, channel))
+                last_seen_row = cursor.fetchone()
+
+                if last_seen_row and last_seen_row["last_seen_timestamp"]:
+                    cursor = conn.execute("""
+                        SELECT COUNT(*) AS unread_count
+                        FROM messages
+                        WHERE channel = ?
+                          AND COALESCE(message_type, 'channel') = 'channel'
+                          AND COALESCE(direction, 'received') = 'received'
+                          AND {message_ts_expr} > {seen_ts_expr}
+                    """.format(
+                        message_ts_expr=self._sqlite_ts_expr("timestamp"),
+                        seen_ts_expr=self._sqlite_ts_expr("?"),
+                    ), (channel, last_seen_row["last_seen_timestamp"]))
+                else:
+                    cursor = conn.execute("""
+                        SELECT COUNT(*) AS unread_count
+                        FROM messages
+                        WHERE channel = ?
+                          AND COALESCE(message_type, 'channel') = 'channel'
+                          AND COALESCE(direction, 'received') = 'received'
+                    """, (channel,))
+
+                row = cursor.fetchone()
+                unread_count = int((row["unread_count"] if row else 0) or 0)
+                if unread_count > 0:
+                    channel_counts[channel] = unread_count
+
+        return channel_counts
+
+    def mark_dm_thread_read(self, profile_id: str, peer_node_num: int) -> bool:
+        """Update the last seen timestamp for a DM thread."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                now_timestamp = self._current_timestamp()
+                conn.execute("""
+                    INSERT OR REPLACE INTO profile_dm_last_seen
+                    (profile_id, peer_node_num, last_seen_timestamp)
+                    VALUES (?, ?, ?)
+                """, (profile_id, int(peer_node_num), now_timestamp))
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"Error updating DM last seen: {e}")
+            return False
+
+    def get_unread_dm_counts(self, profile_id: str) -> Dict[int, int]:
+        """Count unread received DMs per peer for a profile."""
+        unread_counts: Dict[int, int] = {}
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT m.sender_num AS peer_node_num, COUNT(*) AS unread_count
+                FROM messages m
+                LEFT JOIN profile_dm_last_seen d
+                  ON d.profile_id = m.owner_profile_id
+                 AND d.peer_node_num = m.sender_num
+                WHERE m.owner_profile_id = ?
+                  AND COALESCE(m.message_type, 'channel') = 'dm'
+                  AND COALESCE(m.direction, 'received') = 'received'
+                  AND m.sender_num IS NOT NULL
+                  AND (
+                    d.last_seen_timestamp IS NULL
+                    OR {message_ts_expr} > {seen_ts_expr}
+                  )
+                GROUP BY m.sender_num
+            """.format(
+                message_ts_expr=self._sqlite_ts_expr("m.timestamp"),
+                seen_ts_expr=self._sqlite_ts_expr("d.last_seen_timestamp"),
+            ), (profile_id,))
+            for row in cursor:
+                peer_node_num = row["peer_node_num"]
+                unread_count = int((row["unread_count"] or 0))
+                if peer_node_num is not None and unread_count > 0:
+                    unread_counts[int(peer_node_num)] = unread_count
+        return unread_counts
 
     def _serialize_messages(self, cursor) -> List[Dict]:
         messages = []

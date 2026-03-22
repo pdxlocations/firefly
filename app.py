@@ -20,7 +20,8 @@ from mudp import node
 from mudp.reliability import is_ack, is_nak, parse_routing
 from database import Database
 from encryption import generate_hash
-from mesh_runtime import MeshNodeStore, VirtualNodeManager, count_nodes_for_profiles
+from mesh_runtime import MeshNodeStore, SharedPacketReceiver, VirtualNodeManager, count_nodes_for_profiles
+from vnode.crypto import b64_decode
 
 
 MCAST_GRP = os.getenv("FIREFLY_MCAST_GRP", "224.0.0.69")
@@ -386,7 +387,9 @@ def _apply_ack_update(packet_id, ack_status, ack_error=None):
         _emit_message_update(message)
 
 
-virtual_node_manager = VirtualNodeManager(MCAST_GRP, MCAST_PORT)
+shared_packet_receiver = SharedPacketReceiver(MCAST_GRP, MCAST_PORT)
+virtual_node_manager = VirtualNodeManager(MCAST_GRP, MCAST_PORT, shared_receiver=shared_packet_receiver)
+shared_packet_receiver.start()
 
 
 def _get_mesh_store(profile=None):
@@ -429,6 +432,176 @@ def _get_chat_payload(profile):
         "dm_messages": dm_messages,
         "channel_number": channel_number,
         "selected_channel_index": effective_profile.get("selected_channel_index", 0) if effective_profile else 0,
+    }
+
+
+def _interface_status_for_profile(profile) -> str:
+    if shared_packet_receiver.running:
+        return "started"
+    effective_profile = _effective_profile(profile)
+    if not effective_profile:
+        return "stopped"
+    profile_channel_hash = generate_hash(effective_profile.get("channel", ""), effective_profile.get("key", ""))
+    if (
+        udp_server.running
+        and udp_server.current_profile_id == effective_profile.get("id")
+        and udp_server.current_channel_hash == profile_channel_hash
+    ):
+        return "started"
+    return "stopped"
+
+
+def _dm_owner_profile_for_packet(packet: mesh_pb2.MeshPacket):
+    """Resolve which local profile should own a received DM."""
+    target_node_num = getattr(packet, "to", None)
+    if target_node_num in (None, 0, BROADCAST_NODE_NUM):
+        return None
+    return db.get_profile_by_node_num(target_node_num)
+
+
+def _ensure_local_dm_ack(packet: mesh_pb2.MeshPacket, owner_profile) -> None:
+    if not owner_profile:
+        return
+    if not getattr(packet, "want_ack", False):
+        return
+    if is_ack(packet) or is_nak(packet):
+        return
+
+    active_profile = udp_server.get_active_profile()
+    if active_profile and str(active_profile.get("id")) == str(owner_profile.get("id")):
+        return
+
+    try:
+        ack_packet_id = udp_server.send_ack_for_profile(owner_profile, packet)
+        print(
+            f"[ACK] Sent routing ACK for local DM packet {getattr(packet, 'id', None)} "
+            f"as profile {owner_profile.get('id')} (ack packet {ack_packet_id})"
+        )
+    except Exception as e:
+        print(
+            f"[ACK] Failed to send routing ACK for local DM packet {getattr(packet, 'id', None)} "
+            f"as profile {owner_profile.get('id')}: {e}"
+        )
+
+
+def _coerce_public_key_bytes(value):
+    if not value:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, str):
+        try:
+            return b64_decode(value.strip())
+        except Exception:
+            return None
+    return None
+
+
+def _sender_public_key_for_local_packet(owner_profile, sender_num):
+    if sender_num in (None, 0):
+        return None
+
+    local_sender_profile = db.get_profile_by_node_num(sender_num)
+    if local_sender_profile:
+        local_public_key = virtual_node_manager.get_profile_public_key(local_sender_profile)
+        if local_public_key is not None:
+            return local_public_key
+
+    mesh_store = _get_mesh_store(owner_profile) if owner_profile else None
+    if not mesh_store:
+        return None
+
+    sender_node = mesh_store.get_node(sender_num)
+    if not sender_node:
+        return None
+    return _coerce_public_key_bytes(sender_node.get("public_key"))
+
+
+def _maybe_ack_local_direct_packet(packet: mesh_pb2.MeshPacket) -> None:
+    owner_profile = _dm_owner_profile_for_packet(packet)
+    if not owner_profile:
+        return
+
+    pkt_id = int(getattr(packet, "id", 0) or 0)
+    if pkt_id > 0 and _already_seen(("local-direct-ack", owner_profile.get("id"), pkt_id)):
+        return
+
+    if packet.HasField("decoded"):
+        if is_ack(packet) or is_nak(packet):
+            return
+        if int(getattr(packet.decoded, "portnum", 0) or 0) not in (
+            int(portnums_pb2.PortNum.TEXT_MESSAGE_APP),
+            int(portnums_pb2.PortNum.TEXT_MESSAGE_COMPRESSED_APP),
+        ):
+            return
+
+    _ensure_local_dm_ack(packet, owner_profile)
+
+
+def _decode_local_direct_packet(packet: mesh_pb2.MeshPacket):
+    owner_profile = _dm_owner_profile_for_packet(packet)
+    if not owner_profile:
+        return None, None
+    if packet.HasField("decoded"):
+        return packet, owner_profile
+
+    sender_public_key = _sender_public_key_for_local_packet(
+        owner_profile,
+        getattr(packet, "from", None),
+    )
+    decoded_packet = udp_server.decode_packet_for_profile(
+        owner_profile,
+        packet,
+        sender_public_key=sender_public_key,
+    )
+    return decoded_packet, owner_profile
+
+
+def _decode_packet_for_service(packet: mesh_pb2.MeshPacket):
+    if packet.HasField("decoded"):
+        return packet
+
+    decoded_packet, owner_profile = _decode_local_direct_packet(packet)
+    if decoded_packet is not None:
+        return decoded_packet
+
+    packet_channel = int(getattr(packet, "channel", 0) or 0)
+    if packet_channel == 0:
+        return None
+
+    try:
+        all_profiles = db.get_all_profiles()
+    except Exception:
+        return None
+
+    for profile in all_profiles.values():
+        for channel in _profile_channels(profile):
+            try:
+                if generate_hash(channel["name"], channel["key"]) != packet_channel:
+                    continue
+            except Exception:
+                continue
+            decoded_packet = udp_server.decode_packet_for_profile(profile, packet)
+            if decoded_packet is not None:
+                return decoded_packet
+    return None
+
+
+def _unread_state_for_profile(profile):
+    effective_profile = _effective_profile(profile)
+    if not effective_profile:
+        return {"unread_channel_counts": {}, "unread_dm_counts": {}}
+
+    channel_numbers = [
+        channel.get("channel_number")
+        for channel in _profile_channels_with_numbers(effective_profile)
+        if channel.get("channel_number") is not None
+    ]
+    unread_channel_counts = db.get_unread_channel_counts(effective_profile["id"], channel_numbers)
+    unread_dm_counts = db.get_unread_dm_counts(effective_profile["id"])
+    return {
+        "unread_channel_counts": unread_channel_counts,
+        "unread_dm_counts": unread_dm_counts,
     }
 
 
@@ -535,8 +708,11 @@ def _print_packet_with_decoded_payload(packet: mesh_pb2.MeshPacket):
 
 
 def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
+    supplemental_packet = _decode_packet_for_service(packet)
+
     print(f"\n[RECV] Packet received from {addr}")
-    _print_packet_with_decoded_payload(packet)
+    _maybe_ack_local_direct_packet(packet)
+    _print_packet_with_decoded_payload(supplemental_packet or packet)
 
     active_profile = udp_server.get_active_profile()
     mesh_store = _get_mesh_store(active_profile) if active_profile else None
@@ -545,6 +721,18 @@ def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
             mesh_store.record_packet(packet)
         except Exception as e:
             print(f"[MESHDB] Failed to record packet: {e}")
+
+    if supplemental_packet is not None and supplemental_packet.HasField("decoded"):
+        supplemental_portnum = int(getattr(supplemental_packet.decoded, "portnum", 0) or 0)
+        if supplemental_portnum == int(portnums_pb2.PortNum.TEXT_MESSAGE_APP):
+            on_text_message(supplemental_packet, addr=addr)
+        elif supplemental_portnum == int(portnums_pb2.PortNum.ROUTING_APP):
+            routing = parse_routing(supplemental_packet)
+            if routing is not None:
+                if is_ack(supplemental_packet):
+                    on_ack_message(supplemental_packet, routing=routing, addr=addr, pending=None)
+                elif is_nak(supplemental_packet):
+                    on_nak_message(supplemental_packet, routing=routing, addr=addr, pending=None)
 
 
 def _my_node_num():
@@ -590,12 +778,13 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
     try:
         sender_num = getattr(packet, "from", None)
         active_profile = udp_server.get_active_profile()
-        message_type = "dm" if _is_direct_message(packet, active_profile) else "channel"
+        dm_owner_profile = _dm_owner_profile_for_packet(packet)
+        message_type = "dm" if dm_owner_profile else "channel"
         target_node_num = getattr(packet, "to", None) if message_type == "dm" else None
         if target_node_num in (0, BROADCAST_NODE_NUM):
             target_node_num = None
         reply_packet_id = getattr(packet.decoded, "reply_id", None) or None
-        owner_profile_id = active_profile.get("id") if (active_profile and message_type == "dm") else None
+        owner_profile_id = dm_owner_profile.get("id") if dm_owner_profile else None
         message_channel = getattr(packet, "channel", None)
         if message_channel is None and active_profile:
             message_channel = _profile_channel_num(active_profile)
@@ -643,7 +832,7 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
         }
         messages.append(message)
 
-        if message_channel is not None:
+        if message_channel is not None and (message_type == "channel" or owner_profile_id):
             print(f"[MESSAGE] Storing {message_type} message on channel {message_channel}: {msg[:50]}...")
             db.store_message(
                 message_id=message["id"],
@@ -663,6 +852,8 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
                 rx_snr=packet.rx_snr,
                 rx_rssi=packet.rx_rssi,
             )
+        elif message_type == "dm":
+            print(f"[MESSAGE] DM not addressed to a local profile - skipping storage for: {msg[:50]}...")
         else:
             # If no channel info, skip storage (can't determine channel)
             print(f"[MESSAGE] No channel info - skipping database storage for: {msg[:50]}...")
@@ -1034,6 +1225,27 @@ class UDPChatServer:
         print(f"[UDP] Starting virtual node for profile {effective_profile.get('long_name', 'unknown')}")
         return self.start(effective_profile)
 
+    def reconnect_with_profile(self, profile, session_id=None):
+        """Force a fresh transport restart for a profile."""
+        if not profile:
+            return False
+        effective_profile = _effective_profile(profile)
+        channel_hash = generate_hash(effective_profile.get("channel", ""), effective_profile.get("key", ""))
+
+        if not self.can_switch_transport(effective_profile.get("id"), channel_hash, requester_session_id=session_id):
+            print(
+                f"[UDP] Cannot reconnect to profile {effective_profile.get('id')} channel {channel_hash} - other sessions are active on profile {self.current_profile_id}"
+            )
+            return False
+
+        if self.running:
+            print(
+                f"[UDP] Forcing transport restart from profile {self.current_profile_id} to {effective_profile.get('id')}"
+            )
+            self.stop()
+
+        return self.start(effective_profile)
+
     def get_active_profile(self):
         return self.current_profile
 
@@ -1041,6 +1253,16 @@ class UDPChatServer:
         if not self.running:
             raise RuntimeError("Virtual node is not running")
         return virtual_node_manager.send_nodeinfo(destination if destination is not None else 0xFFFFFFFF)
+
+    def send_ack_for_profile(self, profile, request_packet):
+        return virtual_node_manager.send_ack_for_profile(profile, request_packet)
+
+    def decode_packet_for_profile(self, profile, packet, sender_public_key=None):
+        return virtual_node_manager.decode_packet_for_profile(
+            profile,
+            packet,
+            sender_public_key=sender_public_key,
+        )
 
     def send_message(
         self,
@@ -1121,6 +1343,34 @@ class UDPChatServer:
                 "ack_updated_at": datetime.now().isoformat() if ack_requested else None,
             }
             messages.append(message)
+            local_recipient_message = None
+
+            if message_type == "dm" and message["target_node_num"] is not None:
+                recipient_profile = db.get_profile_by_node_num(message["target_node_num"])
+                if recipient_profile and recipient_profile.get("id") != sender_profile.get("id"):
+                    local_recipient_message = {
+                        "id": str(uuid.uuid4()),
+                        "packet_id": sent_packet_id,
+                        "sender": sender_node_id,
+                        "sender_num": my_node_num,
+                        "sender_display": message["sender_display"],
+                        "sender_short_name": message["sender_short_name"],
+                        "content": message_content,
+                        "timestamp": message["timestamp"],
+                        "sender_ip": "local",
+                        "direction": "received",
+                        "message_type": "dm",
+                        "channel": sender_channel,
+                        "reply_packet_id": reply_packet_id,
+                        "target_node_num": message["target_node_num"],
+                        "target": message["target"],
+                        "owner_profile_id": recipient_profile.get("id"),
+                        "ack_requested": False,
+                        "ack_status": None,
+                        "ack_error": None,
+                        "ack_updated_at": None,
+                    }
+                    messages.append(local_recipient_message)
 
             # Store sent message in database and broadcast to WebSocket
             try:
@@ -1149,6 +1399,35 @@ class UDPChatServer:
                         ack_updated_at=message["ack_updated_at"],
                     )
                     print(f"[SEND] Sent message stored successfully on channel {sender_channel}")
+
+                    if local_recipient_message is not None:
+                        db.store_message(
+                            message_id=local_recipient_message["id"],
+                            packet_id=sent_packet_id,
+                            sender_num=my_node_num,
+                            sender_display=local_recipient_message["sender_display"],
+                            content=message_content,
+                            sender_ip=local_recipient_message["sender_ip"],
+                            direction="received",
+                            channel=sender_channel,
+                            message_type="dm",
+                            reply_packet_id=reply_packet_id,
+                            target_node_num=local_recipient_message["target_node_num"],
+                            owner_profile_id=local_recipient_message["owner_profile_id"],
+                            hop_limit=None,
+                            hop_start=None,
+                            rx_snr=None,
+                            rx_rssi=None,
+                            ack_requested=False,
+                            ack_status=None,
+                            ack_error=None,
+                            ack_updated_at=None,
+                        )
+                        recipient_room_name = f"profile_{local_recipient_message['owner_profile_id']}"
+                        socketio.emit("new_message", local_recipient_message, room=recipient_room_name)
+                        print(
+                            f"[SEND] Stored and broadcasted local recipient DM copy to room {recipient_room_name}"
+                        )
                     
                     room_name = f"channel_{sender_channel}" if message_type == "channel" else f"profile_{sender_profile.get('id')}"
                     try:
@@ -1421,16 +1700,7 @@ def get_current_profile():
     """Get the current active profile with interface status and channel number"""
     current_profile = _get_session_profile()
     if current_profile:
-        effective_profile = _effective_profile(current_profile)
-        profile_channel_hash = generate_hash(effective_profile.get("channel", ""), effective_profile.get("key", ""))
-        if (
-            udp_server.running
-            and udp_server.current_profile_id == current_profile.get("id")
-            and udp_server.current_channel_hash == profile_channel_hash
-        ):
-            interface_status = "started"
-        else:
-            interface_status = "stopped"
+        interface_status = _interface_status_for_profile(current_profile)
 
         # Get channel number for WebSocket room joining
         expected_channel = _current_profile_channel_num()
@@ -1438,6 +1708,7 @@ def get_current_profile():
         # Return profile with interface status and channel number
         response_data = _serialize_profile_for_client(current_profile, interface_status=interface_status)
         response_data["channel_number"] = expected_channel
+        response_data.update(_unread_state_for_profile(current_profile))
         return jsonify(response_data)
     else:
         return jsonify(None)
@@ -1482,10 +1753,6 @@ def set_current_profile():
         # Calculate channel hash for session registration
         channel_hash = _current_profile_channel_num()
         
-        # Restart the active virtual node with the selected profile identity
-        print(f"[PROFILE] Restarting virtual node for profile {profile.get('long_name', 'unknown')}")
-        interface_started = udp_server.restart_with_profile(profile, session_id)
-
         # Get messages for the newly selected profile's channel
         chat_payload = _get_chat_payload(current_profile)
         expected_channel = chat_payload["channel_number"]
@@ -1518,77 +1785,21 @@ def set_current_profile():
             print(f"[PROFILE] Profile switched - user is caught up on messages")
 
         response_profile = _serialize_profile_for_client(current_profile)
-
-        if interface_started:
-            udp_server.register_session(session_id, profile.get("id"), channel_hash)
-            print(f"[PROFILE] Interface successfully started with vnode profile and session registered")
-
-            def send_nodeinfo_delayed():
-                try:
-                    import time
-
-                    time.sleep(0.5)
-                    print(f"[NODEINFO] Sending vnode nodeinfo for profile {profile.get('long_name')}")
-                    udp_server.send_nodeinfo()
-                    print(
-                        f"[NODEINFO] Sent nodeinfo packet for {profile.get('long_name', 'Unknown')} ({profile.get('node_id', 'Unknown')})"
-                    )
-                except Exception as e:
-                    print(f"[NODEINFO] Error sending nodeinfo packet: {e}")
-
-            import threading
-
-            nodeinfo_thread = threading.Thread(target=send_nodeinfo_delayed, daemon=True)
-            nodeinfo_thread.start()
-
-            return jsonify(
-                {
-                    "message": "Profile set successfully and interface started",
-                    "profile": response_profile,
-                    "interface_status": "started",
-                    "messages": chat_payload["channel_messages"],
-                    "channel_messages": chat_payload["channel_messages"],
-                    "dm_messages": chat_payload["dm_messages"],
-                    "channel_number": expected_channel,
-                    "unread_count": unread_count,
-                    "selected_channel_index": response_profile.get("selected_channel_index", 0),
-                }
-            )
-        else:
-            if udp_server.running and udp_server.current_profile_id:
-                current_profile_id = udp_server.current_profile_id
-                if current_profile_id != profile.get("id"):
-                    print(f"[PROFILE] Profile conflict - cannot switch from {current_profile_id} to {profile.get('id')}")
-                    return jsonify(
-                        {
-                            "message": "Cannot switch to this profile - another profile is currently active",
-                            "profile": response_profile,
-                            "interface_status": "conflict",
-                            "warning": f"The active virtual node is currently profile {current_profile_id}. Wait for other users to finish before switching identities.",
-                            "messages": chat_payload["channel_messages"],
-                            "channel_messages": chat_payload["channel_messages"],
-                            "dm_messages": chat_payload["dm_messages"],
-                            "channel_number": expected_channel,
-                            "unread_count": unread_count,
-                            "selected_channel_index": response_profile.get("selected_channel_index", 0),
-                        }
-                    )
-            
-            print(f"[PROFILE] Warning: Profile set but virtual node failed to start")
-            return jsonify(
-                {
-                    "message": "Profile set but virtual node failed to start",
-                    "profile": response_profile,
-                    "interface_status": "failed",
-                    "warning": "Virtual node could not be started. Check logs for details.",
-                    "messages": chat_payload["channel_messages"],
-                    "channel_messages": chat_payload["channel_messages"],
-                    "dm_messages": chat_payload["dm_messages"],
-                    "channel_number": expected_channel,
-                    "unread_count": unread_count,
-                    "selected_channel_index": response_profile.get("selected_channel_index", 0),
-                }
-            )
+        unread_state = _unread_state_for_profile(current_profile)
+        return jsonify(
+            {
+                "message": "Profile selected",
+                "profile": response_profile,
+                "interface_status": _interface_status_for_profile(current_profile),
+                "messages": chat_payload["channel_messages"],
+                "channel_messages": chat_payload["channel_messages"],
+                "dm_messages": chat_payload["dm_messages"],
+                "channel_number": expected_channel,
+                "unread_count": unread_count,
+                "selected_channel_index": response_profile.get("selected_channel_index", 0),
+                **unread_state,
+            }
+        )
     else:
         return jsonify({"error": "Profile not found"}), 404
 
@@ -1612,26 +1823,105 @@ def set_current_channel():
     if channel_index < 0 or channel_index >= len(channels):
         return jsonify({"error": "channel_index out of range"}), 400
 
-    session_id = f"flask_session_{id(session)}"
     _set_session_channel_index(channel_index)
-    effective_profile = _effective_profile(current_profile)
-    channel_hash = _profile_channel_num(effective_profile)
-    interface_started = udp_server.restart_with_profile(current_profile, session_id=session_id)
-    if interface_started:
-        udp_server.register_session(session_id, current_profile.get("id"), channel_hash)
 
     chat_payload = _get_chat_payload(current_profile)
+    if chat_payload["channel_number"] is not None:
+        db.update_profile_last_seen(current_profile["id"], chat_payload["channel_number"])
     response_profile = _serialize_profile_for_client(current_profile)
+    unread_state = _unread_state_for_profile(current_profile)
 
     return jsonify(
         {
             "message": "Channel selected",
             "profile": response_profile,
-            "interface_status": "started" if interface_started else "failed",
+            "interface_status": _interface_status_for_profile(current_profile),
             "channel_messages": chat_payload["channel_messages"],
             "dm_messages": chat_payload["dm_messages"],
             "channel_number": chat_payload["channel_number"],
             "selected_channel_index": channel_index,
+            **unread_state,
+        }
+    )
+
+
+@app.route("/api/reconnect-profile", methods=["POST"])
+@login_required
+def reconnect_profile():
+    current_profile = _get_session_profile()
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+
+    session_id = f"flask_session_{id(session)}"
+    effective_profile = _effective_profile(current_profile)
+    channel_hash = _profile_channel_num(effective_profile)
+    interface_started = udp_server.reconnect_with_profile(current_profile, session_id=session_id)
+    if interface_started:
+        udp_server.register_session(session_id, current_profile.get("id"), channel_hash)
+        print(f"[PROFILE] Reconnected virtual node transport for profile {current_profile.get('long_name', 'unknown')}")
+
+        def send_nodeinfo_delayed():
+            try:
+                import time
+
+                time.sleep(0.5)
+                print(f"[NODEINFO] Sending vnode nodeinfo for profile {current_profile.get('long_name')}")
+                udp_server.send_nodeinfo()
+                print(
+                    f"[NODEINFO] Sent nodeinfo packet for {current_profile.get('long_name', 'Unknown')} ({current_profile.get('node_id', 'Unknown')})"
+                )
+            except Exception as e:
+                print(f"[NODEINFO] Error sending nodeinfo packet: {e}")
+
+        import threading
+
+        nodeinfo_thread = threading.Thread(target=send_nodeinfo_delayed, daemon=True)
+        nodeinfo_thread.start()
+
+    chat_payload = _get_chat_payload(current_profile)
+    response_profile = _serialize_profile_for_client(current_profile)
+    unread_state = _unread_state_for_profile(current_profile)
+
+    if interface_started:
+        return jsonify(
+            {
+                "message": "Profile reconnected",
+                "profile": response_profile,
+                "interface_status": "started",
+                "channel_messages": chat_payload["channel_messages"],
+                "dm_messages": chat_payload["dm_messages"],
+                "channel_number": chat_payload["channel_number"],
+                "selected_channel_index": response_profile.get("selected_channel_index", 0),
+                **unread_state,
+            }
+        )
+
+    if udp_server.running and udp_server.current_profile_id and udp_server.current_profile_id != current_profile.get("id"):
+        current_profile_id = udp_server.current_profile_id
+        return jsonify(
+            {
+                "message": "Cannot reconnect this profile",
+                "profile": response_profile,
+                "interface_status": "conflict",
+                "warning": f"The active virtual node is currently profile {current_profile_id}. Wait for other users to finish before switching identities.",
+                "channel_messages": chat_payload["channel_messages"],
+                "dm_messages": chat_payload["dm_messages"],
+                "channel_number": chat_payload["channel_number"],
+                "selected_channel_index": response_profile.get("selected_channel_index", 0),
+                **unread_state,
+            }
+        )
+
+    return jsonify(
+        {
+            "message": "Receiver active; send transport will reconnect on demand",
+            "profile": response_profile,
+            "interface_status": _interface_status_for_profile(current_profile),
+            "channel_messages": chat_payload["channel_messages"],
+            "dm_messages": chat_payload["dm_messages"],
+            "channel_number": chat_payload["channel_number"],
+            "selected_channel_index": response_profile.get("selected_channel_index", 0),
+            **unread_state,
         }
     )
 
@@ -1659,8 +1949,51 @@ def get_messages():
     expected_channel = chat_payload["channel_number"]
     if expected_channel is not None and chat_payload["channel_messages"]:
         db.update_profile_last_seen(current_profile["id"], expected_channel)
-
+    chat_payload.update(_unread_state_for_profile(current_profile))
     return jsonify(chat_payload)
+
+
+@app.route("/api/channel-read", methods=["POST"])
+@login_required
+def mark_channel_read():
+    """Mark a channel as read for the current profile."""
+    current_profile = _get_session_profile()
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+
+    data = request.get_json(silent=True) or {}
+    channel_index = data.get("channel_index", _selected_channel_index(current_profile))
+    try:
+        channel_index = int(channel_index)
+    except (TypeError, ValueError):
+        return jsonify({"error": "channel_index must be an integer"}), 400
+
+    effective_profile = _effective_profile(current_profile, channel_index=channel_index)
+    channel_number = _profile_channel_num(effective_profile)
+    if channel_number is None:
+        return jsonify({"error": "Unable to determine channel"}), 400
+
+    db.update_profile_last_seen(current_profile["id"], channel_number)
+    return jsonify({"message": "Channel marked read", **_unread_state_for_profile(current_profile)})
+
+
+@app.route("/api/dm-read", methods=["POST"])
+@login_required
+def mark_dm_read():
+    """Mark a DM thread as read for the current profile."""
+    current_profile = _get_session_profile()
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+
+    data = request.get_json(silent=True) or {}
+    peer_node_num = data.get("peer_node_num")
+    try:
+        peer_node_num = int(peer_node_num)
+    except (TypeError, ValueError):
+        return jsonify({"error": "peer_node_num must be an integer"}), 400
+
+    db.mark_dm_thread_read(current_profile["id"], peer_node_num)
+    return jsonify({"message": "DM marked read", **_unread_state_for_profile(current_profile)})
 
 
 @app.route("/api/threads/channel", methods=["DELETE"])

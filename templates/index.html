@@ -787,6 +787,15 @@
     background: var(--bs-tertiary-bg);
 }
 
+.remove-channel-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    padding: 0;
+    min-height: 2.4rem;
+}
+
 .profile-item {
     border: 1px solid var(--firefly-chat-border);
     border-radius: 1rem;
@@ -1292,6 +1301,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     document.getElementById('manageProfilesBtn').addEventListener('click', openProfilesInbox);
     document.getElementById('saveProfileBtn').addEventListener('click', updateManagedProfile);
     document.getElementById('addEditChannelBtn').addEventListener('click', () => addProfileChannelRow('editChannelsList'));
+    document.getElementById('editChannelsList').addEventListener('click', handleEditChannelListClick);
 
     const messageInput = document.getElementById('messageInput');
     const messagesContainer = document.getElementById('messagesContainer');
@@ -2208,6 +2218,18 @@ function handleThreadCardClick(event) {
         if (Number.isInteger(nodeNum)) {
             void showNodeDetails(nodeNum);
         }
+    }
+}
+
+function handleEditChannelListClick(event) {
+    const removeChannelTrigger = event.target.closest('[data-remove-channel]');
+    if (!removeChannelTrigger) return;
+
+    event.preventDefault();
+    const containerId = removeChannelTrigger.dataset.removeChannel;
+    const channelIndex = Number(removeChannelTrigger.dataset.removeChannelIndex);
+    if (containerId && Number.isInteger(channelIndex)) {
+        removeProfileChannelRow(containerId, channelIndex);
     }
 }
 

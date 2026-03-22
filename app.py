@@ -1301,17 +1301,22 @@ def index():
 @app.route("/profiles")
 @login_required
 def profiles():
-    """Profile management page"""
-    current_user = _get_session_user()
-    profiles = profile_manager.get_all_profiles(user_id=current_user["id"])
-    return render_template("profiles.html", profiles=profiles)
+    """Redirect legacy profile route into the single-page app."""
+    return redirect(url_for("index", tab="profiles"))
 
 
 @app.route("/nodes")
 @login_required
 def nodes():
-    """Legacy nodes route redirects into the unified index tab view."""
+    """Redirect legacy nodes route into the single-page app."""
     return redirect(url_for("index", tab="nodes"))
+
+
+@app.route("/map")
+@login_required
+def map_view():
+    """Redirect legacy map route into the single-page app."""
+    return redirect(url_for("index", tab="map"))
 
 
 @app.route("/api/profiles", methods=["GET"])

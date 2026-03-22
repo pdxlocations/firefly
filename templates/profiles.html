@@ -190,25 +190,6 @@
     </div>
 </div>
 
-<div class="mt-4">
-    <div class="card">
-        <div class="card-header">
-            <h6>Profile Management Tips</h6>
-        </div>
-        <div class="card-body">
-            <ul class="mb-0">
-                <li><strong>Node ID:</strong> Unique identifier for your device or node</li>
-                <li><strong>Long Name:</strong> Descriptive name shown in chat messages</li>
-                <li><strong>Short Name:</strong> Short identifier shown in lists and compact views</li>
-                <li><strong>Channels:</strong> Each profile can keep multiple channel and key pairs</li>
-                <li><strong>Hop Limit:</strong> Number of hops (0-7) a message can travel before being dropped. Default is 3.</li>
-                <li><strong>Multiple Profiles:</strong> You can create multiple profiles for different purposes</li>
-                <li><strong>Profile Selection:</strong> Go back to the chat page to select which profile to use</li>
-            </ul>
-        </div>
-    </div>
-</div>
-
 <div class="mobile-bottom-nav d-md-none">
     <a class="mobile-bottom-nav__button" href="{{ url_for('index') }}">
         <span class="mobile-bottom-nav__icon" aria-hidden="true">
@@ -295,6 +276,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('saveProfileBtn').addEventListener('click', updateProfile);
     document.getElementById('addNewChannelBtn').addEventListener('click', () => addChannelRow('newChannelsList'));
     document.getElementById('addEditChannelBtn').addEventListener('click', () => addChannelRow('editChannelsList'));
+    document.getElementById('newNodeId').addEventListener('input', syncGeneratedProfileNames);
+    document.getElementById('newLongName').addEventListener('input', markGeneratedNameOverride);
+    document.getElementById('newShortName').addEventListener('input', markGeneratedNameOverride);
 
     // Delegate edit and delete buttons robustly (use closest)
     document.getElementById('profilesList')?.addEventListener('click', function(e) {
@@ -314,7 +298,63 @@ document.addEventListener('DOMContentLoaded', function() {
     loadProfiles();
     renderChannelRows('newChannelsList', [{ name: '', key: '' }]);
     renderChannelRows('editChannelsList', [{ name: '', key: '' }]);
+    applyGeneratedProfileDefaults();
 });
+
+function createRandomNodeId() {
+    if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+        const values = new Uint32Array(1);
+        window.crypto.getRandomValues(values);
+        return `!${values[0].toString(16).padStart(8, '0')}`;
+    }
+
+    const fallback = Math.floor(Math.random() * 0x100000000);
+    return `!${fallback.toString(16).padStart(8, '0')}`;
+}
+
+function generatedNameParts(nodeId) {
+    const hex = String(nodeId || '').replace(/[^0-9a-f]/gi, '').toLowerCase();
+    const suffix = (hex.slice(-4) || '0000').padStart(4, '0');
+    return {
+        longName: `Meshtastic ${suffix}`,
+        shortName: suffix,
+    };
+}
+
+function applyGeneratedProfileDefaults(force = false) {
+    const nodeIdInput = document.getElementById('newNodeId');
+    const longNameInput = document.getElementById('newLongName');
+    const shortNameInput = document.getElementById('newShortName');
+    if (!nodeIdInput || !longNameInput || !shortNameInput) return;
+
+    if (force || !nodeIdInput.value.trim()) {
+        nodeIdInput.value = createRandomNodeId();
+    }
+
+    const generated = generatedNameParts(nodeIdInput.value);
+    const canReplaceLong = force || !longNameInput.value.trim() || longNameInput.dataset.autofill === 'true';
+    const canReplaceShort = force || !shortNameInput.value.trim() || shortNameInput.dataset.autofill === 'true';
+
+    if (canReplaceLong) {
+        longNameInput.value = generated.longName;
+        longNameInput.dataset.autofill = 'true';
+    }
+
+    if (canReplaceShort) {
+        shortNameInput.value = generated.shortName;
+        shortNameInput.dataset.autofill = 'true';
+    }
+}
+
+function syncGeneratedProfileNames() {
+    applyGeneratedProfileDefaults(false);
+}
+
+function markGeneratedNameOverride(event) {
+    const input = event.target;
+    if (!input) return;
+    input.dataset.autofill = 'false';
+}
 
 function renderChannelRows(containerId, channels) {
     const container = document.getElementById(containerId);

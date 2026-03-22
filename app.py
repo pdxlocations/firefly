@@ -415,6 +415,43 @@ def _seed_profile_mesh_identity(profile):
         return False
 
 
+def _profiles_matching_packet(packet):
+    matched_profiles = []
+    seen_profile_ids = set()
+
+    packet_to = getattr(packet, "to", None)
+    if packet_to not in (None, 0, BROADCAST_NODE_NUM):
+        owner_profile = db.get_profile_by_node_num(packet_to)
+        if owner_profile and owner_profile.get("id") not in seen_profile_ids:
+            matched_profiles.append(owner_profile)
+            seen_profile_ids.add(owner_profile.get("id"))
+
+    try:
+        packet_channel = int(getattr(packet, "channel", 0) or 0)
+    except Exception:
+        packet_channel = 0
+
+    if packet_channel <= 0:
+        return matched_profiles
+
+    try:
+        all_profiles = db.get_all_profiles()
+    except Exception:
+        return matched_profiles
+
+    for profile in all_profiles.values():
+        profile_id = profile.get("id")
+        if profile_id in seen_profile_ids:
+            continue
+        for channel in _profile_channels(profile):
+            if _channel_number_for_config(channel) == packet_channel:
+                matched_profiles.append(profile)
+                seen_profile_ids.add(profile_id)
+                break
+
+    return matched_profiles
+
+
 def _get_chat_payload(profile):
     effective_profile = _effective_profile(profile)
     channel_number = _profile_channel_num(effective_profile)
@@ -943,27 +980,49 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
         print(f"[NODEINFO_DEBUG] Packet not addressed to us (to: {packet_to}, us: {my_node_num})")
 
     try:
-        active_profile = udp_server.get_active_profile()
-        mesh_store = _get_mesh_store(active_profile) if active_profile else None
-        if not mesh_store:
-            print("[NODEINFO_DEBUG] No active mesh store; skipping node persistence")
+        target_profiles = _profiles_matching_packet(packet)
+        if not target_profiles:
+            print("[NODEINFO_DEBUG] No matching local profiles; skipping node persistence")
             return
 
-        before = mesh_store.get_node(sender_num)
-        stored = mesh_store.record_packet(packet)
-        after = mesh_store.get_node(sender_num)
-        print(f"[NODEINFO_DEBUG] meshdb stored packet: {stored}")
+        for profile in target_profiles:
+            mesh_store = _get_mesh_store(profile)
+            if not mesh_store:
+                print(
+                    f"[NODEINFO_DEBUG] No mesh store for profile {profile.get('id')}; "
+                    f"skipping persistence for node {sender_num}"
+                )
+                continue
 
-        if after is None:
-            print(f"[NODEINFO_DEBUG] meshdb did not return node {sender_num} after NODEINFO packet")
-            return
+            before = mesh_store.get_node(sender_num)
+            stored = mesh_store.record_packet(packet)
+            after = mesh_store.get_node(sender_num)
+            print(
+                f"[NODEINFO_DEBUG] meshdb stored packet for profile {profile.get('id')}: {stored}"
+            )
 
-        if before is None:
-            print(f"\n[NODEINFO] NEW NODE {sender_num}: {after.get('long_name')} ({after.get('short_name')})")
-        elif before != after:
-            print(f"\n[NODEINFO] UPDATED NODE {sender_num}: {after.get('long_name')} ({after.get('short_name')})")
-        else:
-            print(f"\n[NODEINFO] SEEN NODE {sender_num}: {after.get('long_name')} ({after.get('short_name')})")
+            if after is None:
+                print(
+                    f"[NODEINFO_DEBUG] meshdb did not return node {sender_num} after NODEINFO packet "
+                    f"for profile {profile.get('id')}"
+                )
+                continue
+
+            if before is None:
+                print(
+                    f"\n[NODEINFO] NEW NODE {sender_num} for profile {profile.get('id')}: "
+                    f"{after.get('long_name')} ({after.get('short_name')})"
+                )
+            elif before != after:
+                print(
+                    f"\n[NODEINFO] UPDATED NODE {sender_num} for profile {profile.get('id')}: "
+                    f"{after.get('long_name')} ({after.get('short_name')})"
+                )
+            else:
+                print(
+                    f"\n[NODEINFO] SEEN NODE {sender_num} for profile {profile.get('id')}: "
+                    f"{after.get('long_name')} ({after.get('short_name')})"
+                )
 
     except Exception as e:
         print(f"Error processing nodeinfo: {e}")
@@ -1112,6 +1171,7 @@ class UDPChatServer:
         self.current_profile_id = None
         self.current_channel_hash = None
         self.current_profile = None
+        self.last_send_error = None
         self.active_sessions = {}  # Maps session_id -> {profile_id, channel_hash, timestamp}
 
     def start(self, profile=None):
@@ -1274,7 +1334,9 @@ class UDPChatServer:
         reply_packet_id=None,
     ):
         """Send a text message via vnode."""
+        self.last_send_error = None
         if not sender_profile:
+            self.last_send_error = "No sender profile selected"
             return False
 
         sender_profile = _effective_profile(sender_profile)
@@ -1286,6 +1348,7 @@ class UDPChatServer:
             print(f"[UDP] Active virtual node does not match sender profile, restarting...")
             if not self.restart_with_profile(sender_profile, session_id=session_id):
                 print(f"[UDP] Failed to restart virtual node for profile")
+                self.last_send_error = "Transmit identity could not be started for this profile"
                 return False
         else:
             print(f"[UDP] Reusing existing virtual node for profile {sender_profile.get('id')}")
@@ -1297,6 +1360,7 @@ class UDPChatServer:
             if message_type == "dm":
                 if target_node_num in (None, 0, BROADCAST_NODE_NUM):
                     print("[SEND] Refusing to send DM without a valid target node")
+                    self.last_send_error = "Direct messages require a valid target node"
                     return False
                 print(f"[SEND] Sending DM to {target_node_num} with hop_limit={hop_limit}")
                 sent_packet_id = virtual_node_manager.send_text(
@@ -1446,6 +1510,7 @@ class UDPChatServer:
             return True
         except Exception as e:
             print(f"Error sending message via mudp: {e}")
+            self.last_send_error = str(e) or "Failed to send message"
             return False
 
 
@@ -2148,7 +2213,7 @@ def send_message():
         return jsonify({"message": "Message sent successfully"})
     else:
         print("[API] send_message -> FAILED (udp_server.send_message returned False)")
-        return jsonify({"error": "Failed to send message"}), 500
+        return jsonify({"error": udp_server.last_send_error or "Failed to send message"}), 500
 
 
 @app.route("/api/health")

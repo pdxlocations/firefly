@@ -1839,15 +1839,26 @@ function upsertDmTarget(target) {
     }
 }
 
+function getManagedProfileByNodeNum(nodeNum) {
+    const normalizedNodeNum = Number(nodeNum);
+    if (!Number.isFinite(normalizedNodeNum)) return null;
+
+    return Object.values(managedProfiles || {}).find(profile => {
+        const parsedNodeNum = parseNodeId(profile?.node_id);
+        return parsedNodeNum !== null && Number(parsedNodeNum) === normalizedNodeNum;
+    }) || null;
+}
+
 function createDmTargetFromMessage(message, peerNodeNum = getPeerNodeNum(message)) {
     if (!peerNodeNum) return null;
 
     const normalizedNodeNum = Number(peerNodeNum);
+    const localProfile = getManagedProfileByNodeNum(normalizedNodeNum);
     return {
         node_num: normalizedNodeNum,
-        node_id: message.sender_num === normalizedNodeNum ? message.sender : message.target,
+        node_id: localProfile?.node_id || (message.sender_num === normalizedNodeNum ? message.sender : message.target),
         label: getPeerLabel(message, normalizedNodeNum),
-        short_name: '',
+        short_name: localProfile?.short_name || '',
     };
 }
 
@@ -3658,6 +3669,10 @@ function handleDesktopConnectClick() {
 function getPeerLabel(message, peerNodeNum) {
     const knownTarget = dmTargets.find(target => Number(target.node_num) === Number(peerNodeNum));
     if (knownTarget) return knownTarget.label;
+    const localProfile = getManagedProfileByNodeNum(peerNodeNum);
+    if (localProfile) {
+        return localProfile.long_name || localProfile.short_name || localProfile.node_id || `!${Number(peerNodeNum).toString(16).padStart(8, '0')}`;
+    }
     if (message.sender_num && Number(message.sender_num) === Number(peerNodeNum)) {
         return message.sender_display || message.sender || `!${Number(peerNodeNum).toString(16).padStart(8, '0')}`;
     }

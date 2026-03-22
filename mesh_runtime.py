@@ -190,7 +190,11 @@ class VirtualNodeManager:
         self.stop()
         config_path = ensure_profile_config(profile, self.mcast_group, self.mcast_port)
         vnode = FireflyVirtualNode(config_path, shared_receiver=self.shared_receiver)
-        vnode.start()
+        if self.shared_receiver is None or not self.shared_receiver.running:
+            print("[VNODE] Starting full virtual node runtime")
+            vnode.start()
+        else:
+            print("[VNODE] Shared receiver active; preparing send-only virtual node identity")
         self.virtual_node = vnode
         self.current_profile_id = str(profile["id"])
         return vnode

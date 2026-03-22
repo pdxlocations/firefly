@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 
 {% block title %}Chat - Firefly{% endblock %}
+{% block body_class %}mobile-fixed-nav-page{% endblock %}
+{% block head_extra %}
+<link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+>
+{% endblock %}
 
 {% block content %}
 <div class="row">
@@ -39,16 +48,16 @@
                     </div>
                 </div>
             </div>
-            <a href="{{ url_for('profiles') }}" class="btn w-100 profile-selector-manage-link">Manage Profiles</a>
+            <button id="manageProfilesBtn" class="btn w-100 profile-selector-manage-link" type="button">Manage Profiles</button>
         </div>
     </div>
     <div class="col-12">
         <div class="card chat-shell-card" style="overflow: hidden;">
-            <div class="card-body p-0 d-flex flex-column" style="height: calc(100vh - 250px);">
+            <div class="card-body p-0 d-flex flex-column" style="height: 100%;">
                 <div class="desktop-chat-header d-none d-md-flex border-bottom px-4 py-3">
                     <div>
                         <div class="fw-semibold" id="desktopProfileName">No Profile Selected</div>
-                        <div class="small text-muted" id="desktopProfileSubline">Use Profiles to choose a profile</div>
+                        <div class="small text-muted" id="desktopProfileSubline"></div>
                     </div>
                     <div class="desktop-connect-panel">
                         <div class="desktop-status-lights" aria-label="Connection status">
@@ -90,7 +99,7 @@
                     <div class="mobile-chat-header__main">
                         <div class="mobile-chat-profile">
                             <div class="fw-semibold" id="mobileProfileName">No Profile Selected</div>
-                            <div class="small text-muted" id="mobileProfileSubline">Use the bottom bar to choose a section</div>
+                            <div class="small text-muted" id="mobileProfileSubline"></div>
                         </div>
                         <div class="mobile-connect-panel">
                             <div class="mobile-status-lights" aria-label="Connection status">
@@ -118,6 +127,9 @@
                             </li>
                             <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="nodesTabBtn" type="button">Nodes</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="mapTabBtn" type="button">Map</button>
                             </li>
                             <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="desktopProfilesTabBtn" type="button">Profiles</button>
@@ -156,22 +168,18 @@
                                 <path d="M7 12h10"></path>
                                 <path d="M10 17h4"></path>
                             </svg>
+                            <span id="mobileChannelsBadge" class="chat-tab-badge chat-tab-badge--mobile mobile-bottom-nav__badge d-none" aria-label="Unread channel messages">0</span>
                         </span>
-                        <span class="mobile-bottom-nav__label">
-                            <span>Channels</span>
-                            <span id="mobileChannelsBadge" class="chat-tab-badge chat-tab-badge--mobile d-none" aria-label="Unread channel messages">0</span>
-                        </span>
+                        <span class="mobile-bottom-nav__text">Channels</span>
                     </button>
                     <button id="mobileDmsBtn" class="mobile-bottom-nav__button" type="button">
                         <span class="mobile-bottom-nav__icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                             </svg>
+                            <span id="mobileDmsBadge" class="chat-tab-badge chat-tab-badge--mobile mobile-bottom-nav__badge d-none" aria-label="Unread direct messages">0</span>
                         </span>
-                        <span class="mobile-bottom-nav__label">
-                            <span>DMs</span>
-                            <span id="mobileDmsBadge" class="chat-tab-badge chat-tab-badge--mobile d-none" aria-label="Unread direct messages">0</span>
-                        </span>
+                        <span class="mobile-bottom-nav__text">DMs</span>
                     </button>
                     <button id="mobileNodesBtn" class="mobile-bottom-nav__button" type="button">
                         <span class="mobile-bottom-nav__icon" aria-hidden="true">
@@ -186,7 +194,17 @@
                         </span>
                         <span>Nodes</span>
                     </button>
-                    <button class="mobile-bottom-nav__button" type="button" data-bs-toggle="offcanvas" data-bs-target="#mobileSettingsSheet" aria-controls="mobileSettingsSheet">
+                    <button id="mobileMapBtn" class="mobile-bottom-nav__button" type="button">
+                        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20V6.5Z"></path>
+                                <path d="M9 4v13.5"></path>
+                                <path d="M15 6.5V20"></path>
+                            </svg>
+                        </span>
+                        <span>Map</span>
+                    </button>
+                    <button id="mobileProfilesBtn" class="mobile-bottom-nav__button" type="button">
                         <span class="mobile-bottom-nav__icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="3"></circle>
@@ -211,6 +229,51 @@
             <div class="modal-body" id="nodeDetailsContent"></div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editProfileModal" tabindex="-1" aria-labelledby="editProfileModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editProfileModalLabel">Edit Profile</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editProfileForm">
+                    <input type="hidden" id="editProfileId">
+                    <div class="mb-3">
+                        <label for="editNodeId" class="form-label">Node ID *</label>
+                        <input type="text" class="form-control" id="editNodeId" required maxlength="64">
+                    </div>
+                    <div class="mb-3">
+                        <label for="editLongName" class="form-label">Long Name *</label>
+                        <input type="text" class="form-control" id="editLongName" required maxlength="100">
+                    </div>
+                    <div class="mb-3">
+                        <label for="editShortName" class="form-label">Short Name *</label>
+                        <input type="text" class="form-control" id="editShortName" required maxlength="16">
+                    </div>
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label mb-0">Channels *</label>
+                            <button class="btn btn-sm btn-outline-secondary" id="addEditChannelBtn" type="button">Add Channel</button>
+                        </div>
+                        <div id="editChannelsList" class="channel-editor-list"></div>
+                        <div class="form-text">Each channel needs a name and key.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editHopLimit" class="form-label">Hop Limit</label>
+                        <input type="number" class="form-control" id="editHopLimit" min="0" max="7" value="3" placeholder="0-7">
+                        <div class="form-text">Number of hops a message can travel (0-7). Default is 3.</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveProfileBtn">Save Changes</button>
             </div>
         </div>
     </div>
@@ -398,14 +461,38 @@
 
 /* Chat layout improvements */
 .card-body.d-flex.flex-column {
-    height: calc(100vh - 250px);
+    height: 100%;
     min-height: 350px;
+}
+
+@media (min-width: 768px) {
+    body.mobile-fixed-nav-page > .container.mt-4 {
+        margin-top: 0 !important;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+        min-height: calc(100vh - 76px);
+        display: flex;
+        flex-direction: column;
+    }
+
+    body.mobile-fixed-nav-page > .container.mt-4 > .row {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    .chat-shell-card {
+        height: 100%;
+    }
+
+    .chat-shell-card > .card-body.d-flex.flex-column {
+        min-height: 0;
+    }
 }
 
 .desktop-chat-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     gap: 1rem;
     background: var(--firefly-chat-surface-muted);
 }
@@ -455,6 +542,11 @@
     background: var(--firefly-chat-accent);
     color: #ffffff;
     border-color: var(--firefly-chat-accent);
+}
+
+#desktopProfileSubline:empty,
+#mobileProfileSubline:empty {
+    display: none;
 }
 
 #messagesContainer {
@@ -523,12 +615,6 @@
     min-width: 1.1rem;
     padding: 0.06rem 0.34rem;
     font-size: 0.64rem;
-}
-
-.mobile-bottom-nav__label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
 }
 
 .node-list {
@@ -621,6 +707,152 @@
     font-size: 0.78rem;
 }
 
+.map-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-height: 0;
+    height: 100%;
+    flex: 1 1 auto;
+}
+
+.map-panel__toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.node-map {
+    min-height: 0;
+    height: auto;
+    flex: 1 1 auto;
+    border-radius: 0;
+    overflow: hidden;
+    border: none;
+    background: var(--firefly-chat-surface-muted);
+}
+
+.map-node-icon {
+    background: transparent;
+    border: none;
+}
+
+.map-node-badge {
+    width: 2.35rem;
+    height: 2.35rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--node-color, var(--firefly-chat-accent));
+    color: var(--node-text-color, #fff);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    box-shadow: 0 8px 18px rgba(24, 36, 48, 0.24);
+    border: 2px solid rgba(255, 255, 255, 0.85);
+}
+
+.profile-manager {
+    display: grid;
+    gap: 1rem;
+}
+
+.profile-manager__selector {
+    display: flex;
+    gap: 0.75rem;
+    align-items: end;
+}
+
+.profile-manager__selector-field {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.profile-manager__grid {
+    display: grid;
+    gap: 1rem;
+}
+
+.channel-editor-list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.channel-editor-row {
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.85rem;
+    padding: 0.75rem;
+    background: var(--bs-tertiary-bg);
+}
+
+.profile-item {
+    border: 1px solid var(--firefly-chat-border);
+    border-radius: 1rem;
+    padding: 1rem;
+    background: var(--firefly-chat-surface);
+}
+
+.profile-item__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.7rem;
+    color: var(--bs-secondary-color);
+    font-size: 0.88rem;
+}
+
+.profile-item__channels {
+    display: grid;
+    gap: 0.35rem;
+    font-size: 0.87rem;
+}
+
+.profile-item__actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 5rem;
+}
+
+.profile-manager__create-shell {
+    border: 1px solid var(--firefly-chat-border);
+    border-radius: 1rem;
+    background: var(--firefly-chat-surface);
+    overflow: hidden;
+}
+
+.profile-manager__create-shell > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 1rem 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    font-weight: 700;
+}
+
+.profile-manager__create-shell > summary::-webkit-details-marker {
+    display: none;
+}
+
+.profile-manager__create-shell > summary::after {
+    content: "+";
+    font-size: 1.15rem;
+    line-height: 1;
+    color: var(--firefly-chat-accent);
+}
+
+.profile-manager__create-shell[open] > summary::after {
+    content: "\2212";
+}
+
+.profile-manager__create-body {
+    padding: 0 1.1rem 1.1rem;
+    border-top: 1px solid var(--firefly-chat-border);
+}
+
 /* Remove default margins that might cause issues */
 .card-body.p-0 {
     padding: 0 !important;
@@ -630,6 +862,15 @@
 #messagesContainer {
     border-top: none !important;
     border-bottom: none !important;
+}
+
+#messagesContainer.messages-container--map {
+    padding: 0 0 calc(4.75rem + env(safe-area-inset-bottom)) 0 !important;
+    overflow: hidden !important;
+}
+
+#messagesContainer.messages-container--nav-safe {
+    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom)) !important;
 }
 
 /* Mobile compact profile controls */
@@ -652,7 +893,7 @@
         margin-top: 0 !important;
         padding-left: 0.5rem;
         padding-right: 0.5rem;
-        padding-bottom: 0.5rem;
+        padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
         padding-top: 0;
     }
 
@@ -679,153 +920,6 @@
         min-height: 0 !important;
     }
 
-    .mobile-chat-header {
-        background: var(--firefly-chat-surface-muted);
-        padding-top: 0.75rem !important;
-        padding-bottom: 0.75rem !important;
-    }
-
-    .mobile-chat-header__top {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.85rem;
-        margin-bottom: 0.55rem;
-    }
-
-    .mobile-chat-header__main {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.9rem;
-    }
-
-    .mobile-chat-profile {
-        min-width: 0;
-        flex: 1 1 auto;
-    }
-
-    .mobile-chat-brand {
-        display: flex;
-        align-items: center;
-        gap: 0.45rem;
-        font-size: 0.95rem;
-        font-weight: 700;
-        letter-spacing: 0.01em;
-    }
-
-    .mobile-chat-brand img {
-        display: block;
-    }
-
-    #mobile-logo-light {
-        display: none;
-    }
-
-    [data-bs-theme="dark"] #mobile-logo-light {
-        display: none !important;
-    }
-
-    [data-bs-theme="light"] #mobile-logo-dark {
-        display: none !important;
-    }
-
-    [data-bs-theme="light"] #mobile-logo-light {
-        display: block !important;
-    }
-
-    .mobile-connect-panel {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 0.55rem;
-        flex-shrink: 0;
-    }
-
-    .mobile-chat-auth {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 0.45rem;
-        min-width: 0;
-        flex: 0 1 auto;
-    }
-
-    .mobile-chat-auth__username {
-        min-width: 0;
-        font-size: 0.86rem;
-        font-weight: 700;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        text-align: right;
-    }
-
-    .mobile-chat-auth__form {
-        flex: 0 0 auto;
-        margin: 0;
-    }
-
-    .mobile-chat-auth__button {
-        width: 2.1rem;
-        height: 2.1rem;
-        min-height: 2.1rem;
-        padding: 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 999px;
-    }
-
-    .mobile-chat-auth__button svg {
-        width: 1rem;
-        height: 1rem;
-    }
-
-    .mobile-status-lights {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-    }
-
-    .mobile-status-light {
-        width: 0.62rem;
-        height: 0.62rem;
-        border-radius: 999px;
-        background: #95a5b5;
-        box-shadow: 0 0 0 0.14rem rgba(149, 165, 181, 0.18);
-    }
-
-    .mobile-status-light.is-online {
-        background: #2f9e72;
-        box-shadow: 0 0 0 0.14rem rgba(47, 158, 114, 0.18);
-    }
-
-    .mobile-status-light.is-warning {
-        background: #d3922e;
-        box-shadow: 0 0 0 0.14rem rgba(211, 146, 46, 0.18);
-    }
-
-    .mobile-status-light.is-offline {
-        background: #c65353;
-        box-shadow: 0 0 0 0.14rem rgba(198, 83, 83, 0.18);
-    }
-
-    .mobile-status-light.is-idle {
-        background: #95a5b5;
-        box-shadow: 0 0 0 0.14rem rgba(149, 165, 181, 0.18);
-    }
-
-    #mobileConnectBtn {
-        min-width: 5.2rem;
-    }
-
-    #mobileConnectBtn.is-connected {
-        background: var(--firefly-chat-accent);
-        color: #ffffff;
-        border-color: var(--firefly-chat-accent);
-    }
-
     #chatTabs {
         display: none !important;
     }
@@ -838,6 +932,32 @@
         background: var(--firefly-chat-surface-muted);
         padding-bottom: 1rem !important;
         min-height: 0;
+    }
+
+    .node-map {
+        min-height: 0;
+        height: auto;
+    }
+
+    .profile-manager__grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .profile-manager__selector {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .profile-manager {
+        padding-bottom: 0;
+    }
+
+    .profile-item {
+        padding: 0.8rem;
+    }
+
+    .profile-item__actions {
+        min-width: 4.8rem;
     }
 
     .message {
@@ -856,48 +976,23 @@
         border-left-color: var(--firefly-chat-accent);
     }
 
-    .mobile-bottom-nav {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 0.5rem;
-        padding: 0.4rem 0.85rem calc(0.7rem + env(safe-area-inset-bottom)) 0.85rem;
-        background: var(--firefly-chat-surface);
-        border-top: 1px solid var(--firefly-chat-border);
+    .mobile-bottom-nav__text {
+        white-space: nowrap;
     }
 
-    .mobile-bottom-nav__button {
-        border: none;
-        background: transparent;
-        color: #516170;
-        border-radius: 1.1rem;
-        padding: 0.55rem 0.4rem;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.28rem;
-        font-size: 0.72rem;
-        font-weight: 600;
-        transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
-        text-decoration: none;
+    .mobile-bottom-nav__badge {
+        position: absolute;
+        top: -0.18rem;
+        right: -0.34rem;
+        min-width: 1rem;
+        padding: 0.05rem 0.24rem;
+        line-height: 1;
+        box-shadow: 0 0 0 2px var(--firefly-chat-surface-muted);
+        z-index: 1;
     }
 
-    .mobile-bottom-nav__button.active {
-        background: var(--firefly-chat-accent);
-        color: #ffffff;
-        transform: translateY(-1px);
-    }
-
-    .mobile-bottom-nav__icon {
-        width: 1.35rem;
-        height: 1.35rem;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .mobile-bottom-nav__icon svg {
-        width: 100%;
-        height: 100%;
+    #composerBar {
+        padding-bottom: calc(4.75rem + env(safe-area-inset-bottom)) !important;
     }
 
     #mobileSettingsSheet {
@@ -981,7 +1076,7 @@
     }
 
     #composerBar {
-        padding: 0.85rem 0.85rem 0.75rem 0.85rem !important;
+        padding: 0.85rem 0.85rem calc(4.75rem + env(safe-area-inset-bottom)) 0.85rem !important;
         background: var(--firefly-chat-surface);
         border-top: 1px solid var(--firefly-chat-border) !important;
     }
@@ -1035,6 +1130,26 @@
 }
 
 @media (max-width: 575.98px) {
+    .dm-thread-card > .d-flex.justify-content-between.align-items-start {
+        flex-direction: column;
+        align-items: stretch !important;
+        gap: 0.55rem !important;
+    }
+
+    .thread-card__actions {
+        justify-content: space-between;
+        width: 100%;
+        gap: 0.4rem;
+    }
+
+    .thread-card__actions .small {
+        min-width: 0;
+    }
+
+    .thread-card__delete {
+        margin-left: auto;
+    }
+
     .node-card {
         padding: 0.55rem 0.6rem;
         border-radius: 0.75rem;
@@ -1114,6 +1229,11 @@
     }
 }
 </style>
+<script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+></script>
 <script>
 console.log('[page] index.js inline loaded');
 
@@ -1136,6 +1256,9 @@ let currentSocketStatusClass = 'bg-secondary';
 let currentInterfaceStatusClass = 'bg-warning';
 let unreadChannelMessageCounts = new Map();
 let unreadDmMessageCounts = new Map();
+let managedProfiles = {{ profiles|tojson }};
+let mapInstance = null;
+let mapLayerGroup = null;
 
 document.addEventListener('DOMContentLoaded', async function() {
     initializePendingChatContext();
@@ -1158,11 +1281,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     document.getElementById('cancelReplyBtn').addEventListener('click', clearReplyComposer);
     document.getElementById('channelTabBtn').addEventListener('click', openChannelInbox);
     document.getElementById('dmTabBtn').addEventListener('click', openDmInbox);
-    document.getElementById('nodesTabBtn').addEventListener('click', () => { void openNodesInbox(); });
-    document.getElementById('desktopProfilesTabBtn').addEventListener('click', openProfileSelector);
+    document.getElementById('nodesTabBtn').addEventListener('click', openNodesInbox);
+    document.getElementById('mapTabBtn').addEventListener('click', openMapInbox);
+    document.getElementById('desktopProfilesTabBtn').addEventListener('click', openProfilesInbox);
     document.getElementById('mobileChannelsBtn').addEventListener('click', openChannelInbox);
     document.getElementById('mobileDmsBtn').addEventListener('click', openDmInbox);
-    document.getElementById('mobileNodesBtn').addEventListener('click', () => { void openNodesInbox(); });
+    document.getElementById('mobileNodesBtn').addEventListener('click', openNodesInbox);
+    document.getElementById('mobileMapBtn').addEventListener('click', openMapInbox);
+    document.getElementById('mobileProfilesBtn').addEventListener('click', openProfilesInbox);
+    document.getElementById('manageProfilesBtn').addEventListener('click', openProfilesInbox);
+    document.getElementById('saveProfileBtn').addEventListener('click', updateManagedProfile);
+    document.getElementById('addEditChannelBtn').addEventListener('click', () => addProfileChannelRow('editChannelsList'));
 
     const messageInput = document.getElementById('messageInput');
     const messagesContainer = document.getElementById('messagesContainer');
@@ -1188,10 +1317,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     openProfileSelectorIfRequested();
     setInterval(async () => {
         refreshProfileBanner();
-        if (activeChatTab === 'nodes') {
-            await loadNodes();
-            renderActiveMessages();
-        }
     }, 30000);
 });
 
@@ -1200,7 +1325,7 @@ function openProfileSelectorIfRequested() {
     if (params.get('open_profiles') !== '1') {
         return;
     }
-    openProfileSelector();
+    void openProfilesInbox();
     params.delete('open_profiles');
     const query = params.toString();
     const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
@@ -1221,6 +1346,10 @@ function initializePendingChatContext() {
         activeChatTab = 'dm';
     } else if (tab === 'nodes') {
         activeChatTab = 'nodes';
+    } else if (tab === 'map') {
+        activeChatTab = 'map';
+    } else if (tab === 'profiles') {
+        activeChatTab = 'profiles';
     }
     const channelParam = params.get('channel');
     if (channelParam !== null) {
@@ -1424,6 +1553,7 @@ async function loadCurrentProfileAndStatus() {
 
         resetUnreadState();
         updateProfileBanner(profile);
+        syncProfileSelectors();
     } catch (error) {
         console.error('Error loading profile and status:', error);
         updateInterfaceStatus('bg-secondary', 'Unknown');
@@ -1634,6 +1764,16 @@ async function applyPendingChatContext() {
         setActiveChatTab('nodes');
         return;
     }
+    if (activeChatTab === 'map') {
+        await loadNodes();
+        setActiveChatTab('map');
+        return;
+    }
+    if (activeChatTab === 'profiles') {
+        await loadManagedProfiles();
+        setActiveChatTab('profiles');
+        return;
+    }
     if (activeChatTab === 'channel') {
         if (pendingChannelIndex !== null) {
             await setActiveChannel(pendingChannelIndex, false);
@@ -1663,6 +1803,20 @@ async function openNodesInbox() {
     setActiveChatTab('nodes');
 }
 
+async function openMapInbox() {
+    await loadNodes();
+    setActiveChatTab('map');
+}
+
+async function openProfilesInbox() {
+    await loadManagedProfiles();
+    const sheet = document.getElementById('mobileSettingsSheet');
+    if (sheet && typeof bootstrap !== 'undefined' && bootstrap.Offcanvas) {
+        bootstrap.Offcanvas.getOrCreateInstance(sheet).hide();
+    }
+    setActiveChatTab('profiles');
+}
+
 function openChannelInbox() {
     setActiveChatTab('channel');
     const channels = getProfileChannels();
@@ -1673,17 +1827,24 @@ function openChannelInbox() {
 }
 
 function setActiveChatTab(tab) {
-    const nextTab = tab === 'dm' ? 'dm' : (tab === 'nodes' ? 'nodes' : 'channel');
+    const nextTab = ['dm', 'nodes', 'map', 'profiles'].includes(tab) ? tab : 'channel';
     if (activeChatTab !== nextTab) {
         replyingToPacketId = null;
+    }
+    if (nextTab !== 'map') {
+        clearMap();
     }
     activeChatTab = nextTab;
     document.getElementById('channelTabBtn').classList.toggle('active', activeChatTab === 'channel');
     document.getElementById('dmTabBtn').classList.toggle('active', activeChatTab === 'dm');
     document.getElementById('nodesTabBtn').classList.toggle('active', activeChatTab === 'nodes');
+    document.getElementById('mapTabBtn').classList.toggle('active', activeChatTab === 'map');
+    document.getElementById('desktopProfilesTabBtn').classList.toggle('active', activeChatTab === 'profiles');
     document.getElementById('mobileChannelsBtn').classList.toggle('active', activeChatTab === 'channel');
     document.getElementById('mobileDmsBtn').classList.toggle('active', activeChatTab === 'dm');
     document.getElementById('mobileNodesBtn').classList.toggle('active', activeChatTab === 'nodes');
+    document.getElementById('mobileMapBtn').classList.toggle('active', activeChatTab === 'map');
+    document.getElementById('mobileProfilesBtn').classList.toggle('active', activeChatTab === 'profiles');
     updateComposerState();
     renderActiveMessages();
     updateChatUrl();
@@ -1771,7 +1932,7 @@ function updateComposerState() {
     const replyAuthor = document.getElementById('replyComposerAuthor');
     const replyPreview = document.getElementById('replyComposerPreview');
 
-    if (activeChatTab === 'nodes') {
+    if (activeChatTab === 'nodes' || activeChatTab === 'map' || activeChatTab === 'profiles') {
         if (composerBar) composerBar.classList.add('d-none');
         if (replyBar) replyBar.classList.add('d-none');
         updateHeaderState();
@@ -1839,9 +2000,21 @@ function getVisibleMessages() {
 function renderActiveMessages() {
     const container = document.getElementById('messagesContainer');
     if (!container) return;
+    container.classList.toggle('messages-container--map', activeChatTab === 'map');
+    container.classList.toggle('messages-container--nav-safe', activeChatTab === 'nodes' || activeChatTab === 'profiles');
 
     if (activeChatTab === 'nodes') {
         renderNodesList(container);
+        return;
+    }
+
+    if (activeChatTab === 'map') {
+        renderMapView(container);
+        return;
+    }
+
+    if (activeChatTab === 'profiles') {
+        renderProfilesView(container);
         return;
     }
 
@@ -1954,6 +2127,31 @@ function renderChannelThreadCardHtml(thread) {
 }
 
 function handleThreadCardClick(event) {
+    const removeChannelTrigger = event.target.closest('[data-remove-channel]');
+    if (removeChannelTrigger) {
+        event.preventDefault();
+        const containerId = removeChannelTrigger.dataset.removeChannel;
+        const channelIndex = Number(removeChannelTrigger.dataset.removeChannelIndex);
+        if (containerId && Number.isInteger(channelIndex)) {
+            removeProfileChannelRow(containerId, channelIndex);
+        }
+        return;
+    }
+
+    const editProfileTrigger = event.target.closest('[data-edit-profile-id]');
+    if (editProfileTrigger) {
+        event.preventDefault();
+        openEditProfileModal(editProfileTrigger.dataset.editProfileId);
+        return;
+    }
+
+    const deleteProfileTrigger = event.target.closest('[data-delete-profile-id]');
+    if (deleteProfileTrigger) {
+        event.preventDefault();
+        void deleteManagedProfile(deleteProfileTrigger.dataset.deleteProfileId);
+        return;
+    }
+
     const deleteChannelTrigger = event.target.closest('[data-delete-channel-index]');
     if (deleteChannelTrigger) {
         event.preventDefault();
@@ -2079,6 +2277,546 @@ function renderNodesList(container) {
             </div>
         </div>
     `;
+}
+
+async function loadManagedProfiles() {
+    try {
+        const response = await fetch('/api/profiles');
+        const payload = await response.json();
+        managedProfiles = payload && typeof payload === 'object' ? payload : {};
+    } catch (error) {
+        console.error('Error loading profiles:', error);
+        managedProfiles = {};
+    }
+    syncProfileSelectors();
+}
+
+function syncProfileSelectors() {
+    const options = ['<option value="">Select profile...</option>'];
+    Object.entries(managedProfiles).forEach(([profileId, profile]) => {
+        options.push(`<option value="${escapeHtml(profileId)}">${escapeHtml(profile.long_name || profileId)}</option>`);
+    });
+    const selectedValue = currentProfile?.id || '';
+
+    ['profileSelect', 'profilesTabProfileSelect'].forEach(selectId => {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        select.innerHTML = options.join('');
+        select.value = selectedValue;
+    });
+}
+
+function renderProfilesView(container) {
+    const profileEntries = Object.entries(managedProfiles);
+    const profileCards = profileEntries.length
+        ? profileEntries.map(([profileId, profile]) => renderManagedProfileCard(profileId, profile)).join('')
+        : `
+            <div class="text-center text-muted">
+                <p class="mb-1">No profiles created yet.</p>
+                <p class="mb-0">Create your first profile to start chatting.</p>
+            </div>
+        `;
+
+    container.innerHTML = `
+        <div class="profile-manager">
+            <div class="card">
+                <div class="card-body">
+                    <div class="profile-manager__selector">
+                        <div class="profile-manager__selector-field">
+                            <label for="profilesTabProfileSelect" class="form-label">Active Profile</label>
+                            <select id="profilesTabProfileSelect" class="form-select">
+                                <option value="">Select profile...</option>
+                            </select>
+                        </div>
+                        <button id="profilesTabSetProfileBtn" class="btn btn-primary" type="button">Set Profile</button>
+                    </div>
+                </div>
+            </div>
+            <div class="profile-manager__grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Existing Profiles</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="profilesList">${profileCards}</div>
+                    </div>
+                </div>
+            </div>
+            <details class="profile-manager__create-shell">
+                <summary>
+                    <span>Create New Profile</span>
+                </summary>
+                <div class="profile-manager__create-body">
+                    <form id="createProfileForm">
+                        <div class="mb-3">
+                            <label for="newNodeId" class="form-label">Node ID *</label>
+                            <input type="text" class="form-control" id="newNodeId" required maxlength="64" placeholder="e.g. !deadbeef">
+                        </div>
+                        <div class="mb-3">
+                            <label for="newLongName" class="form-label">Long Name *</label>
+                            <input type="text" class="form-control" id="newLongName" required maxlength="100">
+                        </div>
+                        <div class="mb-3">
+                            <label for="newShortName" class="form-label">Short Name *</label>
+                            <input type="text" class="form-control" id="newShortName" required maxlength="16">
+                        </div>
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label mb-0">Channels *</label>
+                                <button class="btn btn-sm btn-outline-secondary" id="addNewChannelBtn" type="button">Add Channel</button>
+                            </div>
+                            <div id="newChannelsList" class="channel-editor-list"></div>
+                            <div class="form-text">Each profile can have multiple channel and key pairs.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="newHopLimit" class="form-label">Hop Limit</label>
+                            <input type="number" class="form-control" id="newHopLimit" min="0" max="7" value="3" placeholder="0-7">
+                            <div class="form-text">Number of hops a message can travel (0-7). Default is 3.</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Create Profile</button>
+                    </form>
+                </div>
+            </details>
+        </div>
+    `;
+
+    syncProfileSelectors();
+    document.getElementById('profilesTabSetProfileBtn')?.addEventListener('click', setProfileFromProfilesTab);
+    document.getElementById('createProfileForm')?.addEventListener('submit', createManagedProfile);
+    document.getElementById('addNewChannelBtn')?.addEventListener('click', () => addProfileChannelRow('newChannelsList'));
+    document.getElementById('newNodeId')?.addEventListener('input', syncGeneratedProfileNames);
+    document.getElementById('newLongName')?.addEventListener('input', markGeneratedNameOverride);
+    document.getElementById('newShortName')?.addEventListener('input', markGeneratedNameOverride);
+
+    renderProfileChannelRows('newChannelsList', [{ name: '', key: '' }]);
+    applyGeneratedProfileDefaults(true);
+}
+
+function setProfileFromProfilesTab() {
+    const select = document.getElementById('profilesTabProfileSelect');
+    const button = document.getElementById('profilesTabSetProfileBtn');
+    if (!select || !button) return;
+    setProfile({
+        target: button,
+        profileSelectId: 'profilesTabProfileSelect',
+    });
+}
+
+function renderManagedProfileCard(profileId, profile) {
+    const channels = Array.isArray(profile.channels) ? profile.channels : [];
+    const channelMarkup = channels.length
+        ? channels.map(channel => `<div>${escapeHtml(channel.name || '')} • ${escapeHtml(channel.key || '')}</div>`).join('')
+        : '<div class="text-muted">No channels configured.</div>';
+
+    return `
+        <div class="profile-item mb-3" data-profile-id="${escapeHtml(profileId)}">
+            <div class="d-flex justify-content-between align-items-start gap-3">
+                <div class="flex-grow-1">
+                    <h6 class="mb-1">${escapeHtml(profile.long_name || profileId)}</h6>
+                    <div class="profile-item__meta mb-2">
+                        <span>Short: ${escapeHtml(profile.short_name || '')}</span>
+                        <span>Node: ${escapeHtml(profile.node_id || '')}</span>
+                        <span>Hop Limit: ${escapeHtml(String(profile.hop_limit ?? 3))}</span>
+                    </div>
+                    <div class="profile-item__channels mb-2">${channelMarkup}</div>
+                    <small class="text-muted">Created: ${escapeHtml(String(profile.created_at || '').slice(0, 10))}</small>
+                </div>
+                <div class="profile-item__actions">
+                    <button class="btn btn-outline-primary btn-sm" type="button" data-edit-profile-id="${escapeHtml(profileId)}">Edit</button>
+                    <button class="btn btn-outline-danger btn-sm" type="button" data-delete-profile-id="${escapeHtml(profileId)}">Delete</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderProfileChannelRows(containerId, channels) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const normalized = Array.isArray(channels) && channels.length ? channels : [{ name: '', key: '' }];
+    container.innerHTML = normalized.map((channel, index) => `
+        <div class="channel-editor-row" data-channel-index="${index}">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-5">
+                    <label class="form-label small text-muted">Channel Name</label>
+                    <input type="text" class="form-control channel-name-input" maxlength="64" value="${escapeHtml(channel.name || '')}" placeholder="e.g. LongFast">
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label small text-muted">Key</label>
+                    <input type="text" class="form-control channel-key-input" maxlength="256" value="${escapeHtml(channel.key || '')}" placeholder="e.g. AQ==">
+                </div>
+                <div class="col-12 col-md-1">
+                    <button class="btn btn-outline-danger w-100 remove-channel-btn" type="button" data-remove-channel="${containerId}" data-remove-channel-index="${index}">×</button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function addProfileChannelRow(containerId) {
+    const channels = collectProfileChannels(containerId, false);
+    channels.push({ name: '', key: '' });
+    renderProfileChannelRows(containerId, channels);
+}
+
+function removeProfileChannelRow(containerId, index) {
+    const channels = collectProfileChannels(containerId, false).filter((_, rowIndex) => rowIndex !== index);
+    renderProfileChannelRows(containerId, channels);
+}
+
+function collectProfileChannels(containerId, requireValues = true) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+
+    const rows = Array.from(container.querySelectorAll('.channel-editor-row'));
+    const channels = rows.map(row => ({
+        name: row.querySelector('.channel-name-input')?.value.trim() || '',
+        key: row.querySelector('.channel-key-input')?.value.trim() || '',
+    }));
+    const filtered = channels.filter(channel => channel.name || channel.key);
+    return requireValues ? filtered.filter(channel => channel.name && channel.key) : filtered;
+}
+
+function createRandomNodeId() {
+    if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+        const values = new Uint32Array(1);
+        window.crypto.getRandomValues(values);
+        return `!${values[0].toString(16).padStart(8, '0')}`;
+    }
+    const fallback = Math.floor(Math.random() * 0x100000000);
+    return `!${fallback.toString(16).padStart(8, '0')}`;
+}
+
+function generatedNameParts(nodeId) {
+    const hex = String(nodeId || '').replace(/[^0-9a-f]/gi, '').toLowerCase();
+    const suffix = (hex.slice(-4) || '0000').padStart(4, '0');
+    return {
+        longName: `Meshtastic ${suffix}`,
+        shortName: suffix,
+    };
+}
+
+function applyGeneratedProfileDefaults(force = false) {
+    const nodeIdInput = document.getElementById('newNodeId');
+    const longNameInput = document.getElementById('newLongName');
+    const shortNameInput = document.getElementById('newShortName');
+    if (!nodeIdInput || !longNameInput || !shortNameInput) return;
+
+    if (force || !nodeIdInput.value.trim()) {
+        nodeIdInput.value = createRandomNodeId();
+    }
+
+    const generated = generatedNameParts(nodeIdInput.value);
+    const canReplaceLong = force || !longNameInput.value.trim() || longNameInput.dataset.autofill === 'true';
+    const canReplaceShort = force || !shortNameInput.value.trim() || shortNameInput.dataset.autofill === 'true';
+
+    if (canReplaceLong) {
+        longNameInput.value = generated.longName;
+        longNameInput.dataset.autofill = 'true';
+    }
+
+    if (canReplaceShort) {
+        shortNameInput.value = generated.shortName;
+        shortNameInput.dataset.autofill = 'true';
+    }
+}
+
+function syncGeneratedProfileNames() {
+    applyGeneratedProfileDefaults(false);
+}
+
+function markGeneratedNameOverride(event) {
+    const input = event.target;
+    if (!input) return;
+    input.dataset.autofill = 'false';
+}
+
+async function createManagedProfile(event) {
+    event.preventDefault();
+
+    const hopLimitValue = document.getElementById('newHopLimit')?.value;
+    const hopLimit = hopLimitValue === '' ? 3 : parseInt(hopLimitValue, 10);
+    if (hopLimit < 0 || hopLimit > 7) {
+        alert('Hop limit must be between 0 and 7');
+        return;
+    }
+
+    const payload = {
+        node_id: document.getElementById('newNodeId')?.value.trim(),
+        long_name: document.getElementById('newLongName')?.value.trim(),
+        short_name: document.getElementById('newShortName')?.value.trim(),
+        channels: collectProfileChannels('newChannelsList'),
+        hop_limit: hopLimit,
+    };
+
+    if (!payload.node_id || !payload.long_name || !payload.short_name || !payload.channels.length) {
+        alert('All fields are required, including at least one complete channel.');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        await loadManagedProfiles();
+        renderActiveMessages();
+    } catch (error) {
+        console.error('Error creating profile:', error);
+        alert(`Error creating profile: ${error.message}`);
+    }
+}
+
+function openEditProfileModal(profileId) {
+    const profile = managedProfiles[profileId];
+    if (!profile) {
+        alert('Profile not found');
+        return;
+    }
+
+    document.getElementById('editProfileId').value = profileId;
+    document.getElementById('editNodeId').value = profile.node_id || '';
+    document.getElementById('editLongName').value = profile.long_name || '';
+    document.getElementById('editShortName').value = profile.short_name || '';
+    document.getElementById('editHopLimit').value = profile.hop_limit !== undefined ? profile.hop_limit : 3;
+    renderProfileChannelRows('editChannelsList', profile.channels || [{ name: '', key: '' }]);
+    new bootstrap.Modal(document.getElementById('editProfileModal')).show();
+}
+
+async function updateManagedProfile() {
+    const profileId = document.getElementById('editProfileId').value;
+    const hopLimitValue = document.getElementById('editHopLimit').value;
+    const hopLimit = hopLimitValue === '' ? 3 : parseInt(hopLimitValue, 10);
+
+    if (hopLimit < 0 || hopLimit > 7) {
+        alert('Hop limit must be between 0 and 7');
+        return;
+    }
+
+    const payload = {
+        node_id: document.getElementById('editNodeId').value.trim(),
+        long_name: document.getElementById('editLongName').value.trim(),
+        short_name: document.getElementById('editShortName').value.trim(),
+        channels: collectProfileChannels('editChannelsList'),
+        hop_limit: hopLimit,
+    };
+
+    if (!payload.node_id || !payload.long_name || !payload.short_name || !payload.channels.length) {
+        alert('All fields are required, including at least one complete channel.');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/profiles/${profileId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        bootstrap.Modal.getInstance(document.getElementById('editProfileModal'))?.hide();
+        await loadManagedProfiles();
+        await loadCurrentProfileAndStatus();
+        await loadMessages();
+        await loadDmTargets();
+        await loadNodes();
+        renderActiveMessages();
+        updateComposerState();
+    } catch (error) {
+        console.error('Error updating profile:', error);
+        alert(`Error updating profile: ${error.message}`);
+    }
+}
+
+async function deleteManagedProfile(profileId) {
+    const profile = managedProfiles[profileId];
+    if (!profile) {
+        alert('Profile not found');
+        return;
+    }
+
+    if (!confirm(`Are you sure you want to delete the profile "${profile.long_name}"? This action cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/profiles/${profileId}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        await loadManagedProfiles();
+        await loadCurrentProfileAndStatus();
+        await loadMessages();
+        await loadDmTargets();
+        await loadNodes();
+        renderActiveMessages();
+        updateComposerState();
+    } catch (error) {
+        console.error('Error deleting profile:', error);
+        alert(`Error deleting profile: ${error.message}`);
+    }
+}
+
+function renderMapView(container) {
+    if (!currentProfile) {
+        container.innerHTML = '<div class="alert alert-warning mb-0"><h5>No Profile Selected</h5><p class="mb-0">Use Profiles to choose a profile before viewing node positions.</p></div>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="map-panel">
+            <div id="nodeMapStatus" class="alert alert-secondary mb-0 d-none" role="status"></div>
+            <div id="nodeMap" class="node-map" aria-label="Map of known node positions"></div>
+        </div>
+    `;
+
+    const positionedNodes = meshNodes.filter(hasRenderableLocation);
+    const mapStatus = document.getElementById('nodeMapStatus');
+    if (!positionedNodes.length) {
+        mapStatus.className = 'alert alert-info mb-0';
+        mapStatus.textContent = 'Node markers will appear here after this profile hears position packets.';
+        mapStatus.classList.remove('d-none');
+        clearMap();
+        return;
+    }
+
+    mapStatus.classList.add('d-none');
+    window.requestAnimationFrame(() => renderMap(positionedNodes));
+}
+
+function clearMap() {
+    if (mapLayerGroup) {
+        mapLayerGroup.clearLayers();
+    }
+    if (mapInstance) {
+        mapInstance.remove();
+        mapInstance = null;
+        mapLayerGroup = null;
+    }
+}
+
+function renderMap(nodes) {
+    const mapElement = document.getElementById('nodeMap');
+    if (!mapElement || typeof L === 'undefined') return;
+
+    clearMap();
+    mapInstance = L.map(mapElement, {
+        zoomControl: true,
+        attributionControl: true,
+    });
+
+    const baseLayers = buildMapBaseLayers();
+    const defaultLayer = baseLayers['OpenStreetMap'];
+    defaultLayer.addTo(mapInstance);
+    L.control.layers(baseLayers, null, { position: 'topright', collapsed: true }).addTo(mapInstance);
+
+    mapLayerGroup = L.layerGroup().addTo(mapInstance);
+    const bounds = [];
+
+    nodes.forEach(node => {
+        const lat = Number(node.latitude);
+        const lng = Number(node.longitude);
+        const shortName = (node.short_name || '?').trim() || '?';
+        const label = escapeHtml(shortName.slice(0, 4));
+        const markerColors = getNodeMarkerColors(node);
+        const marker = L.marker([lat, lng], {
+            icon: L.divIcon({
+                className: 'map-node-icon',
+                html: `<span class="map-node-badge" style="--node-color: ${markerColors.background}; --node-text-color: ${markerColors.foreground};">${label}</span>`,
+                iconSize: [44, 44],
+                iconAnchor: [22, 22],
+            }),
+            title: node.long_name || node.node_id || shortName,
+        });
+
+        const popupLines = [
+            `<div class="fw-semibold">${escapeHtml(node.long_name || shortName)}</div>`,
+            `<div class="small text-muted">${escapeHtml(node.node_id || `!${Number(node.node_num).toString(16).padStart(8, '0')}`)}</div>`,
+        ];
+        if (node.position_timestamp) {
+            popupLines.push(`<div class="small mt-1">Updated ${escapeHtml(formatPositionTime(node.position_timestamp))}</div>`);
+        }
+        marker.bindPopup(popupLines.join(''));
+        marker.addTo(mapLayerGroup);
+        bounds.push([lat, lng]);
+    });
+
+    if (bounds.length === 1) {
+        mapInstance.setView(bounds[0], 13);
+    } else {
+        mapInstance.fitBounds(bounds, { padding: [24, 24] });
+    }
+
+    window.requestAnimationFrame(() => mapInstance?.invalidateSize());
+}
+
+function buildMapBaseLayers() {
+    return {
+        'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors',
+        }),
+        'Carto Voyager': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            maxZoom: 20,
+            subdomains: 'abcd',
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        }),
+        'Topo': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            maxZoom: 17,
+            attribution: '&copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap',
+        }),
+        'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 20,
+            subdomains: 'abcd',
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        }),
+    };
+}
+
+function formatPositionTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return String(value);
+    }
+    return date.toLocaleString();
+}
+
+function hasRenderableLocation(node) {
+    if (!node) return false;
+    if (node.latitude === null || node.latitude === undefined || node.longitude === null || node.longitude === undefined) {
+        return false;
+    }
+    if (node.latitude === '' || node.longitude === '') {
+        return false;
+    }
+
+    const lat = Number(node.latitude);
+    const lng = Number(node.longitude);
+    return Number.isFinite(lat) && Number.isFinite(lng);
+}
+
+function getNodeMarkerColors(node) {
+    const cleaned = String(node?.node_id || '')
+        .replace(/[^0-9a-f]/gi, '')
+        .toLowerCase();
+    const hex = cleaned.slice(-6).padStart(6, '0');
+    const background = `#${hex}`;
+    const red = parseInt(hex.slice(0, 2), 16);
+    const green = parseInt(hex.slice(2, 4), 16);
+    const blue = parseInt(hex.slice(4, 6), 16);
+    const brightness = ((red * 299) + (green * 587) + (blue * 114)) / 1000;
+    return {
+        background,
+        foreground: brightness > 160 ? '#162231' : '#ffffff',
+    };
 }
 
 function getFilteredNodes() {
@@ -2367,11 +3105,13 @@ async function setProfile(event) {
     const isDesktopConnectButton = clickedButton && clickedButton.id === 'desktopConnectBtn';
     const isMobileConnectButton = clickedButton && clickedButton.id === 'mobileConnectBtn';
     const isConnectButton = isDesktopConnectButton || isMobileConnectButton;
+    const requestedSelectId = event && event.profileSelectId ? event.profileSelectId : 'profileSelect';
+    const selectedProfileId = document.getElementById(requestedSelectId)?.value || '';
     const profileId = isDesktopConnectButton
         ? (currentProfile?.id || '')
         : (isMobileConnectButton
             ? (document.getElementById('profileSelect')?.value || currentProfile?.id || '')
-            : (document.getElementById('profileSelect')?.value || ''));
+            : selectedProfileId);
     const setBtn = isDesktopConnectButton
         ? document.getElementById('desktopConnectBtn')
         : (isMobileConnectButton ? document.getElementById('mobileConnectBtn') : document.getElementById('setProfileBtn'));
@@ -2413,6 +3153,7 @@ async function setProfile(event) {
         }
 
         updateProfileBanner(currentProfile);
+        syncProfileSelectors();
         await loadDmTargets();
         await loadNodes();
         await applyPendingChatContext();
@@ -2650,34 +3391,8 @@ function clearReplyComposer() {
 function updateHeaderState() {
     const mobileSubline = document.getElementById('mobileProfileSubline');
     const desktopSubline = document.getElementById('desktopProfileSubline');
-
-    let mobileText = 'Use the bottom bar to choose a section';
-    let desktopText = 'Use Profiles to choose a profile';
-
-    if (currentProfile) {
-        if (activeChatTab === 'dm') {
-            const activeTarget = dmTargets.find(target => Number(target.node_num) === Number(activeDmTargetNodeNum));
-            const dmText = activeTarget
-                ? `Direct thread with ${activeTarget.label}`
-                : (dmTargets.length ? 'Direct messages' : 'No DM threads yet');
-            mobileText = dmText;
-            desktopText = dmText;
-        } else if (activeChatTab === 'nodes') {
-            const nodesText = meshNodes.length ? `Seen nodes (${meshNodes.length})` : 'Seen nodes';
-            mobileText = nodesText;
-            desktopText = nodesText;
-        } else {
-            const activeChannel = getActiveChannel();
-            const channelText = activeChannel
-                ? `Channel ${activeChannel.name}`
-                : (getProfileChannels().length ? 'Channels' : 'No channels configured');
-            mobileText = channelText;
-            desktopText = channelText;
-        }
-    }
-
-    if (mobileSubline) mobileSubline.textContent = mobileText;
-    if (desktopSubline) desktopSubline.textContent = desktopText;
+    if (mobileSubline) mobileSubline.textContent = '';
+    if (desktopSubline) desktopSubline.textContent = '';
 }
 
 function updateStatusLight(elementId, status) {
@@ -2827,6 +3542,14 @@ function updateChatUrl() {
         params.set('tab', 'nodes');
         params.delete('dm');
         params.delete('channel');
+    } else if (activeChatTab === 'map') {
+        params.set('tab', 'map');
+        params.delete('dm');
+        params.delete('channel');
+    } else if (activeChatTab === 'profiles') {
+        params.set('tab', 'profiles');
+        params.delete('dm');
+        params.delete('channel');
     } else {
         params.delete('dm');
         params.delete('tab');
@@ -2941,7 +3664,7 @@ function showNotification(message, type = 'info', duration = 4000) {
 }
 
 function escapeHtml(unsafe) {
-    return unsafe
+    return String(unsafe ?? '')
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")

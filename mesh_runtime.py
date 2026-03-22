@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import math
 import os
 import sqlite3
 import time
@@ -183,6 +184,8 @@ class MeshNodeStore:
         self.channel_num = self.channel_nums[0] if self.channel_nums else generate_hash(profile["channel"], profile["key"])
         self.node_db = meshdb.NodeDB(self.owner_node_num, self.db_path)
         self.node_db.ensure_table()
+        self.location_db = meshdb.LocationDB(self.owner_node_num, self.db_path)
+        self.location_db.ensure_table()
 
     def ensure_owner_node(self) -> None:
         self.node_db.upsert(
@@ -211,7 +214,11 @@ class MeshNodeStore:
             row = cursor.fetchone()
         if not row:
             return None
-        return self._row_to_dict(row, fallback_hops=self._get_fallback_hops(int(node_num)))
+        return self._row_to_dict(
+            row,
+            fallback_hops=self._get_fallback_hops(int(node_num)),
+            location=self._get_latest_location(int(node_num)),
+        )
 
     def list_nodes(self) -> List[Dict]:
         with self.node_db.connect() as con:
@@ -221,8 +228,13 @@ class MeshNodeStore:
             )
             rows = cursor.fetchall()
         fallback_hops = self._get_fallback_hops_map()
+        location_map = self._get_latest_locations_map()
         return [
-            self._row_to_dict(row, fallback_hops=fallback_hops.get(int(row["node_num"])))
+            self._row_to_dict(
+                row,
+                fallback_hops=fallback_hops.get(int(row["node_num"])),
+                location=location_map.get(int(row["node_num"])),
+            )
             for row in rows
             if int(row["node_num"]) != self.owner_node_num
         ]
@@ -387,7 +399,113 @@ class MeshNodeStore:
         if previous is None or timestamp > previous[0] or (timestamp == previous[0] and hops_away < previous[1]):
             latest_hops[sender_num] = (timestamp, hops_away)
 
-    def _row_to_dict(self, row: sqlite3.Row, fallback_hops: Optional[int] = None) -> Dict:
+    def _get_latest_location(self, node_num: int) -> Optional[Dict]:
+        try:
+            with self.location_db.connect() as con:
+                con.row_factory = sqlite3.Row
+                row = con.execute(
+                    f"""
+                    SELECT timestamp, latitude, longitude, latitude_i, longitude_i, altitude
+                    FROM {self.location_db.table}
+                    WHERE node_num = ?
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                    """,
+                    (str(int(node_num)),),
+                ).fetchone()
+        except Exception:
+            return None
+
+        if not row:
+            return None
+
+        latitude, longitude = self._normalize_location(row["latitude"], row["longitude"], row["latitude_i"], row["longitude_i"])
+        if latitude is None or longitude is None:
+            return None
+        return {
+            "timestamp": row["timestamp"],
+            "latitude": latitude,
+            "longitude": longitude,
+            "altitude": row["altitude"],
+        }
+
+    def _get_latest_locations_map(self) -> Dict[int, Dict]:
+        try:
+            with self.location_db.connect() as con:
+                con.row_factory = sqlite3.Row
+                rows = con.execute(
+                    f"""
+                    SELECT node_num, timestamp, latitude, longitude, latitude_i, longitude_i, altitude
+                    FROM {self.location_db.table}
+                    """
+                ).fetchall()
+        except Exception:
+            return {}
+
+        locations: Dict[int, Dict] = {}
+        for row in rows:
+            node_num = self._coerce_int(row["node_num"])
+            if node_num is None:
+                continue
+            latitude, longitude = self._normalize_location(
+                row["latitude"],
+                row["longitude"],
+                row["latitude_i"],
+                row["longitude_i"],
+            )
+            if latitude is None or longitude is None:
+                continue
+            existing = locations.get(node_num)
+            timestamp = self._coerce_int(row["timestamp"]) or 0
+            if existing is not None and timestamp < (self._coerce_int(existing.get("timestamp")) or 0):
+                continue
+            locations[node_num] = {
+                "timestamp": row["timestamp"],
+                "latitude": latitude,
+                "longitude": longitude,
+                "altitude": row["altitude"],
+            }
+        return locations
+
+    def _normalize_location(self, latitude, longitude, latitude_i=None, longitude_i=None) -> tuple[Optional[float], Optional[float]]:
+        normalized_lat = self._coerce_float(latitude)
+        normalized_lon = self._coerce_float(longitude)
+        int_lat = self._coerce_int(latitude_i)
+        int_lon = self._coerce_int(longitude_i)
+
+        if self._is_valid_coordinate_pair(normalized_lat, normalized_lon):
+            if not self._looks_like_null_island(normalized_lat, normalized_lon) or int_lat in (None, 0) or int_lon in (None, 0):
+                return normalized_lat, normalized_lon
+
+        if int_lat is not None and int_lon is not None:
+            derived_lat = int_lat / 1e7
+            derived_lon = int_lon / 1e7
+            if self._is_valid_coordinate_pair(derived_lat, derived_lon):
+                return derived_lat, derived_lon
+
+        return None, None
+
+    def _coerce_float(self, value) -> Optional[float]:
+        try:
+            if value in (None, ""):
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _is_valid_coordinate_pair(self, latitude: Optional[float], longitude: Optional[float]) -> bool:
+        if latitude is None or longitude is None:
+            return False
+        if not math.isfinite(latitude) or not math.isfinite(longitude):
+            return False
+        return -90 <= latitude <= 90 and -180 <= longitude <= 180
+
+    def _looks_like_null_island(self, latitude: Optional[float], longitude: Optional[float]) -> bool:
+        if latitude is None or longitude is None:
+            return False
+        return abs(latitude) < 1e-9 and abs(longitude) < 1e-9
+
+    def _row_to_dict(self, row: sqlite3.Row, fallback_hops: Optional[int] = None, location: Optional[Dict] = None) -> Dict:
         node_num = int(row["node_num"])
         hops_away = row["hops_away"] if row["hops_away"] is not None else fallback_hops
         if row["hops_away"] is None and fallback_hops is not None:
@@ -408,6 +526,10 @@ class MeshNodeStore:
             "last_heard": row["last_heard"],
             "last_seen": _epoch_to_iso(row["last_heard"]),
         }
+        node["latitude"] = location.get("latitude") if location else None
+        node["longitude"] = location.get("longitude") if location else None
+        node["altitude"] = location.get("altitude") if location else None
+        node["position_timestamp"] = _epoch_to_iso(location.get("timestamp")) if location and location.get("timestamp") else None
         node["first_seen"] = node["last_seen"]
         return node
 

@@ -20,6 +20,9 @@
                             <a class="nav-link" href="{{ url_for('nodes') }}">Nodes</a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('map_view') }}">Map</a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('index') }}?open_profiles=1">Profiles</a>
                         </li>
                     </ul>
@@ -221,6 +224,16 @@
             </svg>
         </span>
         <span>Nodes</span>
+    </a>
+    <a class="mobile-bottom-nav__button" href="{{ url_for('map_view') }}">
+        <span class="mobile-bottom-nav__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20V6.5Z"></path>
+                <path d="M9 4v13.5"></path>
+                <path d="M15 6.5V20"></path>
+            </svg>
+        </span>
+        <span>Map</span>
     </a>
     <a class="mobile-bottom-nav__button" href="{{ url_for('index') }}?open_profiles=1">
         <span class="mobile-bottom-nav__icon" aria-hidden="true">

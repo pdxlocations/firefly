@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Firefly{% endblock %}</title>
+    {% block head_extra %}{% endblock %}
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
@@ -91,6 +92,162 @@
             display: block !important;
         }
 
+        .mobile-chat-header {
+            background: var(--firefly-mobile-surface-muted);
+            padding-top: 0.75rem !important;
+            padding-bottom: 0.75rem !important;
+        }
+
+        .mobile-chat-header__top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.85rem;
+            margin-bottom: 0.55rem;
+        }
+
+        .mobile-chat-header__main {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.9rem;
+        }
+
+        .mobile-chat-profile {
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+
+        .mobile-chat-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        .mobile-chat-brand img {
+            display: block;
+        }
+
+        #mobile-logo-light {
+            display: none;
+        }
+
+        [data-bs-theme="dark"] #mobile-logo-light {
+            display: none !important;
+        }
+
+        [data-bs-theme="light"] #mobile-logo-dark {
+            display: none !important;
+        }
+
+        [data-bs-theme="light"] #mobile-logo-light {
+            display: block !important;
+        }
+
+        .mobile-connect-panel {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 0.55rem;
+            flex-shrink: 0;
+        }
+
+        .mobile-chat-auth {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 0.45rem;
+            min-width: 0;
+            flex: 0 0 auto;
+            max-width: min(12rem, 46vw);
+        }
+
+        .mobile-chat-auth__username {
+            min-width: 0;
+            max-width: min(8.5rem, 34vw);
+            display: block;
+            font-size: 0.86rem;
+            font-weight: 700;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-align: right;
+        }
+
+        .mobile-chat-auth__form {
+            display: flex;
+            flex: 0 0 auto;
+            margin: 0;
+        }
+
+        .mobile-chat-auth__button {
+            width: 2.1rem;
+            height: 2.1rem;
+            min-height: 2.1rem;
+            flex: 0 0 auto;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            color: var(--firefly-mobile-accent);
+            border: 1px solid rgba(31, 93, 150, 0.24);
+            border-color: color-mix(in srgb, var(--firefly-mobile-accent) 28%, transparent);
+            background: transparent;
+        }
+
+        .mobile-chat-auth__button svg {
+            width: 1rem;
+            height: 1rem;
+        }
+
+        .mobile-status-lights {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .mobile-status-light {
+            width: 0.62rem;
+            height: 0.62rem;
+            border-radius: 999px;
+            background: #95a5b5;
+            box-shadow: 0 0 0 0.14rem rgba(149, 165, 181, 0.18);
+        }
+
+        .mobile-status-light.is-online {
+            background: #2f9e72;
+            box-shadow: 0 0 0 0.14rem rgba(47, 158, 114, 0.18);
+        }
+
+        .mobile-status-light.is-warning {
+            background: #d3922e;
+            box-shadow: 0 0 0 0.14rem rgba(211, 146, 46, 0.18);
+        }
+
+        .mobile-status-light.is-offline {
+            background: #c65353;
+            box-shadow: 0 0 0 0.14rem rgba(198, 83, 83, 0.18);
+        }
+
+        .mobile-status-light.is-idle {
+            background: #95a5b5;
+            box-shadow: 0 0 0 0.14rem rgba(149, 165, 181, 0.18);
+        }
+
+        #mobileConnectBtn {
+            min-width: 5.2rem;
+        }
+
+        #mobileConnectBtn.is-connected {
+            background: var(--firefly-mobile-accent);
+            color: #ffffff;
+            border-color: var(--firefly-mobile-accent);
+        }
+
         .mobile-header-auth {
             display: flex;
             align-items: center;
@@ -150,7 +307,7 @@
                 padding-top: 0;
                 padding-left: 0.5rem;
                 padding-right: 0.5rem;
-                padding-bottom: calc(5.9rem + env(safe-area-inset-bottom));
+                padding-bottom: calc(4.55rem + env(safe-area-inset-bottom));
             }
 
             body.mobile-fixed-nav-page .mobile-bottom-nav {
@@ -160,13 +317,13 @@
                 bottom: calc(0.65rem + env(safe-area-inset-bottom));
                 z-index: 1040;
                 display: grid;
-                grid-template-columns: repeat(4, minmax(0, 1fr));
-                gap: 0.5rem;
-                padding: 0.55rem;
+                grid-template-columns: repeat(5, minmax(0, 1fr));
+                gap: 0.12rem;
+                padding: 0 0.08rem;
                 background: var(--firefly-mobile-surface-muted);
                 backdrop-filter: blur(18px);
                 border: 1px solid var(--firefly-mobile-border);
-                border-radius: 1.5rem;
+                border-radius: 1.35rem;
                 box-shadow: 0 18px 45px rgba(38, 57, 77, 0.18);
             }
 
@@ -174,16 +331,20 @@
                 border: none;
                 background: transparent;
                 color: #516170;
-                border-radius: 1.1rem;
-                padding: 0.55rem 0.4rem;
+                border-radius: 1.05rem;
+                padding: 0.02rem 0.1rem 0.01rem;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                gap: 0.28rem;
-                font-size: 0.72rem;
+                justify-content: center;
+                gap: 0.06rem;
+                font-size: 0.56rem;
+                line-height: 1;
                 font-weight: 600;
                 transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
                 text-decoration: none;
+                min-width: 0;
+                min-height: 2.3rem;
             }
 
             [data-bs-theme="dark"] body.mobile-fixed-nav-page .mobile-bottom-nav__button {
@@ -197,16 +358,24 @@
             }
 
             body.mobile-fixed-nav-page .mobile-bottom-nav__icon {
-                width: 1.35rem;
-                height: 1.35rem;
+                width: 1.48rem;
+                height: 1.48rem;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
+                position: relative;
+                overflow: visible;
             }
 
             body.mobile-fixed-nav-page .mobile-bottom-nav__icon svg {
                 width: 100%;
                 height: 100%;
+            }
+
+            body.mobile-fixed-nav-page .mobile-bottom-nav__button > span:last-child,
+            body.mobile-fixed-nav-page .mobile-bottom-nav__label {
+                white-space: nowrap;
+                line-height: 0.9;
             }
         }
         

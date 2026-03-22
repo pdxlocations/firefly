@@ -203,7 +203,7 @@ def show_features():
     print("• Profiles - Manage your Meshtastic configurations")
 
 
-def _register_shutdown_hooks(udp_server):
+def _register_shutdown_hooks(udp_server, packet_receiver=None):
     def cleanup():
         global _SHUTDOWN_IN_PROGRESS
         if _SHUTDOWN_IN_PROGRESS:
@@ -214,6 +214,11 @@ def _register_shutdown_hooks(udp_server):
                 udp_server.stop()
         except Exception as exc:
             print(f"[SHUTDOWN] Error while stopping UDP runtime: {exc}")
+        try:
+            if packet_receiver:
+                packet_receiver.stop()
+        except Exception as exc:
+            print(f"[SHUTDOWN] Error while stopping packet receiver: {exc}")
 
     def handle_signal(signum, _frame):
         signal_name = signal.Signals(signum).name
@@ -248,11 +253,11 @@ def main():
         print("=" * 50)
 
         # Import and run the main application
-        from app import app, socketio, udp_server
-        _register_shutdown_hooks(udp_server)
+        from app import app, socketio, shared_packet_receiver, udp_server
+        _register_shutdown_hooks(udp_server, shared_packet_receiver)
 
-        # Note: UDP server will start when a profile is selected
-        print("✓ Meshtastic UDP server ready (will start with profile selection)")
+        print("✓ Meshtastic packet receiver started")
+        print("✓ Virtual node transport will activate per profile when needed")
         # Get port from environment variable, default to 5011
         port = int(os.getenv('FIREFLY_PORT', 5011))
         host = os.getenv('FIREFLY_HOST', '0.0.0.0')

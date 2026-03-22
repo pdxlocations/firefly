@@ -2505,10 +2505,12 @@ async function sendMessage() {
         messageInput.value = '';
         updateCharacterCounter();
         clearReplyComposer();
-        if (!socket || !socket.connected) {
-            await loadMessages();
-            renderActiveMessages();
+        await loadMessages();
+        if (payload.message_type === 'dm') {
+            await loadDmTargets();
         }
+        renderActiveMessages();
+        updateComposerState();
     } catch (err) {
         console.error('Error sending message:', err);
         alert('Error sending message: ' + err.message);

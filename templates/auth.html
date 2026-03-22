@@ -22,7 +22,7 @@
                 <h5 class="mb-0">Sign In</h5>
             </div>
             <div class="card-body p-4 p-lg-5">
-                <form method="post" action="{{ url_for('login') }}">
+                <form method="post" action="{{ url_for('login') }}" data-async-form>
                     <div class="mb-3">
                         <label class="form-label" for="loginUsername">Username</label>
                         <input class="form-control" id="loginUsername" name="username" type="text" maxlength="64" required autocomplete="username">
@@ -46,7 +46,7 @@
                             <h5 class="mb-0">Create Account</h5>
                         </div>
                         <div class="card-body">
-                            <form method="post" action="{{ url_for('register') }}">
+                            <form method="post" action="{{ url_for('register') }}" data-async-form>
                                 <div class="mb-3">
                                     <label class="form-label" for="registerUsername">Username</label>
                                     <input class="form-control" id="registerUsername" name="username" type="text" maxlength="64" required autocomplete="username">

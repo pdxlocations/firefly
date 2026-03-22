@@ -758,7 +758,7 @@
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <form method="post" action="{{ url_for('update_account_password') }}" class="mb-4">
+                        <form method="post" action="{{ url_for('update_account_password') }}" class="mb-4" data-async-form>
                             <div class="fw-semibold mb-3">Change Password</div>
                             <div class="mb-3">
                                 <label class="form-label" for="accountCurrentPassword">Current Password</label>
@@ -778,7 +778,7 @@
                         <div class="border-top pt-4">
                             <div class="fw-semibold text-danger mb-2">Delete Account</div>
                             <p class="small text-muted mb-3">This removes your login and all profiles owned by this account.</p>
-                            <form method="post" action="{{ url_for('delete_account') }}" onsubmit="return confirm('Delete your account permanently?');">
+                            <form method="post" action="{{ url_for('delete_account') }}" data-async-form data-confirm-message="Delete your account permanently?">
                                 <div class="mb-3">
                                     <label class="form-label" for="accountDeletePassword">Current Password</label>
                                     <input class="form-control" id="accountDeletePassword" name="current_password" type="password" autocomplete="current-password" required>
@@ -887,6 +887,54 @@
           }
 
           window.addEventListener('resize', syncProfileSelectorSheets);
+      });
+
+      document.addEventListener('DOMContentLoaded', function() {
+          document.querySelectorAll('form[data-async-form]').forEach(function(form) {
+              form.addEventListener('submit', async function(event) {
+                  event.preventDefault();
+
+                  const confirmMessage = form.getAttribute('data-confirm-message');
+                  if (confirmMessage && !window.confirm(confirmMessage)) {
+                      return;
+                  }
+
+                  const submitButton = event.submitter || form.querySelector('button[type="submit"], input[type="submit"]');
+                  const originalButtonText = submitButton ? submitButton.innerHTML : null;
+                  if (submitButton) {
+                      submitButton.disabled = true;
+                  }
+
+                  try {
+                      const response = await fetch(form.action, {
+                          method: (form.method || 'POST').toUpperCase(),
+                          body: new FormData(form),
+                          credentials: 'same-origin',
+                          redirect: 'follow',
+                          headers: {
+                              'X-Requested-With': 'fetch',
+                          },
+                      });
+
+                      if (response.redirected && response.url) {
+                          window.location.assign(response.url);
+                          return;
+                      }
+
+                      window.location.reload();
+                  } catch (error) {
+                      console.error('Async form submission failed:', error);
+                      window.alert('Request failed. Please try again.');
+                  } finally {
+                      if (submitButton) {
+                          submitButton.disabled = false;
+                          if (originalButtonText !== null) {
+                              submitButton.innerHTML = originalButtonText;
+                          }
+                      }
+                  }
+              });
+          });
       });
     </script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

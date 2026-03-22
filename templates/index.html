@@ -470,9 +470,11 @@
         margin-top: 0 !important;
         padding-top: 0.5rem;
         padding-bottom: 0.5rem;
+        height: calc(100vh - 76px);
         min-height: calc(100vh - 76px);
         display: flex;
         flex-direction: column;
+        overflow: hidden;
     }
 
     body.mobile-fixed-nav-page > .container.mt-4 > .row {
@@ -480,12 +482,34 @@
         min-height: 0;
     }
 
+    body.mobile-fixed-nav-page > .container.mt-4 > .row > .col-12 {
+        display: flex;
+        min-height: 0;
+    }
+
     .chat-shell-card {
         height: 100%;
+        flex: 1 1 auto;
+        min-height: 0;
     }
 
     .chat-shell-card > .card-body.d-flex.flex-column {
+        height: 100%;
         min-height: 0;
+        overflow: hidden;
+    }
+
+    .desktop-chat-header,
+    #chatTabBar,
+    #composerBar {
+        flex: 0 0 auto;
+    }
+
+    #messagesContainer {
+        flex: 1 1 0 !important;
+        height: 0;
+        min-height: 0 !important;
+        overflow-y: auto !important;
     }
 }
 

@@ -2235,17 +2235,8 @@ function handleEditChannelListClick(event) {
 
 function handleThreadListInput(event) {
     if (event.target && event.target.id === 'nodeSearchInput') {
-        const nextValue = event.target.value || '';
-        const selectionStart = event.target.selectionStart ?? nextValue.length;
-        const selectionEnd = event.target.selectionEnd ?? nextValue.length;
-        nodeSearchQuery = nextValue;
-        renderActiveMessages();
-        requestAnimationFrame(() => {
-            const refreshedInput = document.getElementById('nodeSearchInput');
-            if (!refreshedInput) return;
-            refreshedInput.focus();
-            refreshedInput.setSelectionRange(selectionStart, selectionEnd);
-        });
+        nodeSearchQuery = event.target.value || '';
+        updateNodeListFilter();
     }
 }
 
@@ -2291,14 +2282,27 @@ function renderNodesList(container) {
                 </div>
             </div>
             <div class="card-body">
-                ${
-                    filteredNodes.length
-                        ? `<div class="node-list">${filteredNodes.map(renderNodeCardHtml).join('')}</div>`
-                        : '<div class="text-muted small">No nodes match this search.</div>'
-                }
+                <div id="nodeListResults">
+                    ${renderNodeListResults(filteredNodes)}
+                </div>
             </div>
         </div>
     `;
+}
+
+function renderNodeListResults(nodes) {
+    return nodes.length
+        ? `<div class="node-list">${nodes.map(renderNodeCardHtml).join('')}</div>`
+        : '<div class="text-muted small">No nodes match this search.</div>';
+}
+
+function updateNodeListFilter() {
+    const results = document.getElementById('nodeListResults');
+    if (!results) {
+        renderActiveMessages();
+        return;
+    }
+    results.innerHTML = renderNodeListResults(getFilteredNodes());
 }
 
 async function loadManagedProfiles() {

@@ -2,6 +2,12 @@ import base64
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from meshtastic.protobuf import mesh_pb2
+from firefly_logging import configure_logging, get_logger, make_log_print
+
+
+configure_logging()
+logger = get_logger("firefly.crypto")
+print = make_log_print(logger)
 
 
 MESHTASTIC_ONE_BYTE_PSK_PREFIX = bytes.fromhex("d4f1bb3a20290759f0bcffabcf4e69")
@@ -19,7 +25,7 @@ def expand_short_psk(key: str) -> str:
     return base64.b64encode(MESHTASTIC_ONE_BYTE_PSK_PREFIX + raw_key).decode("ascii")
 
 
-def decrypt_packet(mp: mesh_pb2.MeshPacket, key: str) -> mesh_pb2.Data | None:
+def decrypt_packet(mp: mesh_pb2.MeshPacket, key: str, *, silent: bool = False) -> mesh_pb2.Data | None:
     """
     Decrypt the encrypted message payload and return the decoded Data object.
 
@@ -55,7 +61,8 @@ def decrypt_packet(mp: mesh_pb2.MeshPacket, key: str) -> mesh_pb2.Data | None:
             return None
 
     except Exception as e:
-        print(f"Failed to decrypt: {e}")
+        if not silent:
+            print(f"Failed to decrypt: {e}")
         return None
 
 

@@ -21,6 +21,11 @@ from pubsub import pub
 from vnode import VirtualNode, parse_node_id
 from vnode.crypto import b64_decode, decrypt_dm, derive_public_key
 from encryption import generate_hash
+from firefly_logging import configure_logging, get_logger, make_log_print
+
+configure_logging()
+logger = get_logger("firefly.mesh")
+print = make_log_print(logger)
 
 
 BROADCAST_NODE_NUM = 0xFFFFFFFF
@@ -285,7 +290,7 @@ class VirtualNodeManager:
         if not channel_name or not channel_key:
             return None
         try:
-            data = decrypt_packet(decoded_packet, channel_key)
+            data = decrypt_packet(decoded_packet, channel_key, silent=True)
         except Exception:
             data = None
         if data is None:

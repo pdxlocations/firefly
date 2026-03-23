@@ -5,6 +5,12 @@ import json
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 import os
+from firefly_logging import configure_logging, get_logger, make_log_print
+
+
+configure_logging()
+logger = get_logger("firefly.db")
+print = make_log_print(logger)
 
 
 class Database:

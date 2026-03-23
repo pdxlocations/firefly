@@ -12,6 +12,12 @@ import importlib.util
 import signal
 import atexit
 from database import Database
+from firefly_logging import configure_logging, get_logger, make_log_print
+
+
+configure_logging()
+logger = get_logger("firefly.start")
+print = make_log_print(logger)
 
 REQUIRED_RUNTIME_MODULES = ("meshdb", "vnode")
 _SHUTDOWN_IN_PROGRESS = False

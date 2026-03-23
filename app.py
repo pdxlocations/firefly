@@ -20,8 +20,13 @@ from mudp import node
 from mudp.reliability import is_ack, is_nak, parse_routing
 from database import Database
 from encryption import generate_hash
+from firefly_logging import configure_logging, get_logger, make_log_print
 from mesh_runtime import MeshNodeStore, SharedPacketReceiver, VirtualNodeManager, count_nodes_for_profiles
 from vnode.crypto import b64_decode
+
+configure_logging()
+logger = get_logger("firefly.app")
+print = make_log_print(logger)
 
 
 MCAST_GRP = os.getenv("FIREFLY_MCAST_GRP", "224.0.0.69")
@@ -739,71 +744,62 @@ def _decode_payload_for_log(packet: mesh_pb2.MeshPacket):
     return "protobuf", decoded_payload
 
 
-def _print_packet_with_decoded_payload(packet: mesh_pb2.MeshPacket):
+def _packet_type_for_log(packet: mesh_pb2.MeshPacket) -> str:
+    if packet.HasField("decoded"):
+        try:
+            return portnums_pb2.PortNum.Name(packet.decoded.portnum)
+        except Exception:
+            return str(int(getattr(packet.decoded, "portnum", 0) or 0))
+    if getattr(packet, "encrypted", b""):
+        return "ENCRYPTED"
+    return "RAW"
+
+
+def _payload_preview_for_log(packet: mesh_pb2.MeshPacket, max_len: int = 140) -> str:
     payload_kind, decoded_payload = _decode_payload_for_log(packet)
-    if payload_kind is None:
-        print(packet)
-        return
-
-    print("from:", getattr(packet, "from", None))
-    print("to:", packet.to)
-    print("channel:", packet.channel or None)
-    print("decoded {")
-    port_name = portnums_pb2.PortNum.Name(packet.decoded.portnum) if packet.decoded.portnum else "N/A"
-    print("  portnum:", port_name)
-
     if payload_kind == "text":
-        escaped_text = decoded_payload.encode("unicode_escape").decode("ascii")
-        print(f'  payload: "{escaped_text}"')
+        preview = decoded_payload.encode("unicode_escape").decode("ascii")
+    elif payload_kind == "protobuf":
+        preview = text_format.MessageToString(decoded_payload, as_utf8=True).strip().replace("\n", " ")
+    elif packet.HasField("decoded"):
+        payload = bytes(packet.decoded.payload or b"")
+        if payload:
+            preview = payload[:24].hex(" ")
+            if len(payload) > 24:
+                preview += f" ... ({len(payload)} bytes)"
+        else:
+            preview = ""
     else:
-        print("  payload: {")
-        decoded_text = text_format.MessageToString(decoded_payload, as_utf8=True).rstrip()
-        for line in decoded_text.splitlines():
-            print(f"    {line}")
-        print("  }")
+        preview = f"{len(bytes(getattr(packet, 'encrypted', b'')))} encrypted bytes"
 
-    if packet.decoded.dest:
-        print("  dest:", packet.decoded.dest)
-    if packet.decoded.source:
-        print("  source:", packet.decoded.source)
-    if packet.decoded.request_id:
-        print("  request_id:", packet.decoded.request_id)
-    if packet.decoded.reply_id:
-        print("  reply_id:", packet.decoded.reply_id)
-    if packet.decoded.emoji:
-        print("  emoji:", packet.decoded.emoji)
-    if packet.decoded.HasField("bitfield"):
-        print("  bitfield:", packet.decoded.bitfield)
-    if packet.decoded.want_response:
-        print("  want_response:", packet.decoded.want_response)
-    print("}")
+    preview = " ".join(str(preview).split())
+    if len(preview) > max_len:
+        return preview[: max_len - 3] + "..."
+    return preview
 
-    print("id:", packet.id or None)
-    print("rx_time:", packet.rx_time or None)
-    print("rx_snr:", packet.rx_snr or None)
-    print("hop_limit:", packet.hop_limit or None)
-    priority_name = mesh_pb2.MeshPacket.Priority.Name(packet.priority) if packet.priority else "N/A"
-    print("priority:", priority_name or None)
-    print("rx_rssi:", packet.rx_rssi or None)
-    print("hop_start:", packet.hop_start or None)
-    print("next_hop:", packet.next_hop or None)
-    print("relay_node:", packet.relay_node or None)
-    transport_name = (
-        mesh_pb2.MeshPacket.TransportMechanism.Name(packet.transport_mechanism)
-        if packet.transport_mechanism
-        else None
+
+def _log_packet_summary(packet: mesh_pb2.MeshPacket, addr=None):
+    sender = _node_id_from_num(getattr(packet, "from", None)) or str(getattr(packet, "from", None))
+    destination = getattr(packet, "to", None)
+    if destination == BROADCAST_NODE_NUM:
+        destination_label = "broadcast"
+    else:
+        destination_label = _node_id_from_num(destination) or str(destination)
+    packet_type = _packet_type_for_log(packet)
+    payload_preview = _payload_preview_for_log(packet)
+    source_addr = addr[0] if isinstance(addr, tuple) and len(addr) >= 1 else addr
+    print(
+        f"[RECV] src={source_addr} from={sender} to={destination_label} "
+        f"type={packet_type} payload={payload_preview}"
     )
-    if transport_name:
-        print("transport_mechanism:", transport_name)
 
 
 def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
     supplemental_packet = _decode_packet_for_service(packet)
     packet_for_storage = supplemental_packet or packet
 
-    print(f"\n[RECV] Packet received from {addr}")
     _maybe_ack_local_direct_packet(packet)
-    _print_packet_with_decoded_payload(packet_for_storage)
+    _log_packet_summary(packet_for_storage, addr=addr)
 
     for profile, mesh_store in _matching_mesh_stores_for_packet(packet_for_storage):
         try:
@@ -1150,7 +1146,13 @@ pub.subscribe(on_max_retransmit, "mesh.tx.max_retransmit")
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("FIREFLY_SECRET_KEY", DEFAULT_SECRET_KEY)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", logger=True, engineio_logger=True)
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="threading",
+    logger=get_logger("socketio.server"),
+    engineio_logger=get_logger("engineio.server"),
+)
 
 
 @app.context_processor

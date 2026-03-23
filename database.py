@@ -614,52 +614,6 @@ class Database:
             print(f"Error deleting profile: {e}")
             return False
 
-    def store_node(self, profile_id: str, node_num: int, node_id: str, 
-                   long_name: str = None, short_name: str = None, 
-                   macaddr: bytes = None, hw_model: str = None, 
-                   role: str = None, public_key: bytes = None, 
-                   raw_nodeinfo: str = None) -> bool:
-        """Store or update a node seen by a profile"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                # Check if node exists for this profile
-                cursor = conn.execute("""
-                    SELECT id, packet_count FROM nodes WHERE profile_id = ? AND node_num = ?
-                """, (profile_id, node_num))
-                existing = cursor.fetchone()
-                
-                if existing:
-                    # Update existing node
-                    conn.execute("""
-                        UPDATE nodes SET 
-                            node_id = COALESCE(?, node_id),
-                            long_name = COALESCE(?, long_name),
-                            short_name = COALESCE(?, short_name),
-                            macaddr = COALESCE(?, macaddr),
-                            hw_model = COALESCE(?, hw_model),
-                            role = COALESCE(?, role),
-                            public_key = COALESCE(?, public_key),
-                            last_seen = CURRENT_TIMESTAMP,
-                            packet_count = packet_count + 1,
-                            raw_nodeinfo = COALESCE(?, raw_nodeinfo)
-                        WHERE id = ?
-                    """, (node_id, long_name, short_name, macaddr, hw_model, 
-                         role, public_key, raw_nodeinfo, existing[0]))
-                else:
-                    # Insert new node
-                    conn.execute("""
-                        INSERT INTO nodes 
-                        (profile_id, node_num, node_id, long_name, short_name, 
-                         macaddr, hw_model, role, public_key, raw_nodeinfo)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (profile_id, node_num, node_id, long_name, short_name, 
-                         macaddr, hw_model, role, public_key, raw_nodeinfo))
-                conn.commit()
-                return True
-        except Exception as e:
-            print(f"Error storing node: {e}")
-            return False
-
     # === CHANNEL-BASED NODE METHODS (NEW) ===
     
     def store_node_for_channel(self, channel: int, node_num: int, node_id: str, 
@@ -765,48 +719,6 @@ class Database:
                 nodes.append(node_data)
             return nodes
     
-    def get_nodes_for_profile_channel(self, profile_id: str) -> List[Dict]:
-        """Get nodes for a profile based on its channel (convenience method)"""
-        from encryption import generate_hash
-        
-        # Get the profile's channel
-        profile = self.get_profile(profile_id)
-        if not profile:
-            return []
-        
-        # Calculate channel number
-        channel = generate_hash(profile['channel'], profile['key'])
-        
-        # Get nodes for that channel
-        return self.get_nodes_for_channel(channel)
-    
-    # === LEGACY PROFILE-BASED NODE METHODS (DEPRECATED) ===
-    
-    def store_node(self, profile_id: str, node_num: int, node_id: str, 
-                   long_name: str = None, short_name: str = None, 
-                   macaddr: bytes = None, hw_model: str = None, 
-                   role: str = None, public_key: bytes = None, 
-                   raw_nodeinfo: str = None) -> bool:
-        """DEPRECATED: Store node by profile - use store_node_for_channel() instead"""
-        print(f"[DEPRECATED] store_node() called - use store_node_for_channel() instead")
-        
-        # Get profile to determine channel
-        from encryption import generate_hash
-        profile = self.get_profile(profile_id)
-        if not profile:
-            return False
-        
-        # Calculate channel and delegate to new method
-        channel = generate_hash(profile['channel'], profile['key'])
-        return self.store_node_for_channel(channel, node_num, node_id, long_name, 
-                                          short_name, macaddr, hw_model, role, 
-                                          public_key, raw_nodeinfo)
-    
-    def get_nodes_for_profile(self, profile_id: str) -> List[Dict]:
-        """DEPRECATED: Get nodes by profile - use get_nodes_for_profile_channel() instead"""
-        print(f"[DEPRECATED] get_nodes_for_profile() called - use get_nodes_for_profile_channel() instead")
-        return self.get_nodes_for_profile_channel(profile_id)
-
     def store_message(self, message_id: str, packet_id: int = None,
                      sender_num: int = None, sender_display: str = None,
                      content: str = None, sender_ip: str = None, direction: str = "received",
@@ -832,12 +744,6 @@ class Database:
         except Exception as e:
             print(f"Error storing message: {e}")
             return False
-
-    # Legacy method - use get_messages_for_channel() instead
-    def get_messages_for_profile(self, profile_id: str, limit: int = 100) -> List[Dict]:
-        """Legacy method - messages are now stored by channel, not profile"""
-        print(f"[DEPRECATED] get_messages_for_profile() called - use get_messages_for_channel() instead")
-        return []
 
     def get_stats(self, profile_id: str = None) -> Dict:
         """Get database statistics"""
@@ -994,72 +900,6 @@ class Database:
             print(f"Error deleting DM thread: {e}")
             return 0
 
-    def get_nodes_for_profile_channel(self, profile_id: str, channel: int) -> List[Dict]:
-        """Get nodes for a specific profile that have been seen on a specific channel"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            
-            # Get nodes that have sent messages on the specified channel
-            cursor = conn.execute("""
-                SELECT DISTINCT n.node_id, n.node_num, n.long_name, n.short_name, 
-                       n.macaddr, n.hw_model, n.role, n.first_seen, n.last_seen, 
-                       n.packet_count, n.raw_nodeinfo
-                FROM nodes n
-                WHERE n.profile_id = ? 
-                AND EXISTS (
-                    SELECT 1 FROM messages m 
-                    WHERE m.sender_num = n.node_num AND m.channel = ?
-                )
-                ORDER BY n.last_seen DESC
-            """, (profile_id, channel))
-            
-            nodes = []
-            for row in cursor:
-                # Ensure node_id is properly formatted as hex
-                node_id = row['node_id']
-                if not node_id and row['node_num']:
-                    # Fallback: create hex node_id from node_num
-                    node_id = f"!{hex(row['node_num'])[2:].zfill(8)}"
-                elif node_id and not node_id.startswith('!'):
-                    # Fix malformed node_id that might be decimal
-                    try:
-                        # If it's a decimal number, convert to hex format
-                        decimal_val = int(node_id)
-                        node_id = f"!{hex(decimal_val)[2:].zfill(8)}"
-                    except ValueError:
-                        # If it's not a number, keep as is
-                        pass
-                
-                node_data = {
-                    'node_id': node_id,
-                    'node_num': row['node_num'],
-                    'long_name': row['long_name'],
-                    'short_name': row['short_name'],
-                    'hw_model': row['hw_model'],
-                    'role': row['role'],
-                    'first_seen': row['first_seen'],
-                    'last_seen': row['last_seen'],
-                    'packet_count': row['packet_count']
-                }
-                
-                # Try to parse raw_nodeinfo JSON
-                if row['raw_nodeinfo']:
-                    try:
-                        node_data['raw_nodeinfo'] = json.loads(row['raw_nodeinfo'])
-                    except:
-                        pass
-                        
-                # Format MAC address if available
-                if row['macaddr']:
-                    try:
-                        mac_bytes = row['macaddr']
-                        node_data['macaddr'] = ':'.join(f'{b:02x}' for b in mac_bytes)
-                    except:
-                        pass
-                        
-                nodes.append(node_data)
-            return nodes
-    
     def update_profile_last_seen(self, profile_id: str, channel: int) -> bool:
         """Update the last seen timestamp for a profile+channel combination"""
         try:

@@ -217,15 +217,12 @@ firefly/
 ├── start.py            # Primary startup entry point
 ├── start_with_venv.py  # Interpreter validation helper
 ├── templates/
-│   ├── base.html      # Base template with navigation
-│   ├── index.html     # Chat interface
-│   ├── nodes.html     # Node discovery and details
-│   └── profiles.html  # Profile management
+│   ├── auth.html      # Login and account creation
+│   ├── base.html      # Shared layout and mobile navigation
+│   └── index.html     # Single-page app for chat, nodes, map, and profiles
 └── static/
     ├── css/
     │   └── style.css  # Custom styles
-    ├── js/
-    │   └── app.js     # JavaScript utilities
     └── images/
         ├── firefly-logo-dark.png   # Logo for dark theme
         └── firefly-logo-light.png  # Logo for light theme

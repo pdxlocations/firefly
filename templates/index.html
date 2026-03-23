@@ -36,16 +36,14 @@
                     <button id="setProfileBtn" class="btn btn-primary" type="button">Set</button>
                 </div>
             </div>
-            <div class="card mb-3">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <span class="small text-muted">WebSocket</span>
-                        <span id="connectionStatusMobile" class="badge bg-secondary">Connecting...</span>
-                    </div>
-                    <div class="d-flex justify-content-between align-items-center">
-                        <span class="small text-muted">Mesh Interface</span>
-                        <span id="interfaceStatusMobile" class="badge bg-warning">Not Started</span>
-                    </div>
+            <div class="profile-selector-status mb-3">
+                <div class="profile-selector-status__row">
+                    <span class="profile-selector-status__label">WebSocket</span>
+                    <span id="connectionStatusMobile" class="badge bg-secondary profile-selector-status__badge">Connecting...</span>
+                </div>
+                <div class="profile-selector-status__row">
+                    <span class="profile-selector-status__label">Mesh Interface</span>
+                    <span id="interfaceStatusMobile" class="badge bg-warning profile-selector-status__badge">Not Started</span>
                 </div>
             </div>
             <button id="manageProfilesBtn" class="btn w-100 profile-selector-manage-link" type="button">Manage Profiles</button>
@@ -246,15 +244,18 @@
                     <input type="hidden" id="editProfileId">
                     <div class="mb-3">
                         <label for="editNodeId" class="form-label">Node ID *</label>
-                        <input type="text" class="form-control" id="editNodeId" required maxlength="64">
+                        <input type="text" class="form-control" id="editNodeId" required maxlength="9" pattern="^![0-9a-fA-F]{8}$" title="Node ID must start with ! and contain 8 hex characters.">
+                        <div class="form-text">Must be `!` followed by 8 hexadecimal characters.</div>
                     </div>
                     <div class="mb-3">
                         <label for="editLongName" class="form-label">Long Name *</label>
-                        <input type="text" class="form-control" id="editLongName" required maxlength="100">
+                        <input type="text" class="form-control" id="editLongName" required maxlength="31" title="Long name must be fewer than 32 characters.">
+                        <div class="form-text">Must be fewer than 32 characters.</div>
                     </div>
                     <div class="mb-3">
                         <label for="editShortName" class="form-label">Short Name *</label>
-                        <input type="text" class="form-control" id="editShortName" required maxlength="16">
+                        <input type="text" class="form-control" id="editShortName" required maxlength="4" title="Use 1 emoji without modifiers or exactly 4 letters/numbers.">
+                        <div class="form-text">Use 1 emoji without modifiers or exactly 4 letters/numbers.</div>
                     </div>
                     <div class="mb-3">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -919,29 +920,52 @@
 .profile-item {
     border: 1px solid var(--firefly-chat-border);
     border-radius: 1rem;
-    padding: 1rem;
+    padding: 0.85rem;
     background: var(--firefly-chat-surface);
+}
+
+.profile-item__content {
+    display: grid;
+    gap: 0.28rem;
+}
+
+.profile-item__title {
+    margin-bottom: 0;
+    line-height: 1.15;
 }
 
 .profile-item__meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.3rem 0.7rem;
+    gap: 0.18rem 0.55rem;
     color: var(--bs-secondary-color);
-    font-size: 0.88rem;
+    font-size: 0.84rem;
+    line-height: 1.1;
 }
 
 .profile-item__channels {
     display: grid;
-    gap: 0.35rem;
-    font-size: 0.87rem;
+    gap: 0.18rem;
+    font-size: 0.84rem;
+    line-height: 1.1;
 }
 
 .profile-item__actions {
     display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    min-width: 5rem;
+    gap: 0.45rem;
+    margin-top: 0.6rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid var(--firefly-chat-border);
+}
+
+.profile-item__actions .btn {
+    flex: 1 1 0;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.profile-item__created {
+    line-height: 1.1;
 }
 
 .profile-manager__create-shell {
@@ -1086,7 +1110,10 @@
     }
 
     .profile-item__actions {
-        min-width: 4.8rem;
+        display: flex;
+        gap: 0.4rem;
+        margin-top: 0.55rem;
+        padding-top: 0.5rem;
     }
 
     .message {
@@ -1137,6 +1164,43 @@
 
     #mobileSettingsSheet .card {
         border-radius: 1rem;
+    }
+
+    #mobileSettingsSheet .profile-selector-status {
+        display: grid;
+        gap: 0.75rem;
+        padding: 0.9rem 1rem;
+        border-radius: 1rem;
+        border: 1px solid rgba(128, 160, 190, 0.18);
+        background: rgba(255, 255, 255, 0.04);
+        box-shadow: none;
+    }
+
+    #mobileSettingsSheet .profile-selector-status__row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        min-height: 2.1rem;
+    }
+
+    #mobileSettingsSheet .profile-selector-status__label {
+        color: var(--bs-secondary-color);
+        font-size: 0.98rem;
+        line-height: 1.1;
+    }
+
+    #mobileSettingsSheet .profile-selector-status__badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 8.6rem;
+        min-height: 2.1rem;
+        padding: 0.35rem 0.9rem;
+        font-size: 0.92rem;
+        line-height: 1;
+        font-weight: 700;
+        border-radius: 0.9rem;
     }
 
     #mobileSettingsSheet.profile-selector-sheet .profile-selector-manage-link {
@@ -1472,6 +1536,13 @@ function openProfileSelector() {
     const sheet = document.getElementById('mobileSettingsSheet');
     if (sheet && typeof bootstrap !== 'undefined' && bootstrap.Offcanvas) {
         bootstrap.Offcanvas.getOrCreateInstance(sheet).show();
+    }
+}
+
+function closeProfileSelector() {
+    const sheet = document.getElementById('mobileSettingsSheet');
+    if (sheet && typeof bootstrap !== 'undefined' && bootstrap.Offcanvas) {
+        bootstrap.Offcanvas.getOrCreateInstance(sheet).hide();
     }
 }
 
@@ -2690,15 +2761,18 @@ function renderProfilesView(container) {
                     <form id="createProfileForm">
                         <div class="mb-3">
                             <label for="newNodeId" class="form-label">Node ID *</label>
-                            <input type="text" class="form-control" id="newNodeId" required maxlength="64" placeholder="e.g. !deadbeef">
+                            <input type="text" class="form-control" id="newNodeId" required maxlength="9" pattern="^![0-9a-fA-F]{8}$" placeholder="e.g. !deadbeef" title="Node ID must start with ! and contain 8 hex characters.">
+                            <div class="form-text">Must be ! followed by 8 hexadecimal characters.</div>
                         </div>
                         <div class="mb-3">
                             <label for="newLongName" class="form-label">Long Name *</label>
-                            <input type="text" class="form-control" id="newLongName" required maxlength="100">
+                            <input type="text" class="form-control" id="newLongName" required maxlength="31" title="Long name must be fewer than 32 characters.">
+                            <div class="form-text">Must be fewer than 32 characters.</div>
                         </div>
                         <div class="mb-3">
                             <label for="newShortName" class="form-label">Short Name *</label>
-                            <input type="text" class="form-control" id="newShortName" required maxlength="16">
+                            <input type="text" class="form-control" id="newShortName" required maxlength="4" title="Use 1 emoji without modifiers or exactly 4 letters/numbers.">
+                            <div class="form-text">Use 1 emoji without modifiers or exactly 4 letters/numbers.</div>
                         </div>
                         <div class="mb-3">
                             <div class="d-flex justify-content-between align-items-center mb-2">
@@ -2750,21 +2824,19 @@ function renderManagedProfileCard(profileId, profile) {
 
     return `
         <div class="profile-item mb-3" data-profile-id="${escapeHtml(profileId)}">
-            <div class="d-flex justify-content-between align-items-start gap-3">
-                <div class="flex-grow-1">
-                    <h6 class="mb-1">${escapeHtml(profile.long_name || profileId)}</h6>
-                    <div class="profile-item__meta mb-2">
-                        <span>Short: ${escapeHtml(profile.short_name || '')}</span>
-                        <span>Node: ${escapeHtml(profile.node_id || '')}</span>
-                        <span>Hop Limit: ${escapeHtml(String(profile.hop_limit ?? 3))}</span>
-                    </div>
-                    <div class="profile-item__channels mb-2">${channelMarkup}</div>
-                    <small class="text-muted">Created: ${escapeHtml(String(profile.created_at || '').slice(0, 10))}</small>
+            <div class="profile-item__content">
+                <h6 class="profile-item__title">${escapeHtml(profile.long_name || profileId)}</h6>
+                <div class="profile-item__meta">
+                    <span>Short: ${escapeHtml(profile.short_name || '')}</span>
+                    <span>Node: ${escapeHtml(profile.node_id || '')}</span>
+                    <span>Hop Limit: ${escapeHtml(String(profile.hop_limit ?? 3))}</span>
                 </div>
-                <div class="profile-item__actions">
-                    <button class="btn btn-outline-primary btn-sm" type="button" data-edit-profile-id="${escapeHtml(profileId)}">Edit</button>
-                    <button class="btn btn-outline-danger btn-sm" type="button" data-delete-profile-id="${escapeHtml(profileId)}">Delete</button>
-                </div>
+                <div class="profile-item__channels">${channelMarkup}</div>
+                <small class="text-muted profile-item__created">Created: ${escapeHtml(String(profile.created_at || '').slice(0, 10))}</small>
+            </div>
+            <div class="profile-item__actions">
+                <button class="btn btn-primary btn-sm" type="button" data-edit-profile-id="${escapeHtml(profileId)}">Edit</button>
+                <button class="btn btn-danger btn-sm" type="button" data-delete-profile-id="${escapeHtml(profileId)}">Delete</button>
             </div>
         </div>
     `;
@@ -2815,6 +2887,49 @@ function collectProfileChannels(containerId, requireValues = true) {
     }));
     const filtered = channels.filter(channel => channel.name || channel.key);
     return requireValues ? filtered.filter(channel => channel.name && channel.key) : filtered;
+}
+
+function utf8ByteLength(value) {
+    return new TextEncoder().encode(String(value || '')).length;
+}
+
+function isSimpleEmojiCodePoint(codePoint) {
+    if (!Number.isInteger(codePoint)) return false;
+    return (
+        (codePoint >= 0x2600 && codePoint <= 0x26FF) ||
+        (codePoint >= 0x2700 && codePoint <= 0x27BF) ||
+        (codePoint >= 0x1F300 && codePoint <= 0x1F5FF) ||
+        (codePoint >= 0x1F600 && codePoint <= 0x1F64F) ||
+        (codePoint >= 0x1F680 && codePoint <= 0x1F6FF) ||
+        (codePoint >= 0x1F900 && codePoint <= 0x1F9FF) ||
+        (codePoint >= 0x1FA70 && codePoint <= 0x1FAFF)
+    );
+}
+
+function isSingleSimpleEmoji(value) {
+    const glyphs = Array.from(String(value || ''));
+    if (glyphs.length !== 1) return false;
+    const codePoint = glyphs[0].codePointAt(0);
+    return isSimpleEmojiCodePoint(codePoint) && utf8ByteLength(glyphs[0]) <= 4;
+}
+
+function validateProfileIdentityFields({ node_id: nodeId, long_name: longName, short_name: shortName }) {
+    if (!/^![0-9a-fA-F]{8}$/.test(nodeId || '')) {
+        return 'Node ID must be ! followed by 8 hexadecimal characters.';
+    }
+
+    if (Array.from(longName || '').length >= 32) {
+        return 'Long name must be fewer than 32 characters.';
+    }
+
+    const shortValue = String(shortName || '');
+    const isAlphanumericShortName = /^[A-Za-z0-9]{4}$/.test(shortValue) && utf8ByteLength(shortValue) <= 4;
+    const isSingleEmojiShortName = isSingleSimpleEmoji(shortValue);
+    if (!isAlphanumericShortName && !isSingleEmojiShortName) {
+        return 'Short name must be 1 emoji without modifiers or exactly 4 alphanumeric characters.';
+    }
+
+    return '';
 }
 
 function createRandomNodeId() {
@@ -2894,6 +3009,12 @@ async function createManagedProfile(event) {
         return;
     }
 
+    const identityValidationError = validateProfileIdentityFields(payload);
+    if (identityValidationError) {
+        alert(identityValidationError);
+        return;
+    }
+
     try {
         const response = await fetch('/api/profiles', {
             method: 'POST',
@@ -2948,6 +3069,12 @@ async function updateManagedProfile() {
 
     if (!payload.node_id || !payload.long_name || !payload.short_name || !payload.channels.length) {
         alert('All fields are required, including at least one complete channel.');
+        return;
+    }
+
+    const identityValidationError = validateProfileIdentityFields(payload);
+    if (identityValidationError) {
+        alert(identityValidationError);
         return;
     }
 
@@ -3525,6 +3652,10 @@ async function setProfile(event) {
         }
 
         renderActiveMessages();
+
+        if (setBtn.id === 'setProfileBtn') {
+            closeProfileSelector();
+        }
 
         if (currentProfile && data.unread_count !== undefined) {
             if (data.unread_count > 0) {

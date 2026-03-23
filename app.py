@@ -4,6 +4,8 @@ from collections import deque
 
 from datetime import datetime
 from functools import wraps
+import re
+import unicodedata
 from google.protobuf import text_format
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, has_request_context, flash
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
@@ -34,6 +36,8 @@ MCAST_PORT = int(os.getenv("FIREFLY_UDP_PORT", "4403"))
 SOCKETIO_CLIENT_VERSION = "4.7.5"
 BROADCAST_NODE_NUM = 0xFFFFFFFF
 DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
+NODE_ID_PATTERN = re.compile(r"^![0-9a-f]{8}$")
+SHORT_NAME_ALNUM_PATTERN = re.compile(r"^[A-Za-z0-9]{4}$")
 
 # Cross-source de-duplication cache for user-visible packet handling.
 _DEDUP_CACHE = set()
@@ -156,6 +160,51 @@ def login_required(view):
 def _normalize_node_id(node_id):
     value = (node_id or "").strip()
     return value.lower() if value.startswith("!") else value
+
+
+def _normalize_text_field(value):
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _is_valid_short_name(short_name):
+    value = _normalize_text_field(short_name)
+    if not value:
+        return False
+    if SHORT_NAME_ALNUM_PATTERN.fullmatch(value):
+        return len(value.encode("utf-8")) <= 4
+    return (
+        len(value) == 1
+        and len(value.encode("utf-8")) <= 4
+        and unicodedata.category(value) == "So"
+    )
+
+
+def _validate_profile_request_payload(data):
+    normalized_node_id = _normalize_node_id(_normalize_text_field((data or {}).get("node_id")))
+    long_name = _normalize_text_field((data or {}).get("long_name"))
+    short_name = _normalize_text_field((data or {}).get("short_name"))
+    channels = _profile_channels(data)
+
+    if not normalized_node_id or not long_name or not short_name or not channels:
+        return None, "node_id, long_name, short_name, and at least one channel are required"
+    if not NODE_ID_PATTERN.fullmatch(normalized_node_id):
+        return None, "node_id must be ! followed by 8 hexadecimal characters"
+    if len(long_name) >= 32:
+        return None, "long_name must be fewer than 32 characters"
+    if not _is_valid_short_name(short_name):
+        return None, "short_name must be 1 emoji without modifiers or exactly 4 alphanumeric characters"
+
+    hop_limit = (data or {}).get("hop_limit", 3)
+    if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
+        return None, "hop_limit must be an integer between 0 and 7"
+
+    return {
+        "node_id": normalized_node_id,
+        "long_name": long_name,
+        "short_name": short_name,
+        "channels": channels,
+        "hop_limit": hop_limit,
+    }, None
 
 
 def _profile_channels(profile):
@@ -1883,26 +1932,27 @@ def get_profiles():
 @login_required
 def create_profile():
     """Create a new profile"""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     current_user = _get_session_user()
+    validated, error = _validate_profile_request_payload(data)
+    if error:
+        return jsonify({"error": error}), 400
 
-    normalized_node_id = _normalize_node_id((data or {}).get("node_id"))
-    channels = _profile_channels(data)
-    required = ["node_id", "long_name", "short_name"]
-    if not data or any(not data.get(k) for k in required) or not channels:
-        return jsonify({"error": "node_id, long_name, short_name, and at least one channel are required"}), 400
+    normalized_node_id = validated["node_id"]
+    channels = validated["channels"]
     if db.node_id_in_use(normalized_node_id):
         return jsonify({"error": "Node ID is already in use."}), 409
 
-    # Validate hop_limit if provided
-    hop_limit = data.get("hop_limit", 3)
-    if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
-        return jsonify({"error": "hop_limit must be an integer between 0 and 7"}), 400
-
-    # Create and store the profile
+    hop_limit = validated["hop_limit"]
     profile_id = str(uuid.uuid4())
     success = profile_manager.create_profile(
-        profile_id, current_user["id"], normalized_node_id, data["long_name"], data["short_name"], channels, hop_limit
+        profile_id,
+        current_user["id"],
+        normalized_node_id,
+        validated["long_name"],
+        validated["short_name"],
+        channels,
+        hop_limit,
     )
 
     if success:
@@ -1918,27 +1968,31 @@ def create_profile():
 @login_required
 def update_profile(profile_id):
     """Update an existing profile"""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     current_user = _get_session_user()
     existing_profile = profile_manager.get_profile(profile_id, user_id=current_user["id"])
     if not existing_profile:
         return jsonify({"error": "Profile not found"}), 404
 
-    normalized_node_id = _normalize_node_id((data or {}).get("node_id"))
-    channels = _profile_channels(data)
-    required = ["node_id", "long_name", "short_name"]
-    if not data or any(not data.get(k) for k in required) or not channels:
-        return jsonify({"error": "node_id, long_name, short_name, and at least one channel are required"}), 400
+    validated, error = _validate_profile_request_payload(data)
+    if error:
+        return jsonify({"error": error}), 400
+
+    normalized_node_id = validated["node_id"]
+    channels = validated["channels"]
     if db.node_id_in_use(normalized_node_id, exclude_profile_id=profile_id):
         return jsonify({"error": "Node ID is already in use."}), 409
 
-    # Validate hop_limit if provided
-    hop_limit = data.get("hop_limit", 3)
-    if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
-        return jsonify({"error": "hop_limit must be an integer between 0 and 7"}), 400
+    hop_limit = validated["hop_limit"]
 
     success = profile_manager.update_profile(
-        profile_id, current_user["id"], normalized_node_id, data["long_name"], data["short_name"], channels, hop_limit
+        profile_id,
+        current_user["id"],
+        normalized_node_id,
+        validated["long_name"],
+        validated["short_name"],
+        channels,
+        hop_limit,
     )
 
     if success:

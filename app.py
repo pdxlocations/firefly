@@ -422,6 +422,16 @@ def _apply_ack_update(packet_id, ack_status, ack_error=None):
         _emit_message_update(message)
 
 
+def _emit_node_update(profile_id, node):
+    if not profile_id or not node:
+        return
+
+    try:
+        socketio.emit("node_update", {"profile_id": profile_id, "node": node}, room=f"profile_{profile_id}")
+    except Exception as e:
+        print(f"[NODEINFO] Failed to broadcast node update for profile {profile_id}: {e}")
+
+
 shared_packet_receiver = SharedPacketReceiver(MCAST_GRP, MCAST_PORT)
 virtual_node_manager = VirtualNodeManager(MCAST_GRP, MCAST_PORT, shared_receiver=shared_packet_receiver)
 shared_packet_receiver.start()
@@ -586,6 +596,43 @@ def _display_name_for_node_num(node_num):
     return _node_id_from_num(node_num)
 
 
+def _message_has_fallback_sender_display(message):
+    if not message:
+        return True
+    sender_display = (message.get("sender_display") or "").strip()
+    sender_id = (message.get("sender") or "").strip()
+    return not sender_display or sender_display == "Unknown" or (sender_id and sender_display == sender_id)
+
+
+def _hydrate_message_sender_labels(messages, profile):
+    mesh_store = _get_mesh_store(profile)
+    if not mesh_store:
+        return messages
+
+    for message in messages or []:
+        sender_num = message.get("sender_num")
+        if sender_num in (None, 0):
+            continue
+
+        try:
+            found_node = mesh_store.get_node(int(sender_num))
+        except Exception:
+            found_node = None
+        if not found_node:
+            continue
+
+        preferred_display = found_node.get("long_name") or found_node.get("short_name") or found_node.get("node_id")
+        if preferred_display and _message_has_fallback_sender_display(message):
+            message["sender_display"] = preferred_display
+            if message.get("direction") == "received" and message.get("channel") is not None:
+                db.update_received_message_sender_display(message.get("channel"), int(sender_num), preferred_display)
+
+        if found_node.get("short_name"):
+            message["sender_short_name"] = found_node.get("short_name")
+
+    return messages
+
+
 def _get_chat_payload(profile):
     effective_profile = _effective_profile(profile)
     channel_number = _profile_channel_num(effective_profile)
@@ -598,6 +645,8 @@ def _get_chat_payload(profile):
         seen_channel_numbers.add(channel_hash)
         channel_messages.extend(db.get_messages_for_channel(channel_hash))
     dm_messages = db.get_dm_messages_for_profile(effective_profile["id"]) if effective_profile else []
+    _hydrate_message_sender_labels(channel_messages, effective_profile)
+    _hydrate_message_sender_labels(dm_messages, effective_profile)
     return {
         "channel_messages": channel_messages,
         "dm_messages": dm_messages,
@@ -965,6 +1014,8 @@ def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
         supplemental_portnum = int(getattr(supplemental_packet.decoded, "portnum", 0) or 0)
         if supplemental_portnum == int(portnums_pb2.PortNum.TEXT_MESSAGE_APP):
             on_text_message(supplemental_packet, addr=addr)
+        elif supplemental_portnum == int(portnums_pb2.PortNum.NODEINFO_APP):
+            on_nodeinfo(supplemental_packet, addr=addr)
         elif supplemental_portnum == int(portnums_pb2.PortNum.TRACEROUTE_APP):
             on_traceroute(supplemental_packet, addr=addr)
         elif supplemental_portnum == int(portnums_pb2.PortNum.ROUTING_APP):
@@ -1223,6 +1274,21 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
                     f"\n[NODEINFO] SEEN NODE {sender_num} for profile {profile.get('id')}: "
                     f"{after.get('long_name')} ({after.get('short_name')})"
                 )
+
+            display_name = after.get("long_name") or after.get("short_name") or after.get("node_id")
+            if display_name:
+                updated_rows = db.update_received_message_sender_display(
+                    _profile_channel_num(profile),
+                    sender_num,
+                    display_name,
+                )
+                if updated_rows:
+                    print(
+                        f"[NODEINFO] Updated {updated_rows} stored message labels for node {sender_num} "
+                        f"on profile {profile.get('id')}"
+                    )
+
+            _emit_node_update(profile.get("id"), after)
 
     except Exception as e:
         print(f"Error processing nodeinfo: {e}")
@@ -1559,7 +1625,7 @@ class UDPChatServer:
         if not sender_profile:
             return False
         try:
-            return virtual_node_manager.send_nodeinfo(int(destination))
+            return virtual_node_manager.send_nodeinfo(int(destination), want_response=True)
         except Exception as e:
             self.last_send_error = str(e) or "Failed to exchange node info"
             print(f"[NODEINFO] Failed to exchange node info with {destination}: {e}")

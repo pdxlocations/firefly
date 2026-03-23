@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "Firefly",
+  "short_name": "Firefly",
+  "description": "Firefly mesh chat and node management interface.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1420",
+  "theme_color": "#1f5d96",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/images/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

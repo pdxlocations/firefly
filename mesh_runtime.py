@@ -239,10 +239,10 @@ class VirtualNodeManager:
             raise RuntimeError("Virtual node is not running")
         return self.virtual_node.send_text(int(destination), message, hop_limit=hop_limit, reply_id=reply_id)
 
-    def send_nodeinfo(self, destination: int = BROADCAST_NODE_NUM) -> int:
+    def send_nodeinfo(self, destination: int = BROADCAST_NODE_NUM, *, want_response: bool = False) -> int:
         if self.virtual_node is None:
             raise RuntimeError("Virtual node is not running")
-        return self.virtual_node.send_nodeinfo(int(destination))
+        return self.virtual_node.send_nodeinfo(int(destination), want_response=want_response)
 
     def send_traceroute(self, destination: int, hop_limit: Optional[int] = None) -> int:
         if self.virtual_node is None:

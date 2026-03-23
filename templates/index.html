@@ -1766,6 +1766,10 @@ function initializeSocket() {
         applyMessageUpdate(message);
     });
 
+    socket.on('node_update', function(payload) {
+        applyNodeUpdate(payload);
+    });
+
     socket.on('traceroute_result', function(result) {
         handleTracerouteResult(result);
     });
@@ -1961,6 +1965,60 @@ async function loadNodes() {
     }
 }
 
+function getNodeDisplayLabel(node) {
+    if (!node) return 'Unknown';
+    return node.long_name || node.short_name || node.node_id || `!${Number(node.node_num).toString(16).padStart(8, '0')}`;
+}
+
+function applyNodeUpdate(payload) {
+    const node = payload && payload.node ? payload.node : payload;
+    const normalizedNodeNum = Number(node?.node_num);
+    if (!Number.isFinite(normalizedNodeNum)) return;
+
+    const existingIndex = meshNodes.findIndex(item => Number(item.node_num) === normalizedNodeNum);
+    if (existingIndex >= 0) {
+        meshNodes[existingIndex] = {
+            ...meshNodes[existingIndex],
+            ...node,
+            node_num: normalizedNodeNum,
+        };
+    } else {
+        meshNodes.push({
+            ...node,
+            node_num: normalizedNodeNum,
+        });
+    }
+
+    const displayLabel = getNodeDisplayLabel(node);
+    [channelMessages, dmMessages].forEach(collection => {
+        collection.forEach(message => {
+            if (Number(message.sender_num) !== normalizedNodeNum) return;
+            if (node.long_name) {
+                message.sender_display = node.long_name;
+            } else if (!message.sender_display || message.sender_display === message.sender || message.sender_display === 'Unknown') {
+                message.sender_display = displayLabel;
+            }
+            if (node.short_name) {
+                message.sender_short_name = node.short_name;
+            }
+        });
+    });
+
+    const hasExistingTarget = dmTargets.some(target => Number(target.node_num) === normalizedNodeNum);
+    const hasRelatedDm = dmMessages.some(message => Number(getPeerNodeNum(message)) === normalizedNodeNum);
+    if (hasExistingTarget || hasRelatedDm) {
+        upsertDmTarget({
+            node_num: normalizedNodeNum,
+            node_id: node.node_id || `!${normalizedNodeNum.toString(16).padStart(8, '0')}`,
+            label: displayLabel,
+            short_name: node.short_name || '',
+        });
+    }
+    syncDmTargetsFromMessages();
+    renderActiveMessages();
+    updateComposerState();
+}
+
 async function loadDmTargets() {
     if (!currentProfile) {
         dmTargets = [];
@@ -1979,18 +2037,20 @@ async function loadDmTargets() {
     const requestedNodeNums = new Set(
         dmMessages
             .map(message => getPeerNodeNum(message))
-            .filter(nodeNum => !!nodeNum)
+            .filter(nodeNum => Number.isFinite(Number(nodeNum)))
             .map(nodeNum => Number(nodeNum))
     );
     if (pendingDmTargetNodeNum) {
         const pendingNodeNum = Number(pendingDmTargetNodeNum);
-        requestedNodeNums.add(pendingNodeNum);
-        fallbackTargets.push({
-            node_num: pendingNodeNum,
-            node_id: `!${pendingNodeNum.toString(16).padStart(8, '0')}`,
-            label: `!${pendingNodeNum.toString(16).padStart(8, '0')}`,
-            short_name: '',
-        });
+        if (Number.isFinite(pendingNodeNum)) {
+            requestedNodeNums.add(pendingNodeNum);
+            fallbackTargets.push({
+                node_num: pendingNodeNum,
+                node_id: `!${pendingNodeNum.toString(16).padStart(8, '0')}`,
+                label: `!${pendingNodeNum.toString(16).padStart(8, '0')}`,
+                short_name: '',
+            });
+        }
     }
 
     const loadedTargets = await Promise.all(
@@ -2023,6 +2083,7 @@ function upsertDmTarget(target) {
     if (!target || target.node_num === null || target.node_num === undefined) return;
 
     const normalizedNodeNum = Number(target.node_num);
+    if (!Number.isFinite(normalizedNodeNum)) return;
     const existingIndex = dmTargets.findIndex(node => Number(node.node_num) === normalizedNodeNum);
     if (existingIndex >= 0) {
         dmTargets[existingIndex] = {
@@ -2052,6 +2113,7 @@ function createDmTargetFromMessage(message, peerNodeNum = getPeerNodeNum(message
     if (!peerNodeNum) return null;
 
     const normalizedNodeNum = Number(peerNodeNum);
+    if (!Number.isFinite(normalizedNodeNum)) return null;
     const localProfile = getManagedProfileByNodeNum(normalizedNodeNum);
     return {
         node_num: normalizedNodeNum,
@@ -2062,6 +2124,7 @@ function createDmTargetFromMessage(message, peerNodeNum = getPeerNodeNum(message
 }
 
 function syncDmTargetsFromMessages() {
+    dmTargets = dmTargets.filter(target => Number.isFinite(Number(target?.node_num)));
     dmMessages.forEach(message => {
         const fallbackTarget = createDmTargetFromMessage(message);
         if (fallbackTarget) upsertDmTarget(fallbackTarget);

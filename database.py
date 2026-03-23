@@ -802,7 +802,8 @@ class Database:
             
             # Get messages for the specific channel
             cursor = conn.execute("""
-                SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
+                       n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
                        m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
                        m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
                        m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
@@ -819,7 +820,8 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
-                SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
+                       n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
                        m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
                        m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
                        m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
@@ -850,7 +852,8 @@ class Database:
                 )
                 cursor = conn.execute(
                     """
-                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
+                           n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
                            m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
                            m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
                            m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
@@ -869,6 +872,29 @@ class Database:
         except Exception as e:
             print(f"Error updating ACK status: {e}")
             return []
+
+    def update_received_message_sender_display(self, channel: int, sender_num: int, sender_display: str) -> int:
+        """Update stored received-message display names after nodeinfo arrives."""
+        if channel is None or sender_num is None or not sender_display:
+            return 0
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE messages
+                    SET sender_display = ?
+                    WHERE channel = ?
+                      AND sender_num = ?
+                      AND direction = 'received'
+                    """,
+                    (str(sender_display), int(channel), int(sender_num)),
+                )
+                conn.commit()
+                return int(cursor.rowcount or 0)
+        except Exception as e:
+            print(f"Error updating received message sender display: {e}")
+            return 0
 
     def delete_channel_messages(self, channel: int) -> int:
         """Delete all channel messages for a specific channel hash."""
@@ -938,7 +964,8 @@ class Database:
             if last_seen_row and last_seen_row['last_seen_timestamp']:
                 # Get messages newer than last seen
                 cursor = conn.execute("""
-                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
+                           n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
                            m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
                            m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
                            m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
@@ -956,7 +983,8 @@ class Database:
             else:
                 # No last seen timestamp - return all messages (but limit to prevent overload)
                 cursor = conn.execute("""
-                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display, n.short_name AS sender_short_name,
+                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
+                           n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
                            m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
                            m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
                            m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
@@ -1073,11 +1101,33 @@ class Database:
         for row in cursor:
             sender_num = row['sender_num']
             target_node_num = row['target_node_num']
+            sender_display = row['sender_display']
+            sender_long_name = row['sender_long_name'] if 'sender_long_name' in row.keys() else None
+            sender_short_name = row['sender_short_name'] if 'sender_short_name' in row.keys() else None
+            sender_node_id = row['sender_node_id'] if 'sender_node_id' in row.keys() else None
+            fallback_sender_id = f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else None
 
-            if row['sender_display']:
-                current_sender_display = row['sender_display']
+            if sender_long_name and (
+                not sender_display
+                or sender_display == 'Unknown'
+                or (fallback_sender_id is not None and sender_display == fallback_sender_id)
+            ):
+                current_sender_display = sender_long_name
+            elif sender_short_name and (
+                not sender_display
+                or sender_display == 'Unknown'
+                or (fallback_sender_id is not None and sender_display == fallback_sender_id)
+            ):
+                current_sender_display = sender_short_name
+            elif sender_node_id and (
+                not sender_display
+                or sender_display == 'Unknown'
+            ):
+                current_sender_display = sender_node_id
+            elif sender_display:
+                current_sender_display = sender_display
             elif sender_num:
-                current_sender_display = f"!{hex(sender_num)[2:].zfill(8)}"
+                current_sender_display = fallback_sender_id
             else:
                 current_sender_display = 'Unknown'
 
@@ -1088,7 +1138,7 @@ class Database:
                 'sender_num': sender_num,
                 'sender': f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else 'Unknown',
                 'sender_display': current_sender_display,
-                'sender_short_name': row['sender_short_name'],
+                'sender_short_name': sender_short_name,
                 'content': row['content'],
                 'timestamp': row['timestamp'],
                 'sender_ip': row['sender_ip'],

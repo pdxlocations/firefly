@@ -336,13 +336,55 @@
     hyphens: auto;
     max-width: 100%;
     overflow: hidden;
+    padding: 0.7rem 0.8rem;
+}
+
+.message__layout {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.55rem;
+    min-width: 0;
+}
+
+.message__body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.message__sender-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.15rem 0.35rem;
+    line-height: 1.15;
+    margin-bottom: 0.2rem;
+}
+
+.message__content {
+    margin-top: 0.2rem;
+    line-height: 1.28;
 }
 
 .message__meta {
     display: inline-flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.15rem;
+    margin-left: 0.15rem;
+}
+
+.message__meta-top {
+    display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
-    margin-left: 0.75rem;
+    gap: 0.35rem;
+    white-space: nowrap;
+}
+
+.message__timestamp {
+    white-space: nowrap;
+    line-height: 1;
 }
 
 .message-ack {
@@ -417,8 +459,9 @@
 
 .reply-preview {
     border-left: 3px solid var(--bs-border-color);
-    padding-left: 0.75rem;
-    margin-bottom: 0.5rem;
+    padding-left: 0.55rem;
+    margin-bottom: 0.35rem;
+    line-height: 1.2;
 }
 
 .message-unread-divider {
@@ -449,7 +492,17 @@
     border: none;
     background: transparent;
     padding: 0;
-    font-size: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    color: var(--bs-secondary-color);
+}
+
+.reply-trigger svg {
+    width: 100%;
+    height: 100%;
 }
 
 /* Handle Discord/Slack message URLs and long identifiers */
@@ -1121,11 +1174,7 @@
         border: 1px solid var(--firefly-chat-border);
         border-radius: 1.1rem;
         box-shadow: 0 10px 24px rgba(44, 64, 82, 0.07);
-        margin-bottom: 0.75rem !important;
-    }
-
-    .message.border-bottom {
-        border-bottom: 1px solid var(--firefly-chat-border) !important;
+        margin-bottom: 0.55rem !important;
     }
 
     .reply-preview {
@@ -3495,23 +3544,34 @@ function renderMessageHtml(message) {
     const dmBadge = message.message_type === 'dm' ? '<span class="badge bg-secondary ms-1">DM</span>' : '';
     const ackBadge = renderAckStatusHtml(message);
     const replyPreview = renderReplyPreview(message);
-    const replyButton = message.packet_id ? `<button class="reply-trigger text-decoration-none text-muted" type="button" onclick="startReply(${message.packet_id})">Reply</button>` : '';
+    const replyButton = message.packet_id ? `
+        <button class="reply-trigger" type="button" onclick="startReply(${message.packet_id})" aria-label="Reply" title="Reply">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6.25 4.25 2.75 7.75l3.5 3.5"/>
+                <path d="M3.25 7.75h6.1c2.04 0 3.4 1.36 3.4 3.4v.6"/>
+            </svg>
+        </button>
+    ` : '';
 
     return `
-        <div class="message mb-2 p-2 border-bottom">
-            <div class="d-flex justify-content-between align-items-start">
-                <div class="flex-grow-1">
-                    <strong class="${isOwnMessage ? 'text-primary' : 'text-info'}">${escapeHtml(message.sender_display || message.sender || 'Unknown')}</strong>
-                    <small class="text-muted">(${escapeHtml(message.sender || 'Unknown')})</small>
-                    ${isOwnMessage ? '<span class="badge bg-primary ms-1">You</span>' : ''}
-                    ${dmBadge}
+        <div class="message">
+            <div class="message__layout">
+                <div class="message__body">
+                    <div class="message__sender-line">
+                        <strong class="${isOwnMessage ? 'text-primary' : 'text-info'}">${escapeHtml(message.sender_display || message.sender || 'Unknown')}</strong>
+                        <small class="text-muted">(${escapeHtml(message.sender || 'Unknown')})</small>
+                        ${isOwnMessage ? '<span class="badge bg-primary ms-1">You</span>' : ''}
+                        ${dmBadge}
+                    </div>
                     ${replyPreview}
-                    <div class="mt-1">${escapeHtml(message.content || '').replace(/\n/g, '<br>')}</div>
-                    <div class="mt-2">${replyButton}</div>
+                    <div class="message__content">${escapeHtml(message.content || '').replace(/\n/g, '<br>')}</div>
                 </div>
                 <div class="message__meta">
-                    ${ackBadge}
-                    <small class="text-muted">${timestamp}</small>
+                    <div class="message__meta-top">
+                        ${ackBadge}
+                        <small class="message__timestamp text-muted">${timestamp}</small>
+                    </div>
+                    ${replyButton}
                 </div>
             </div>
         </div>

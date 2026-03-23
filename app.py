@@ -638,10 +638,6 @@ def _ensure_local_dm_ack(packet: mesh_pb2.MeshPacket, owner_profile) -> None:
     if is_ack(packet) or is_nak(packet):
         return
 
-    active_profile = udp_server.get_active_profile()
-    if active_profile and str(active_profile.get("id")) == str(owner_profile.get("id")):
-        return
-
     try:
         ack_packet_id = udp_server.send_ack_for_profile(owner_profile, packet)
         print(

@@ -244,6 +244,19 @@ class VirtualNodeManager:
             raise RuntimeError("Virtual node is not running")
         return self.virtual_node.send_nodeinfo(int(destination))
 
+    def send_traceroute(self, destination: int, hop_limit: Optional[int] = None) -> int:
+        if self.virtual_node is None:
+            raise RuntimeError("Virtual node is not running")
+        route_discovery = mesh_pb2.RouteDiscovery()
+        packet = self.virtual_node.sendData(
+            route_discovery,
+            destinationId=int(destination),
+            portNum=portnums_pb2.PortNum.TRACEROUTE_APP,
+            wantResponse=True,
+            hopLimit=hop_limit,
+        )
+        return int(packet.id)
+
     def get_profile_public_key(self, profile: Dict) -> Optional[bytes]:
         private_key_b64 = self._get_profile_private_key(profile)
         if not private_key_b64:

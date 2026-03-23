@@ -510,6 +510,33 @@ def _emit_message_to_profile_rooms(message, profiles):
         emitted_profile_ids.add(profile_id)
 
 
+def _display_name_for_node_num(node_num):
+    if node_num in (None, 0):
+        return None
+
+    local_profile = db.get_profile_by_node_num(node_num)
+    if local_profile:
+        return local_profile.get("short_name") or local_profile.get("long_name") or local_profile.get("node_id")
+
+    try:
+        all_profiles = db.get_all_profiles()
+    except Exception:
+        all_profiles = {}
+
+    for profile in all_profiles.values():
+        mesh_store = _get_mesh_store(profile)
+        if not mesh_store:
+            continue
+        try:
+            found_node = mesh_store.get_node(node_num)
+        except Exception:
+            found_node = None
+        if found_node:
+            return found_node.get("short_name") or found_node.get("long_name") or found_node.get("node_id")
+
+    return _node_id_from_num(node_num)
+
+
 def _get_chat_payload(profile):
     effective_profile = _effective_profile(profile)
     channel_number = _profile_channel_num(effective_profile)
@@ -744,6 +771,88 @@ def _decode_payload_for_log(packet: mesh_pb2.MeshPacket):
     return "protobuf", decoded_payload
 
 
+def _parse_route_discovery(packet: mesh_pb2.MeshPacket):
+    if not packet.HasField("decoded"):
+        return None
+
+    payload = bytes(packet.decoded.payload or b"")
+    if not payload:
+        return mesh_pb2.RouteDiscovery()
+
+    route_discovery = mesh_pb2.RouteDiscovery()
+    try:
+        route_discovery.ParseFromString(payload)
+        return route_discovery
+    except Exception:
+        pass
+
+    try:
+        text_payload = payload.decode("utf-8", "ignore")
+        text_format.Parse(text_payload, route_discovery)
+        return route_discovery
+    except Exception:
+        return None
+
+
+def _format_traceroute_path(origin_node_num, intermediate_nodes, snr_values, destination_node_num):
+    unknown_snr = -128
+    hops = []
+
+    route_nodes = []
+    if origin_node_num is not None:
+        route_nodes.append(int(origin_node_num))
+    route_nodes.extend(int(node_num) for node_num in intermediate_nodes or [])
+    if destination_node_num is not None:
+        route_nodes.append(int(destination_node_num))
+
+    for index, node_num in enumerate(route_nodes):
+        label = _display_name_for_node_num(node_num) or str(node_num)
+        snr_value = None
+        if snr_values and index < len(snr_values):
+            raw_snr = int(snr_values[index])
+            if raw_snr != unknown_snr:
+                snr_value = raw_snr / 4
+        hops.append(
+            {
+                "node_num": node_num,
+                "node_id": _node_id_from_num(node_num),
+                "label": label,
+                "snr": snr_value,
+            }
+        )
+    return hops
+
+
+def _emit_traceroute_result(packet: mesh_pb2.MeshPacket, route_discovery: mesh_pb2.RouteDiscovery):
+    owner_profile = _dm_owner_profile_for_packet(packet)
+    if not owner_profile:
+        matching_profiles = _profiles_matching_packet(packet)
+        owner_profile = matching_profiles[0] if matching_profiles else None
+    if not owner_profile:
+        return
+
+    result = {
+        "packet_id": int(getattr(packet, "id", 0) or 0),
+        "request_id": int(getattr(packet.decoded, "request_id", 0) or 0) if packet.HasField("decoded") else 0,
+        "owner_profile_id": owner_profile.get("id"),
+        "from_node_num": int(getattr(packet, "from", 0) or 0),
+        "to_node_num": int(getattr(packet, "to", 0) or 0),
+        "route_towards": _format_traceroute_path(
+            getattr(packet, "to", None),
+            list(route_discovery.route),
+            list(route_discovery.snr_towards),
+            getattr(packet, "from", None),
+        ),
+        "route_back": _format_traceroute_path(
+            getattr(packet, "from", None),
+            list(route_discovery.route_back),
+            list(route_discovery.snr_back),
+            getattr(packet, "to", None),
+        ),
+    }
+    socketio.emit("traceroute_result", result, room=f"profile_{owner_profile.get('id')}")
+
+
 def _packet_type_for_log(packet: mesh_pb2.MeshPacket) -> str:
     if packet.HasField("decoded"):
         try:
@@ -811,6 +920,8 @@ def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
         supplemental_portnum = int(getattr(supplemental_packet.decoded, "portnum", 0) or 0)
         if supplemental_portnum == int(portnums_pb2.PortNum.TEXT_MESSAGE_APP):
             on_text_message(supplemental_packet, addr=addr)
+        elif supplemental_portnum == int(portnums_pb2.PortNum.TRACEROUTE_APP):
+            on_traceroute(supplemental_packet, addr=addr)
         elif supplemental_portnum == int(portnums_pb2.PortNum.ROUTING_APP):
             routing = parse_routing(supplemental_packet)
             if routing is not None:
@@ -1072,6 +1183,27 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
         print(f"Error processing nodeinfo: {e}")
 
 
+def on_traceroute(packet: mesh_pb2.MeshPacket, addr=None):
+    del addr
+    if _is_from_me(packet):
+        return
+    pkt_id = getattr(packet, "id", 0) or 0
+    if pkt_id and _already_seen(("traceroute", pkt_id)):
+        return
+
+    route_discovery = _parse_route_discovery(packet)
+    if route_discovery is None:
+        print(f"[TRACEROUTE] Failed to parse traceroute payload for packet {pkt_id}")
+        return
+
+    print(
+        f"[TRACEROUTE] from={_node_id_from_num(getattr(packet, 'from', None))} "
+        f"to={_node_id_from_num(getattr(packet, 'to', None))} "
+        f"towards={len(route_discovery.route)} back={len(route_discovery.route_back)}"
+    )
+    _emit_traceroute_result(packet, route_discovery)
+
+
 def on_ack_message(packet, routing=None, addr=None, pending=None):
     del addr, pending
     if not packet.HasField("decoded"):
@@ -1139,6 +1271,7 @@ pub.subscribe(on_text_message, "mesh.rx.text")
 pub.subscribe(on_meshtastic_text, "meshtastic.receive.text")
 pub.subscribe(on_meshtastic_routing, "meshtastic.receive.routing")
 pub.subscribe(on_nodeinfo, "mesh.rx.port.4")  # NODEINFO_APP
+pub.subscribe(on_traceroute, f"mesh.rx.port.{int(portnums_pb2.PortNum.TRACEROUTE_APP)}")
 pub.subscribe(on_ack_message, "mesh.rx.ack")
 pub.subscribe(on_nak_message, "mesh.rx.nak")
 pub.subscribe(on_max_retransmit, "mesh.tx.max_retransmit")
@@ -1357,10 +1490,48 @@ class UDPChatServer:
     def get_active_profile(self):
         return self.current_profile
 
+    def _ensure_sender_profile_transport(self, sender_profile, session_id=None):
+        if not sender_profile:
+            self.last_send_error = "No sender profile selected"
+            return None
+
+        sender_profile = _effective_profile(sender_profile)
+        if not self.running or self.current_profile_id != sender_profile.get("id"):
+            print("[UDP] Active virtual node does not match sender profile, restarting...")
+            if not self.restart_with_profile(sender_profile, session_id=session_id):
+                self.last_send_error = "Transmit identity could not be started for this profile"
+                return None
+        return sender_profile
+
     def send_nodeinfo(self, destination=None):
         if not self.running:
             raise RuntimeError("Virtual node is not running")
         return virtual_node_manager.send_nodeinfo(destination if destination is not None else 0xFFFFFFFF)
+
+    def exchange_nodeinfo(self, sender_profile, destination, session_id=None):
+        self.last_send_error = None
+        sender_profile = self._ensure_sender_profile_transport(sender_profile, session_id=session_id)
+        if not sender_profile:
+            return False
+        try:
+            return virtual_node_manager.send_nodeinfo(int(destination))
+        except Exception as e:
+            self.last_send_error = str(e) or "Failed to exchange node info"
+            print(f"[NODEINFO] Failed to exchange node info with {destination}: {e}")
+            return False
+
+    def send_traceroute(self, sender_profile, destination, session_id=None, hop_limit=None):
+        self.last_send_error = None
+        sender_profile = self._ensure_sender_profile_transport(sender_profile, session_id=session_id)
+        if not sender_profile:
+            return False
+        try:
+            effective_hop_limit = hop_limit if hop_limit is not None else sender_profile.get("hop_limit", 3)
+            return virtual_node_manager.send_traceroute(int(destination), hop_limit=int(effective_hop_limit))
+        except Exception as e:
+            self.last_send_error = str(e) or "Failed to send traceroute"
+            print(f"[TRACEROUTE] Failed to send traceroute to {destination}: {e}")
+            return False
 
     def send_ack_for_profile(self, profile, request_packet):
         return virtual_node_manager.send_ack_for_profile(profile, request_packet)
@@ -1383,23 +1554,12 @@ class UDPChatServer:
     ):
         """Send a text message via vnode."""
         self.last_send_error = None
+        sender_profile = self._ensure_sender_profile_transport(sender_profile, session_id=session_id)
         if not sender_profile:
-            self.last_send_error = "No sender profile selected"
             return False
-
-        sender_profile = _effective_profile(sender_profile)
         sender_channel_hash = generate_hash(sender_profile.get("channel", ""), sender_profile.get("key", ""))
         print(f"[SEND] Debug: Profile '{sender_profile.get('long_name', 'Unknown')}' wants channel {sender_channel_hash}")
         print(f"[SEND] Debug: UDP server running={self.running}, current_profile={self.current_profile_id}")
-
-        if not self.running or self.current_profile_id != sender_profile.get("id"):
-            print(f"[UDP] Active virtual node does not match sender profile, restarting...")
-            if not self.restart_with_profile(sender_profile, session_id=session_id):
-                print(f"[UDP] Failed to restart virtual node for profile")
-                self.last_send_error = "Transmit identity could not be started for this profile"
-                return False
-        else:
-            print(f"[UDP] Reusing existing virtual node for profile {sender_profile.get('id')}")
 
         try:
             hop_limit = sender_profile.get("hop_limit", 3)
@@ -2180,6 +2340,44 @@ def get_node_details(node_num):
         return jsonify({"error": "Node not found"}), 404
 
     return jsonify(node)
+
+
+@app.route("/api/nodes/<int:node_num>/exchange-nodeinfo", methods=["POST"])
+@login_required
+def exchange_nodeinfo(node_num):
+    current_profile = _get_session_profile()
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+
+    session_id = f"flask_session_{id(session)}"
+    packet_id = udp_server.exchange_nodeinfo(current_profile, node_num, session_id=session_id)
+    if not packet_id:
+        return jsonify({"error": udp_server.last_send_error or "Failed to exchange node info"}), 500
+
+    return jsonify({"message": "Node info request sent", "packet_id": int(packet_id), "node_num": int(node_num)})
+
+
+@app.route("/api/nodes/<int:node_num>/traceroute", methods=["POST"])
+@login_required
+def send_node_traceroute(node_num):
+    current_profile = _get_session_profile()
+    if not current_profile:
+        return jsonify({"error": "No profile selected"}), 400
+
+    data = request.get_json(silent=True) or {}
+    hop_limit = data.get("hop_limit")
+    if hop_limit is not None:
+        try:
+            hop_limit = int(hop_limit)
+        except (TypeError, ValueError):
+            return jsonify({"error": "hop_limit must be an integer"}), 400
+
+    session_id = f"flask_session_{id(session)}"
+    packet_id = udp_server.send_traceroute(current_profile, node_num, session_id=session_id, hop_limit=hop_limit)
+    if not packet_id:
+        return jsonify({"error": udp_server.last_send_error or "Failed to send traceroute"}), 500
+
+    return jsonify({"message": "Traceroute sent", "packet_id": int(packet_id), "node_num": int(node_num)})
 
 
 @app.route("/api/stats", methods=["GET"])

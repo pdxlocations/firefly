@@ -219,14 +219,14 @@
     </div>
 </div>
 
-<div class="modal fade" id="nodeDetailsModal" tabindex="-1" aria-labelledby="nodeDetailsModalLabel" aria-hidden="true">
+<div class="modal fade" id="tracerouteModal" tabindex="-1" aria-labelledby="tracerouteModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="nodeDetailsModalLabel">Node Details</h5>
+                <h5 class="modal-title" id="tracerouteModalLabel">Traceroute</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="modal-body" id="nodeDetailsContent"></div>
+            <div class="modal-body" id="tracerouteContent"></div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
@@ -682,13 +682,14 @@
 
 .node-list {
     display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.55rem;
 }
 
 .node-card {
     border: 1px solid var(--firefly-chat-border);
     border-radius: 0.95rem;
-    padding: 0.75rem 0.85rem;
+    padding: 0.58rem 0.7rem;
     background: var(--firefly-chat-surface);
     box-shadow: 0 10px 24px rgba(44, 64, 82, 0.07);
 }
@@ -698,7 +699,7 @@
     justify-content: space-between;
     align-items: flex-start;
     gap: 0.75rem;
-    margin-bottom: 0.45rem;
+    margin-bottom: 0.3rem;
 }
 
 .node-card__title {
@@ -708,23 +709,23 @@
 .node-card__name {
     font-weight: 700;
     line-height: 1.2;
-    font-size: 0.98rem;
+    font-size: 0.92rem;
 }
 
 .node-card__meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.15rem 0.55rem;
-    font-size: 0.8rem;
+    gap: 0.12rem 0.45rem;
+    font-size: 0.75rem;
     color: var(--bs-secondary-color);
-    margin-top: 0.12rem;
+    margin-top: 0.08rem;
 }
 
 .node-card__facts {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.45rem 0.65rem;
-    margin-bottom: 0.55rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem 0.45rem;
+    margin-bottom: 0.4rem;
 }
 
 .node-card__fact {
@@ -733,7 +734,7 @@
 
 .node-card__label {
     display: block;
-    font-size: 0.64rem;
+    font-size: 0.58rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--bs-secondary-color);
@@ -742,7 +743,7 @@
 }
 
 .node-card__value {
-    font-size: 0.84rem;
+    font-size: 0.78rem;
     line-height: 1.15;
 }
 
@@ -752,22 +753,78 @@
 
 .node-card__actions {
     display: flex;
+    flex-wrap: wrap;
     justify-content: flex-end;
-    gap: 0.4rem;
+    gap: 0.3rem;
 }
 
 .node-card__actions .btn {
-    padding: 0.28rem 0.6rem;
+    padding: 0.24rem 0.52rem;
     border-radius: 0.7rem;
+    font-size: 0.74rem;
+    font-weight: 600;
 }
 
 .node-card .badge {
-    font-size: 0.7rem;
-    padding: 0.28rem 0.42rem;
+    font-size: 0.64rem;
+    padding: 0.22rem 0.36rem;
 }
 
 .node-card code {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
+}
+
+.node-card__actions .node-dm-trigger,
+.node-card__actions .node-nodeinfo-trigger,
+.node-card__actions .node-traceroute-trigger {
+    background: #3f77b6;
+    border-color: #3f77b6;
+    color: #ffffff;
+}
+
+.node-card__actions .node-dm-trigger:hover,
+.node-card__actions .node-dm-trigger:focus,
+.node-card__actions .node-nodeinfo-trigger:hover,
+.node-card__actions .node-nodeinfo-trigger:focus,
+.node-card__actions .node-traceroute-trigger:hover,
+.node-card__actions .node-traceroute-trigger:focus {
+    background: #35679c;
+    border-color: #35679c;
+    color: #ffffff;
+}
+
+.traceroute-path {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.traceroute-hop {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    padding: 0.35rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(73, 115, 157, 0.12);
+    color: var(--bs-body-color);
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.traceroute-hop__snr {
+    font-size: 0.72rem;
+    color: var(--bs-secondary-color);
+}
+
+.traceroute-arrow {
+    font-size: 0.82rem;
+    color: var(--bs-secondary-color);
+}
+
+.traceroute-section + .traceroute-section {
+    margin-top: 1rem;
 }
 
 .map-panel {
@@ -1196,6 +1253,10 @@
 
 /* Extra small screens - make buttons even more compact */
 @media (max-width: 991.98px) {
+    .node-list {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
     .node-card__facts {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -1332,6 +1393,7 @@ let managedProfiles = {{ profiles|tojson }};
 let mapInstance = null;
 let mapLayerGroup = null;
 let pendingThreadStateRefresh = null;
+let activeTracerouteRequest = null;
 
 document.addEventListener('DOMContentLoaded', async function() {
     initializePendingChatContext();
@@ -1631,6 +1693,10 @@ function initializeSocket() {
 
     socket.on('message_update', function(message) {
         applyMessageUpdate(message);
+    });
+
+    socket.on('traceroute_result', function(result) {
+        handleTracerouteResult(result);
     });
 }
 
@@ -2451,11 +2517,20 @@ function handleThreadCardClick(event) {
         return;
     }
 
-    const nodeDetailsTrigger = event.target.closest('.node-details-trigger');
-    if (nodeDetailsTrigger) {
-        const nodeNum = Number(nodeDetailsTrigger.dataset.nodeNum);
+    const nodeInfoTrigger = event.target.closest('.node-nodeinfo-trigger');
+    if (nodeInfoTrigger) {
+        const nodeNum = Number(nodeInfoTrigger.dataset.nodeNum);
         if (Number.isInteger(nodeNum)) {
-            void showNodeDetails(nodeNum);
+            void exchangeNodeInfo(nodeNum);
+        }
+        return;
+    }
+
+    const nodeTracerouteTrigger = event.target.closest('.node-traceroute-trigger');
+    if (nodeTracerouteTrigger) {
+        const nodeNum = Number(nodeTracerouteTrigger.dataset.nodeNum);
+        if (Number.isInteger(nodeNum)) {
+            void openTracerouteModal(nodeNum);
         }
     }
 }
@@ -3197,10 +3272,6 @@ function renderNodeCardHtml(node) {
                     <div class="node-card__value text-muted">${lastSeen}</div>
                 </div>
                 <div class="node-card__fact">
-                    <span class="node-card__label">SNR</span>
-                    <div class="node-card__value">${formatNodeSnrBadge(node.snr)}</div>
-                </div>
-                <div class="node-card__fact">
                     <span class="node-card__label">Hops</span>
                     <div class="node-card__value">${formatNodeHopsBadge(node.hops_away)}</div>
                 </div>
@@ -3210,8 +3281,9 @@ function renderNodeCardHtml(node) {
                 </div>
             </div>
             <div class="node-card__actions">
-                <button class="btn btn-sm btn-outline-success node-dm-trigger" type="button" data-node-num="${Number(node.node_num)}">DM</button>
-                <button class="btn btn-sm btn-outline-primary node-details-trigger" type="button" data-node-num="${Number(node.node_num)}">Details</button>
+                <button class="btn btn-sm node-dm-trigger" type="button" data-node-num="${Number(node.node_num)}">DM</button>
+                <button class="btn btn-sm node-nodeinfo-trigger" type="button" data-node-num="${Number(node.node_num)}">Exchange Node Info</button>
+                <button class="btn btn-sm node-traceroute-trigger" type="button" data-node-num="${Number(node.node_num)}">Traceroute</button>
             </div>
         </div>
     `;
@@ -3818,34 +3890,17 @@ function parseNodeId(nodeId) {
     return parseInt(nodeId.slice(1), 16);
 }
 
-function formatNodeLastSeen(lastSeen) {
-    if (!lastSeen) return 'Unknown';
-    const parts = String(lastSeen).split('T');
-    if (parts.length > 1) {
-        return `${escapeHtml(parts[0])}<span class="d-block small">${escapeHtml(parts[1].slice(0, 8))}</span>`;
-    }
-    return escapeHtml(String(lastSeen));
-}
-
-function formatNodeSnrBadge(value) {
-    if (value === null || value === undefined) return '<span class="text-muted">Unknown</span>';
-    const badgeClass = Number(value) > 0 ? 'bg-success' : 'bg-warning text-dark';
-    return `<span class="badge ${badgeClass}">${escapeHtml(String(value))} dB</span>`;
-}
-
-function formatNodeHopsBadge(value) {
-    if (value === null || value === undefined) return '<span class="text-muted">Unknown</span>';
-    return `<span class="badge bg-success">${escapeHtml(String(value))}</span>`;
-}
-
-function formatTimestamp(rawTimestamp) {
-    if (!rawTimestamp) return '';
+function parseTimestampValue(rawTimestamp) {
+    if (!rawTimestamp) return null;
     try {
-        let ts;
         if (typeof rawTimestamp === 'number') {
-            ts = rawTimestamp > 1e10 ? new Date(rawTimestamp) : new Date(rawTimestamp * 1000);
-        } else if (typeof rawTimestamp === 'string') {
+            const ts = rawTimestamp > 1e10 ? new Date(rawTimestamp) : new Date(rawTimestamp * 1000);
+            return isNaN(ts.getTime()) ? null : ts;
+        }
+
+        if (typeof rawTimestamp === 'string') {
             const tsString = rawTimestamp.trim();
+            let ts;
             if (tsString.includes('T') && (tsString.includes('Z') || tsString.includes('+') || tsString.includes('-'))) {
                 ts = new Date(tsString);
             } else if (tsString.includes('T')) {
@@ -3858,13 +3913,62 @@ function formatTimestamp(rawTimestamp) {
                     ts = new Date(tsString + 'Z');
                 }
             }
-        } else {
-            ts = new Date(rawTimestamp);
+            return isNaN(ts.getTime()) ? null : ts;
         }
-        return isNaN(ts.getTime()) ? '' : ts.toLocaleTimeString([], {hour12: true, hour: 'numeric', minute: '2-digit'});
-    } catch (e) {
-        return '';
+
+        const ts = new Date(rawTimestamp);
+        return isNaN(ts.getTime()) ? null : ts;
+    } catch (_error) {
+        return null;
     }
+}
+
+function formatRelativeTime(rawTimestamp) {
+    const timestamp = parseTimestampValue(rawTimestamp);
+    if (!timestamp) return '';
+
+    const diffMs = timestamp.getTime() - Date.now();
+    const absDiffMs = Math.abs(diffMs);
+    if (absDiffMs < 30 * 1000) {
+        return 'just now';
+    }
+
+    const units = [
+        ['year', 365 * 24 * 60 * 60 * 1000],
+        ['month', 30 * 24 * 60 * 60 * 1000],
+        ['week', 7 * 24 * 60 * 60 * 1000],
+        ['day', 24 * 60 * 60 * 1000],
+        ['hour', 60 * 60 * 1000],
+        ['minute', 60 * 1000],
+    ];
+
+    const formatter = new Intl.RelativeTimeFormat(undefined, {numeric: 'always'});
+    for (const [unit, unitMs] of units) {
+        if (absDiffMs >= unitMs || unit === 'minute') {
+            return formatter.format(Math.round(diffMs / unitMs), unit);
+        }
+    }
+
+    return 'just now';
+}
+
+function formatNodeLastSeen(lastSeen) {
+    if (!lastSeen) return 'Unknown';
+    const relative = formatRelativeTime(lastSeen);
+    if (!relative) return escapeHtml(String(lastSeen));
+
+    const exact = formatDateTime(lastSeen);
+    return `<span title="${escapeHtml(exact)}">${escapeHtml(relative)}</span>`;
+}
+
+function formatNodeHopsBadge(value) {
+    if (value === null || value === undefined) return '<span class="text-muted">Unknown</span>';
+    return `<span class="badge bg-success">${escapeHtml(String(value))}</span>`;
+}
+
+function formatTimestamp(rawTimestamp) {
+    const ts = parseTimestampValue(rawTimestamp);
+    return ts ? ts.toLocaleTimeString([], {hour12: true, hour: 'numeric', minute: '2-digit'}) : '';
 }
 
 function truncateText(value, maxLength) {
@@ -3908,51 +4012,98 @@ function updateChatUrl() {
     window.history.replaceState({}, '', nextUrl);
 }
 
-function showNodeDetails(nodeNum) {
-    fetch(`/api/nodes/${nodeNum}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                alert(`Error: ${data.error}`);
-                return;
-            }
+function getNodeByNum(nodeNum) {
+    return meshNodes.find(node => Number(node.node_num) === Number(nodeNum)) || null;
+}
 
-            const content = `
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Basic Information</h6>
-                        <table class="table table-sm">
-                            <tr><td><strong>Node Number:</strong></td><td><code>${escapeHtml(String(data.node_num))}</code></td></tr>
-                            <tr><td><strong>Node ID:</strong></td><td><code>${escapeHtml(data.node_id || 'Unknown')}</code></td></tr>
-                            <tr><td><strong>Long Name:</strong></td><td>${escapeHtml(data.long_name || 'Unknown')}</td></tr>
-                            <tr><td><strong>Short Name:</strong></td><td>${escapeHtml(data.short_name || 'Unknown')}</td></tr>
-                            <tr><td><strong>Hardware Model:</strong></td><td>${escapeHtml(data.hw_model || 'Unknown')}</td></tr>
-                            <tr><td><strong>Role:</strong></td><td><span class="badge bg-info">${escapeHtml(data.role || 'CLIENT')}</span></td></tr>
-                        </table>
-                    </div>
-                    <div class="col-md-6">
-                        <h6>Network Information</h6>
-                        <table class="table table-sm">
-                            <tr><td><strong>Last Heard:</strong></td><td>${formatDateTime(data.last_seen)}</td></tr>
-                            <tr><td><strong>SNR:</strong></td><td>${data.snr === null || data.snr === undefined ? 'Unknown' : `${escapeHtml(String(data.snr))} dB`}</td></tr>
-                            <tr><td><strong>Hops Away:</strong></td><td>${data.hops_away === null || data.hops_away === undefined ? 'Unknown' : escapeHtml(String(data.hops_away))}</td></tr>
-                            ${data.macaddr ? `<tr><td><strong>MAC Address:</strong></td><td><code>${escapeHtml(data.macaddr)}</code></td></tr>` : ''}
-                            ${data.public_key ? `<tr><td><strong>Public Key:</strong></td><td><code>${escapeHtml(data.public_key)}</code></td></tr>` : ''}
-                        </table>
-                    </div>
-                </div>
-            `;
+function getNodeDisplayLabel(nodeNum) {
+    const node = getNodeByNum(nodeNum);
+    return node?.long_name || node?.short_name || node?.node_id || `!${Number(nodeNum).toString(16).padStart(8, '0')}`;
+}
 
-            document.getElementById('nodeDetailsContent').innerHTML = content;
-            document.getElementById('nodeDetailsModalLabel').textContent =
-                `Node Details - ${data.long_name || data.short_name || data.node_id || data.node_num}`;
+async function exchangeNodeInfo(nodeNum) {
+    try {
+        const response = await fetch(`/api/nodes/${nodeNum}/exchange-nodeinfo`, { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+        }
+        showNotification(`Node info exchange requested with ${getNodeDisplayLabel(nodeNum)}.`, 'success');
+    } catch (error) {
+        console.error('Error exchanging node info:', error);
+        alert(`Error exchanging node info: ${error.message}`);
+    }
+}
 
-            new bootstrap.Modal(document.getElementById('nodeDetailsModal')).show();
-        })
-        .catch(error => {
-            console.error('Error fetching node details:', error);
-            alert('Error fetching node details');
+function renderTracerouteHop(hop) {
+    const snr = hop.snr === null || hop.snr === undefined ? '' : `<span class="traceroute-hop__snr">${escapeHtml(String(hop.snr))} dB</span>`;
+    return `<span class="traceroute-hop">${escapeHtml(hop.label || hop.node_id || 'Unknown')}${snr}</span>`;
+}
+
+function renderTraceroutePath(hops) {
+    if (!Array.isArray(hops) || !hops.length) {
+        return '<div class="text-muted small">No hops reported.</div>';
+    }
+    return `<div class="traceroute-path">${hops.map((hop, index) => `${index > 0 ? '<span class="traceroute-arrow">→</span>' : ''}${renderTracerouteHop(hop)}`).join('')}</div>`;
+}
+
+function updateTracerouteModalTitle(title) {
+    document.getElementById('tracerouteModalLabel').textContent = title;
+}
+
+function updateTracerouteModalBody(html) {
+    document.getElementById('tracerouteContent').innerHTML = html;
+}
+
+async function openTracerouteModal(nodeNum) {
+    const nodeLabel = getNodeDisplayLabel(nodeNum);
+    updateTracerouteModalTitle(`Traceroute - ${nodeLabel}`);
+    updateTracerouteModalBody('<div class="text-muted">Running traceroute…</div>');
+    activeTracerouteRequest = { nodeNum: Number(nodeNum), startedAt: Date.now() };
+    new bootstrap.Modal(document.getElementById('tracerouteModal')).show();
+
+    try {
+        const response = await fetch(`/api/nodes/${nodeNum}/traceroute`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
         });
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+        }
+        activeTracerouteRequest.packetId = payload.packet_id;
+        updateTracerouteModalBody('<div class="text-muted">Traceroute request sent. Waiting for response…</div>');
+    } catch (error) {
+        console.error('Error sending traceroute:', error);
+        updateTracerouteModalBody(`<div class="alert alert-danger mb-0">${escapeHtml(error.message)}</div>`);
+    }
+}
+
+function handleTracerouteResult(result) {
+    if (!result || !currentProfile || result.owner_profile_id !== currentProfile.id) {
+        return;
+    }
+
+    const activeRequest = activeTracerouteRequest;
+    if (activeRequest && Number(activeRequest.nodeNum) !== Number(result.from_node_num)) {
+        return;
+    }
+
+    const towards = renderTraceroutePath(result.route_towards || []);
+    const back = renderTraceroutePath(result.route_back || []);
+    updateTracerouteModalTitle(`Traceroute - ${getNodeDisplayLabel(result.from_node_num)}`);
+    updateTracerouteModalBody(`
+        <div class="traceroute-section">
+            <div class="fw-semibold mb-2">Towards destination</div>
+            ${towards}
+        </div>
+        <div class="traceroute-section">
+            <div class="fw-semibold mb-2">Back to us</div>
+            ${back}
+        </div>
+    `);
+    activeTracerouteRequest = null;
 }
 
 function formatDateTime(dateTimeStr) {

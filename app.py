@@ -26,13 +26,9 @@ from vnode.crypto import b64_decode
 
 MCAST_GRP = os.getenv("FIREFLY_MCAST_GRP", "224.0.0.69")
 MCAST_PORT = int(os.getenv("FIREFLY_UDP_PORT", "4403"))
-PROFILES_FILE = "profiles.json"
 SOCKETIO_CLIENT_VERSION = "4.7.5"
 BROADCAST_NODE_NUM = 0xFFFFFFFF
 DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
-
-# Note: current_profile is now stored per-session in session['current_profile']
-messages = []
 
 # Cross-source de-duplication cache for user-visible packet handling.
 _DEDUP_CACHE = set()
@@ -344,15 +340,6 @@ def _routing_error_name(error_reason):
         return str(error_reason)
 
 
-def _sync_cached_message(packet_id, **updates):
-    if packet_id is None:
-        return
-    for message in messages:
-        if int(message.get("packet_id") or 0) != int(packet_id):
-            continue
-        message.update(updates)
-
-
 def _emit_message_update(message):
     if not message:
         return
@@ -378,12 +365,6 @@ def _apply_ack_update(packet_id, ack_status, ack_error=None):
         return
 
     for message in updated_messages:
-        _sync_cached_message(
-            packet_id,
-            ack_status=message.get("ack_status"),
-            ack_error=message.get("ack_error"),
-            ack_updated_at=message.get("ack_updated_at"),
-        )
         _emit_message_update(message)
 
 
@@ -413,6 +394,22 @@ def _seed_profile_mesh_identity(profile):
     except Exception as e:
         print(f"[MESHDB] Failed to seed owner node for profile {profile.get('id')}: {e}")
         return False
+
+
+def _mesh_stores_for_profiles(profiles):
+    stores = []
+    seen_profile_ids = set()
+    for profile in profiles or []:
+        if not isinstance(profile, dict):
+            continue
+        profile_id = profile.get("id")
+        if not profile_id or profile_id in seen_profile_ids:
+            continue
+        mesh_store = _get_mesh_store(profile)
+        if mesh_store:
+            stores.append((profile, mesh_store))
+            seen_profile_ids.add(profile_id)
+    return stores
 
 
 def _profiles_matching_packet(packet):
@@ -450,6 +447,40 @@ def _profiles_matching_packet(packet):
                 break
 
     return matched_profiles
+
+
+def _matching_mesh_stores_for_packet(packet):
+    return _mesh_stores_for_profiles(_profiles_matching_packet(packet))
+
+
+def _find_sender_node_for_packet(packet, sender_num):
+    if sender_num in (None, 0):
+        return None
+
+    local_sender_profile = db.get_profile_by_node_num(sender_num)
+    if local_sender_profile:
+        return {
+            "long_name": local_sender_profile.get("long_name"),
+            "short_name": local_sender_profile.get("short_name"),
+        }
+
+    for _profile, mesh_store in _matching_mesh_stores_for_packet(packet):
+        try:
+            found_node = mesh_store.get_node(sender_num)
+        except Exception:
+            found_node = None
+        if found_node:
+            return found_node
+
+    active_profile = udp_server.get_active_profile()
+    if active_profile:
+        mesh_store = _get_mesh_store(active_profile)
+        if mesh_store:
+            try:
+                return mesh_store.get_node(sender_num)
+            except Exception:
+                return None
+    return None
 
 
 def _emit_message_to_profile_rooms(message, profiles):
@@ -758,18 +789,17 @@ def _print_packet_with_decoded_payload(packet: mesh_pb2.MeshPacket):
 
 def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
     supplemental_packet = _decode_packet_for_service(packet)
+    packet_for_storage = supplemental_packet or packet
 
     print(f"\n[RECV] Packet received from {addr}")
     _maybe_ack_local_direct_packet(packet)
-    _print_packet_with_decoded_payload(supplemental_packet or packet)
+    _print_packet_with_decoded_payload(packet_for_storage)
 
-    active_profile = udp_server.get_active_profile()
-    mesh_store = _get_mesh_store(active_profile) if active_profile else None
-    if mesh_store:
+    for profile, mesh_store in _matching_mesh_stores_for_packet(packet_for_storage):
         try:
-            mesh_store.record_packet(packet)
+            mesh_store.record_packet(packet_for_storage)
         except Exception as e:
-            print(f"[MESHDB] Failed to record packet: {e}")
+            print(f"[MESHDB] Failed to record packet for profile {profile.get('id')}: {e}")
 
     if supplemental_packet is not None and supplemental_packet.HasField("decoded"):
         supplemental_portnum = int(getattr(supplemental_packet.decoded, "portnum", 0) or 0)
@@ -823,10 +853,9 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
 
     print(f"[RECV] From: {getattr(packet, 'from', None)} Channel: {getattr(packet, 'channel', None)} Message: {msg}")
 
-    # Push into in-memory log and notify connected clients
+    # Store and broadcast the message for all relevant local profiles.
     try:
         sender_num = getattr(packet, "from", None)
-        active_profile = udp_server.get_active_profile()
         dm_owner_profile = _dm_owner_profile_for_packet(packet)
         message_type = "dm" if dm_owner_profile else "channel"
         target_node_num = getattr(packet, "to", None) if message_type == "dm" else None
@@ -835,21 +864,18 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
         reply_packet_id = getattr(packet.decoded, "reply_id", None) or None
         owner_profile_id = dm_owner_profile.get("id") if dm_owner_profile else None
         message_channel = getattr(packet, "channel", None)
-        if message_channel is None and active_profile:
-            message_channel = _profile_channel_num(active_profile)
+        if message_channel is None:
+            matching_profiles = _profiles_matching_packet(packet)
+            if matching_profiles:
+                message_channel = _profile_channel_num(matching_profiles[0])
 
         # Look up node name from database if available
-        # Note: We can't access session in UDP packet handler, so we'll look across all profiles
         sender_display = f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else "Unknown"
         sender_short_name = None
 
         if sender_num:
             try:
-                found_node = None
-                mesh_store = _get_mesh_store(active_profile) if active_profile else None
-                if mesh_store:
-                    found_node = mesh_store.get_node(sender_num)
-
+                found_node = _find_sender_node_for_packet(packet, sender_num)
                 if found_node:
                     sender_short_name = found_node.get("short_name") or None
                 if found_node and found_node.get("long_name"):
@@ -879,7 +905,6 @@ def on_text_message(packet: mesh_pb2.MeshPacket, addr=None):
             "owner_profile_id": owner_profile_id,
             "channel": message_channel,
         }
-        messages.append(message)
 
         if message_channel is not None and (message_type == "channel" or owner_profile_id):
             print(f"[MESSAGE] Storing {message_type} message on channel {message_channel}: {msg[:50]}...")
@@ -1131,8 +1156,6 @@ def inject_versions():
 class ProfileManager:
     def __init__(self, database):
         self.db = database
-        self.profiles_file = PROFILES_FILE
-        # Note: Migration is handled by startup script, not automatically here
 
     def get_all_profiles(self, user_id=None):
         """Get all profiles"""
@@ -1419,7 +1442,6 @@ class UDPChatServer:
                 "ack_error": None,
                 "ack_updated_at": datetime.now().isoformat() if ack_requested else None,
             }
-            messages.append(message)
             local_recipient_message = None
 
             if message_type == "dm" and message["target_node_num"] is not None:
@@ -1447,7 +1469,6 @@ class UDPChatServer:
                         "ack_error": None,
                         "ack_updated_at": None,
                     }
-                    messages.append(local_recipient_message)
 
             # Store sent message in database and broadcast to WebSocket
             try:
@@ -2012,10 +2033,9 @@ def get_messages():
     """Get channel and direct messages for the current profile."""
     current_profile = _get_session_profile()
     if not current_profile:
-        return jsonify({"channel_messages": messages, "dm_messages": []})
+        return jsonify({"channel_messages": [], "dm_messages": []})
 
     requested_channel_index = request.args.get("channel_index")
-    skip_mark_read = str(request.args.get("skip_mark_read", "")).strip().lower() in {"1", "true", "yes"}
     if requested_channel_index is not None:
         try:
             requested_channel_index = int(requested_channel_index)
@@ -2027,9 +2047,6 @@ def get_messages():
         _set_session_channel_index(requested_channel_index)
 
     chat_payload = _get_chat_payload(current_profile)
-    expected_channel = chat_payload["channel_number"]
-    if not skip_mark_read and expected_channel is not None and chat_payload["channel_messages"]:
-        db.update_profile_last_seen(current_profile["id"], expected_channel)
     chat_payload.update(_unread_state_for_profile(current_profile))
     return jsonify(chat_payload)
 
@@ -2240,7 +2257,7 @@ def health():
         {
             "status": "ok",
             "profiles": global_stats["profiles"],
-            "messages": len(messages),  # In-memory messages count
+            "messages": global_stats["total_messages"],
             "database": {
                 **global_stats,
                 "total_nodes": count_nodes_for_profiles(profiles),

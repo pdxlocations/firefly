@@ -1565,17 +1565,6 @@ function isViewingDmThread(nodeNum) {
         && Number(activeDmTargetNodeNum) === Number(nodeNum);
 }
 
-function clearVisibleUnread() {
-    if (activeChatTab === 'channel' && activeChannelIndex !== null && activeChannelIndex !== undefined) {
-        clearUnreadCount(unreadChannelMessageCounts, getChannelNumberByIndex(activeChannelIndex));
-        return;
-    }
-
-    if (activeChatTab === 'dm' && activeDmTargetNodeNum) {
-        clearUnreadCount(unreadDmMessageCounts, activeDmTargetNodeNum);
-    }
-}
-
 async function markCurrentChannelRead(channelIndex = activeChannelIndex) {
     if (!currentProfile || channelIndex === null || channelIndex === undefined) return;
     try {
@@ -1787,7 +1776,7 @@ async function refreshThreadStateSnapshot() {
     if (!currentProfile) return;
 
     try {
-        const response = await fetch('/api/messages?skip_mark_read=1');
+        const response = await fetch('/api/messages');
         const payload = await response.json();
         if (!response.ok || Array.isArray(payload)) {
             return;
@@ -2272,7 +2261,6 @@ function renderActiveMessages() {
 
     const visibleMessages = getVisibleMessages();
     const unreadCount = getActiveUnreadCount();
-    clearVisibleUnread();
     if (!visibleMessages.length) {
         container.innerHTML = `<div class="text-muted small">${activeChatTab === 'channel' ? 'No channel messages yet.' : 'No direct messages in this thread yet.'}</div>`;
         return;
@@ -2280,6 +2268,13 @@ function renderActiveMessages() {
 
     container.innerHTML = renderMessagesWithUnreadDivider(visibleMessages, unreadCount);
     container.scrollTop = container.scrollHeight;
+    if (unreadCount > 0) {
+        if (activeChatTab === 'channel' && activeChannelIndex !== null && activeChannelIndex !== undefined) {
+            void markCurrentChannelRead(activeChannelIndex);
+        } else if (activeChatTab === 'dm' && activeDmTargetNodeNum) {
+            void markDmThreadRead(activeDmTargetNodeNum);
+        }
+    }
 }
 
 function renderChannelThreadList(container) {

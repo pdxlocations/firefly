@@ -377,10 +377,20 @@ def _get_mesh_store(profile=None):
     profile = _effective_profile(profile)
     if not profile or not profile.get("node_id"):
         return None
+    normalized_node_num = _profile_node_num(profile)
+    if normalized_node_num is None:
+        print(
+            f"[MESHDB] Skipping node store for profile {profile.get('id')!r}: "
+            f"invalid node_id {profile.get('node_id')!r}"
+        )
+        return None
     try:
         return MeshNodeStore(profile)
     except Exception as e:
-        print(f"[MESHDB] Failed to create node store: {e}")
+        print(
+            f"[MESHDB] Failed to create node store for profile {profile.get('id')!r} "
+            f"with node_id {profile.get('node_id')!r}: {e}"
+        )
         return None
 
 

@@ -26,6 +26,19 @@ from encryption import generate_hash
 BROADCAST_NODE_NUM = 0xFFFFFFFF
 
 
+def _normalized_profile_node_id(profile: Dict) -> str:
+    node_id = (profile or {}).get("node_id")
+    if not isinstance(node_id, str):
+        raise ValueError(f"invalid node_id {node_id!r}")
+
+    normalized = node_id.strip().lower()
+    if len(normalized) != 9 or not normalized.startswith("!"):
+        raise ValueError(f"invalid node_id {node_id!r}")
+
+    int(normalized[1:], 16)
+    return normalized
+
+
 def _runtime_root() -> Path:
     runtime_dir = os.getenv("FIREFLY_RUNTIME_DIR")
     if runtime_dir:
@@ -59,7 +72,8 @@ def _firefly_db_path() -> Path:
 
 
 def owner_node_num(profile: Dict) -> int:
-    return int(parse_node_id(profile["node_id"]))
+    normalized_node_id = _normalized_profile_node_id(profile)
+    return int(parse_node_id(normalized_node_id))
 
 
 def node_id_from_num(node_num: int) -> str:

@@ -62,7 +62,9 @@ def get_logger(name: str) -> logging.Logger:
 
 def _infer_level(message: str) -> int:
     lowered = message.lower()
-    if any(token in lowered for token in ("[recv]", "[nodeinfo_debug]")):
+    if "[recv]" in lowered:
+        return logging.INFO
+    if "[nodeinfo_debug]" in lowered:
         return logging.DEBUG
     if (
         "failed" in lowered

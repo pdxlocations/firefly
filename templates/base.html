@@ -1088,6 +1088,21 @@
                           },
                       });
 
+                      const contentType = response.headers.get('content-type') || '';
+                      if (contentType.includes('application/json')) {
+                          const data = await response.json();
+                          if (!response.ok) {
+                              window.alert(data.error || data.message || 'Request failed.');
+                              return;
+                          }
+                          if (data.redirect_url) {
+                              window.location.assign(data.redirect_url);
+                              return;
+                          }
+                          window.location.reload();
+                          return;
+                      }
+
                       if (response.redirected && response.url) {
                           window.location.assign(response.url);
                           return;

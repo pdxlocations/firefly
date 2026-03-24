@@ -1886,15 +1886,30 @@ def register():
 def login():
     username = (request.form.get("username") or "").strip()
     password = request.form.get("password") or ""
+    is_async_request = request.headers.get("X-Requested-With") == "fetch"
+
+    def fail(message, status=400):
+        if is_async_request:
+            return jsonify({"error": message}), status
+        flash(message, "error")
+        return redirect(url_for("index"))
+
+    if not username:
+        return fail("Username is required.")
+    if not password:
+        return fail("Password is required.")
 
     user = db.get_user_by_username(username)
-    if not user or not check_password_hash(user["password_hash"], password):
-        flash("Invalid username or password.", "error")
-        return redirect(url_for("index"))
+    if not user:
+        return fail("No account exists for that username.", 404)
+    if not check_password_hash(user["password_hash"], password):
+        return fail("Password is incorrect.", 401)
 
     _unregister_current_session_transport()
     _clear_session_user()
     _set_session_user(user)
+    if is_async_request:
+        return jsonify({"redirect_url": url_for("index")})
     return redirect(url_for("index"))
 
 

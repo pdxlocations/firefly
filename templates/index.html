@@ -3022,6 +3022,29 @@ function isSingleSimpleEmoji(value) {
     return isSimpleEmojiCodePoint(codePoint) && utf8ByteLength(glyphs[0]) <= 4;
 }
 
+function isValidChannelKey(channelKey) {
+    const normalized = String(channelKey || '').trim().replace(/-/g, '+').replace(/_/g, '/');
+    if (!normalized) return false;
+
+    let decoded;
+    try {
+        decoded = Uint8Array.from(atob(normalized), char => char.charCodeAt(0));
+    } catch {
+        return false;
+    }
+    return decoded.length === 1 || decoded.length === 16 || decoded.length === 32;
+}
+
+function validateNewChannelKeys(channels) {
+    const list = Array.isArray(channels) ? channels : [];
+    for (let index = 0; index < list.length; index += 1) {
+        if (!isValidChannelKey(list[index]?.key)) {
+            return `Channel ${index + 1} key must be base64 for 1 byte, 128 bits, or 256 bits.`;
+        }
+    }
+    return '';
+}
+
 function validateProfileIdentityFields({ node_id: nodeId, long_name: longName, short_name: shortName }) {
     if (!/^![0-9a-fA-F]{8}$/.test(nodeId || '')) {
         return 'Node ID must be ! followed by 8 hexadecimal characters.';
@@ -3121,6 +3144,11 @@ async function createManagedProfile(event) {
     const identityValidationError = validateProfileIdentityFields(payload);
     if (identityValidationError) {
         alert(identityValidationError);
+        return;
+    }
+    const channelValidationError = validateNewChannelKeys(payload.channels);
+    if (channelValidationError) {
+        alert(channelValidationError);
         return;
     }
 

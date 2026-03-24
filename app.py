@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import base64
 from collections import deque
 
 from datetime import datetime
@@ -177,6 +178,17 @@ def _is_valid_short_name(short_name):
         and len(value.encode("utf-8")) <= 4
         and unicodedata.category(value) == "So"
     )
+
+
+def _is_valid_channel_key(channel_key):
+    value = _normalize_text_field(channel_key).replace("-", "+").replace("_", "/")
+    if not value:
+        return False
+    try:
+        decoded = base64.b64decode(value.encode("ascii"), validate=True)
+    except Exception:
+        return False
+    return len(decoded) in {1, 16, 32}
 
 
 def _validate_profile_request_payload(data):
@@ -2002,6 +2014,9 @@ def create_profile():
 
     normalized_node_id = validated["node_id"]
     channels = validated["channels"]
+    for index, channel in enumerate(channels, start=1):
+        if not _is_valid_channel_key(channel.get("key")):
+            return jsonify({"error": f"channel {index} key must be base64 for 1 byte, 128 bits, or 256 bits"}), 400
     if db.node_id_in_use(normalized_node_id):
         return jsonify({"error": "Node ID is already in use."}), 409
 

@@ -24,7 +24,13 @@ from mudp.reliability import is_ack, is_nak, parse_routing
 from database import Database
 from encryption import generate_hash
 from firefly_logging import configure_logging, get_logger, make_log_print
-from mesh_runtime import MeshNodeStore, SharedPacketReceiver, VirtualNodeManager, count_nodes_for_profiles
+from mesh_runtime import (
+    MeshNodeStore,
+    SharedPacketReceiver,
+    VirtualNodeManager,
+    count_nodes_for_profiles,
+    find_meshdb_node_id_conflict,
+)
 from vnode.crypto import b64_decode
 
 configure_logging()
@@ -237,6 +243,25 @@ def _profile_channels(profile):
     if channel_name and channel_key:
         return [{"name": channel_name, "key": channel_key}]
     return []
+
+
+def _profile_node_id_conflict_error(node_id, exclude_profile_id=None):
+    if db.node_id_in_use(node_id, exclude_profile_id=exclude_profile_id):
+        return "Node ID is already in use by another profile."
+
+    conflict = find_meshdb_node_id_conflict(
+        profile_manager.get_all_profiles(),
+        node_id,
+        exclude_profile_id=exclude_profile_id,
+    )
+    if conflict:
+        print(
+            f"[PROFILES] Rejected node_id {node_id} because it already exists in meshdb "
+            f"for profile {conflict.get('owner_profile_id')} at {conflict.get('meshdb_file')}"
+        )
+        return "Node ID is already in use by another node in the mesh database."
+
+    return None
 
 
 def _selected_channel_index(profile=None):
@@ -613,7 +638,18 @@ def _message_has_fallback_sender_display(message):
         return True
     sender_display = (message.get("sender_display") or "").strip()
     sender_id = (message.get("sender") or "").strip()
-    return not sender_display or sender_display == "Unknown" or (sender_id and sender_display == sender_id)
+    sender_display_lower = sender_display.lower()
+    sender_id_lower = sender_id.lower()
+    if not sender_display or sender_display_lower == "unknown" or (sender_id and sender_display_lower == sender_id_lower):
+        return True
+
+    sender_num = message.get("sender_num")
+    try:
+        suffix = f"{int(sender_num):08x}"[-4:]
+        generated_display = f"Meshtastic {suffix}"
+    except (TypeError, ValueError):
+        generated_display = None
+    return bool(generated_display and sender_display_lower == generated_display.lower())
 
 
 def _hydrate_message_sender_labels(messages, profile):
@@ -2032,8 +2068,9 @@ def create_profile():
     for index, channel in enumerate(channels, start=1):
         if not _is_valid_channel_key(channel.get("key")):
             return jsonify({"error": f"channel {index} key must be base64 for 1 byte, 128 bits, or 256 bits"}), 400
-    if db.node_id_in_use(normalized_node_id):
-        return jsonify({"error": "Node ID is already in use."}), 409
+    conflict_error = _profile_node_id_conflict_error(normalized_node_id)
+    if conflict_error:
+        return jsonify({"error": conflict_error}), 409
 
     hop_limit = validated["hop_limit"]
     profile_id = str(uuid.uuid4())
@@ -2072,8 +2109,9 @@ def update_profile(profile_id):
 
     normalized_node_id = validated["node_id"]
     channels = validated["channels"]
-    if db.node_id_in_use(normalized_node_id, exclude_profile_id=profile_id):
-        return jsonify({"error": "Node ID is already in use."}), 409
+    conflict_error = _profile_node_id_conflict_error(normalized_node_id, exclude_profile_id=profile_id)
+    if conflict_error:
+        return jsonify({"error": conflict_error}), 409
 
     hop_limit = validated["hop_limit"]
 

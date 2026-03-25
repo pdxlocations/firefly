@@ -209,6 +209,28 @@ class Database:
     def _sqlite_ts_expr(column_name: str) -> str:
         return f"julianday(replace(substr({column_name}, 1, 19), 'T', ' '))"
 
+    @staticmethod
+    def _generated_meshtastic_display(sender_num) -> Optional[str]:
+        try:
+            normalized_sender_num = int(sender_num)
+        except (TypeError, ValueError):
+            return None
+        suffix = f"{normalized_sender_num:08x}"[-4:]
+        return f"Meshtastic {suffix}"
+
+    @classmethod
+    def _is_fallback_sender_display(cls, sender_display, sender_num=None, sender_id=None) -> bool:
+        normalized_display = str(sender_display or "").strip()
+        normalized_sender_id = str(sender_id or "").strip()
+        normalized_display_lower = normalized_display.lower()
+        normalized_sender_id_lower = normalized_sender_id.lower()
+        if not normalized_display or normalized_display_lower == "unknown":
+            return True
+        if normalized_sender_id and normalized_display_lower == normalized_sender_id_lower:
+            return True
+        generated_display = cls._generated_meshtastic_display(sender_num)
+        return bool(generated_display and normalized_display_lower == generated_display.lower())
+
     def migrate_profiles_from_json(self, json_file: str = "profiles.json"):
         """Migrate existing profiles from JSON file to database (only if not already migrated)"""
         if not os.path.exists(json_file):
@@ -1106,23 +1128,17 @@ class Database:
             sender_short_name = row['sender_short_name'] if 'sender_short_name' in row.keys() else None
             sender_node_id = row['sender_node_id'] if 'sender_node_id' in row.keys() else None
             fallback_sender_id = f"!{hex(sender_num)[2:].zfill(8)}" if sender_num else None
+            fallback_sender_display = self._is_fallback_sender_display(
+                sender_display,
+                sender_num=sender_num,
+                sender_id=fallback_sender_id,
+            )
 
-            if sender_long_name and (
-                not sender_display
-                or sender_display == 'Unknown'
-                or (fallback_sender_id is not None and sender_display == fallback_sender_id)
-            ):
+            if sender_long_name and fallback_sender_display:
                 current_sender_display = sender_long_name
-            elif sender_short_name and (
-                not sender_display
-                or sender_display == 'Unknown'
-                or (fallback_sender_id is not None and sender_display == fallback_sender_id)
-            ):
+            elif sender_short_name and fallback_sender_display:
                 current_sender_display = sender_short_name
-            elif sender_node_id and (
-                not sender_display
-                or sender_display == 'Unknown'
-            ):
+            elif sender_node_id and fallback_sender_display:
                 current_sender_display = sender_node_id
             elif sender_display:
                 current_sender_display = sender_display

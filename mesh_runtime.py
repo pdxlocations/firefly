@@ -804,6 +804,67 @@ def count_nodes_for_profiles(profiles: Dict[str, Dict]) -> int:
     return total
 
 
+def find_meshdb_node_id_conflict(profiles, node_id: str, exclude_profile_id: Optional[str] = None) -> Optional[Dict]:
+    normalized_node_id = (node_id or "").strip().lower()
+    if not normalized_node_id:
+        return None
+
+    try:
+        target_node_num = int(parse_node_id(normalized_node_id))
+    except Exception:
+        return None
+
+    profile_iterable = profiles.values() if isinstance(profiles, dict) else (profiles or [])
+    excluded_profile_id = str(exclude_profile_id) if exclude_profile_id else None
+
+    for profile in profile_iterable:
+        if not isinstance(profile, dict):
+            continue
+
+        profile_id = str(profile.get("id") or "")
+        try:
+            profile_owner_num = owner_node_num(profile)
+        except Exception:
+            continue
+
+        meshdb_file = _meshdb_root(profile) / f"{profile_owner_num}.db"
+        if not meshdb_file.exists():
+            continue
+
+        table_name = f"{profile_owner_num}_nodedb"
+        try:
+            with sqlite3.connect(meshdb_file) as con:
+                con.row_factory = sqlite3.Row
+                row = con.execute(
+                    f'SELECT node_num, long_name, short_name FROM "{table_name}" WHERE node_num = ? LIMIT 1',
+                    (str(target_node_num),),
+                ).fetchone()
+        except sqlite3.OperationalError:
+            continue
+        except Exception:
+            continue
+
+        if not row:
+            continue
+
+        matched_node_num = int(row["node_num"])
+        if profile_id and excluded_profile_id == profile_id and matched_node_num == profile_owner_num:
+            continue
+
+        return {
+            "owner_profile_id": profile_id or None,
+            "owner_profile_node_id": profile.get("node_id"),
+            "owner_profile_long_name": profile.get("long_name"),
+            "node_num": matched_node_num,
+            "node_id": node_id_from_num(matched_node_num),
+            "long_name": row["long_name"] or None,
+            "short_name": row["short_name"] or None,
+            "meshdb_file": str(meshdb_file),
+        }
+
+    return None
+
+
 def _epoch_to_iso(value) -> Optional[str]:
     if value in (None, ""):
         return None

@@ -371,6 +371,59 @@
     line-height: 1.28;
 }
 
+.message__content p {
+    margin: 0 0 0.45rem;
+}
+
+.message__content p:last-child {
+    margin-bottom: 0;
+}
+
+.message__content ul,
+.message__content ol {
+    margin: 0.25rem 0 0.45rem 1.2rem;
+    padding: 0;
+}
+
+.message__content li + li {
+    margin-top: 0.12rem;
+}
+
+.message__content blockquote {
+    margin: 0.35rem 0;
+    padding-left: 0.75rem;
+    border-left: 3px solid rgba(54, 93, 118, 0.28);
+    color: var(--firefly-muted);
+}
+
+.message__content code {
+    padding: 0.05rem 0.32rem;
+    border-radius: 0.4rem;
+    background: rgba(24, 39, 53, 0.08);
+    font-size: 0.95em;
+}
+
+.message__content pre {
+    margin: 0.35rem 0;
+    padding: 0.75rem 0.9rem;
+    border-radius: 0.85rem;
+    background: #172534;
+    color: #f6fbff;
+    overflow-x: auto;
+}
+
+.message__content pre code {
+    padding: 0;
+    background: transparent;
+    color: inherit;
+}
+
+.message__content a {
+    color: var(--bs-link-color);
+    text-decoration: underline;
+    word-break: break-word;
+}
+
 .message__meta {
     display: inline-flex;
     flex: 0 0 auto;
@@ -1953,6 +2006,7 @@ async function loadMessages(channelIndex = activeChannelIndex) {
             }
             applyUnreadState(payload);
         }
+        reconcileMessageSenderLabelsFromNodes();
         syncDmTargetsFromMessages();
     } catch (err) {
         console.error('Error loading messages:', err);
@@ -2005,6 +2059,7 @@ async function loadNodes() {
             throw new Error(payload.error || `HTTP ${response.status}`);
         }
         meshNodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+        reconcileMessageSenderLabelsFromNodes();
     } catch (error) {
         console.error('Error loading nodes:', error);
         meshNodes = [];
@@ -2014,6 +2069,56 @@ async function loadNodes() {
 function getNodeDisplayLabel(node) {
     if (!node) return 'Unknown';
     return node.long_name || node.short_name || node.node_id || `!${Number(node.node_num).toString(16).padStart(8, '0')}`;
+}
+
+function getGeneratedMeshtasticName(nodeNum) {
+    const normalizedNodeNum = Number(nodeNum);
+    if (!Number.isFinite(normalizedNodeNum)) return '';
+    return `Meshtastic ${normalizedNodeNum.toString(16).padStart(8, '0').slice(-4)}`;
+}
+
+function hasFallbackSenderDisplay(message) {
+    if (!message) return true;
+    const senderDisplay = String(message.sender_display || '').trim();
+    const senderId = String(message.sender || '').trim();
+    const senderDisplayLower = senderDisplay.toLowerCase();
+    const senderIdLower = senderId.toLowerCase();
+    if (!senderDisplay || senderDisplayLower === 'unknown') {
+        return true;
+    }
+    if (senderId && senderDisplayLower === senderIdLower) {
+        return true;
+    }
+    const generatedName = getGeneratedMeshtasticName(message.sender_num);
+    return Boolean(generatedName && senderDisplayLower === generatedName.toLowerCase());
+}
+
+function reconcileMessageSenderLabelsFromNodes() {
+    if (!Array.isArray(meshNodes) || !meshNodes.length) return;
+
+    const nodesByNum = new Map(
+        meshNodes
+            .map(node => [Number(node?.node_num), node])
+            .filter(([nodeNum]) => Number.isFinite(nodeNum))
+    );
+
+    [channelMessages, dmMessages].forEach(collection => {
+        collection.forEach(message => {
+            const node = nodesByNum.get(Number(message?.sender_num));
+            if (!node) return;
+
+            const displayLabel = getNodeDisplayLabel(node);
+            if (node.long_name && hasFallbackSenderDisplay(message)) {
+                message.sender_display = node.long_name;
+            } else if (displayLabel && hasFallbackSenderDisplay(message)) {
+                message.sender_display = displayLabel;
+            }
+
+            if (node.short_name) {
+                message.sender_short_name = node.short_name;
+            }
+        });
+    });
 }
 
 function applyNodeUpdate(payload) {
@@ -2039,9 +2144,9 @@ function applyNodeUpdate(payload) {
     [channelMessages, dmMessages].forEach(collection => {
         collection.forEach(message => {
             if (Number(message.sender_num) !== normalizedNodeNum) return;
-            if (node.long_name) {
+            if (node.long_name && hasFallbackSenderDisplay(message)) {
                 message.sender_display = node.long_name;
-            } else if (!message.sender_display || message.sender_display === message.sender || message.sender_display === 'Unknown') {
+            } else if (displayLabel && hasFallbackSenderDisplay(message)) {
                 message.sender_display = displayLabel;
             }
             if (node.short_name) {
@@ -3569,6 +3674,7 @@ function renderMessageHtml(message) {
     const dmBadge = message.message_type === 'dm' ? '<span class="badge bg-secondary ms-1">DM</span>' : '';
     const ackBadge = renderAckStatusHtml(message);
     const replyPreview = renderReplyPreview(message);
+    const messageContentHtml = renderMessageContentHtml(message.content || '');
     const replyButton = message.packet_id ? `
         <button class="reply-trigger" type="button" onclick="startReply(${message.packet_id})" aria-label="Reply" title="Reply">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -3589,7 +3695,7 @@ function renderMessageHtml(message) {
                         ${dmBadge}
                     </div>
                     ${replyPreview}
-                    <div class="message__content">${escapeHtml(message.content || '').replace(/\n/g, '<br>')}</div>
+                    <div class="message__content">${messageContentHtml}</div>
                 </div>
                 <div class="message__meta">
                     <div class="message__meta-top">
@@ -4444,6 +4550,76 @@ function escapeHtml(unsafe) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+}
+
+function renderMessageContentHtml(content) {
+    const normalized = String(content ?? '').replace(/\r\n?/g, '\n');
+    const fenceTokens = [];
+    let working = normalized.replace(/```([^\n`]*)\n([\s\S]*?)```/g, (_, language, code) => {
+        const label = escapeHtml((language || '').trim());
+        const codeHtml = escapeHtml(code.replace(/\n$/, ''));
+        const token = `@@FENCE_${fenceTokens.length}@@`;
+        fenceTokens.push(
+            `<pre><code${label ? ` data-language="${label}"` : ''}>${codeHtml}</code></pre>`
+        );
+        return token;
+    });
+
+    const blocks = working.split(/\n{2,}/).map(block => renderMarkdownBlock(block.trim())).filter(Boolean);
+    if (!blocks.length) {
+        return '';
+    }
+    return restoreMarkdownTokens(blocks.join(''), fenceTokens, 'FENCE');
+}
+
+function renderMarkdownBlock(block) {
+    if (!block) return '';
+    if (/^@@FENCE_\d+@@$/.test(block)) {
+        return block;
+    }
+
+    const lines = block.split('\n');
+    if (lines.every(line => /^\s*[-*]\s+/.test(line))) {
+        const items = lines.map(line => `<li>${renderMarkdownInline(line.replace(/^\s*[-*]\s+/, ''))}</li>`).join('');
+        return `<ul>${items}</ul>`;
+    }
+    if (lines.every(line => /^\s*\d+\.\s+/.test(line))) {
+        const items = lines.map(line => `<li>${renderMarkdownInline(line.replace(/^\s*\d+\.\s+/, ''))}</li>`).join('');
+        return `<ol>${items}</ol>`;
+    }
+    if (lines.every(line => /^\s*>\s?/.test(line))) {
+        const body = lines.map(line => renderMarkdownInline(line.replace(/^\s*>\s?/, ''))).join('<br>');
+        return `<blockquote>${body}</blockquote>`;
+    }
+
+    return `<p>${lines.map(line => renderMarkdownInline(line)).join('<br>')}</p>`;
+}
+
+function renderMarkdownInline(text) {
+    const tokenStore = [];
+    const addToken = html => {
+        const token = `@@INLINE_${tokenStore.length}@@`;
+        tokenStore.push(html);
+        return token;
+    };
+
+    let html = escapeHtml(text);
+    html = html.replace(/`([^`\n]+)`/g, (_, code) => addToken(`<code>${code}</code>`));
+    html = html.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+        const safeUrl = escapeHtml(url);
+        return addToken(`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+    });
+    html = html.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '<strong>$2</strong>');
+    html = html.replace(/(\*|_)(?=\S)([\s\S]*?\S)\1/g, '<em>$2</em>');
+    html = html.replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>');
+    return restoreMarkdownTokens(html, tokenStore, 'INLINE');
+}
+
+function restoreMarkdownTokens(html, tokenStore, prefix) {
+    return tokenStore.reduce(
+        (output, tokenHtml, index) => output.replaceAll(`@@${prefix}_${index}@@`, tokenHtml),
+        html
+    );
 }
 </script>
 {% endblock %}

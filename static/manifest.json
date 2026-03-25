@@ -1,20 +1,29 @@
 {
   "id": "/",
-  "name": "Firefly",
+  "name": "Firefly Mesh Chat",
   "short_name": "Firefly",
   "description": "Firefly mesh chat and node management interface.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "background_color": "#0b1420",
   "theme_color": "#1f5d96",
+  "lang": "en-US",
+  "categories": ["communication", "utilities"],
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/static/images/favicon-blk.svg",
+      "src": "/static/images/firefly.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/static/images/firefly.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }

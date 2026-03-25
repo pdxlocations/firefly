@@ -8,7 +8,7 @@ from functools import wraps
 import re
 import unicodedata
 from google.protobuf import text_format
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for, has_request_context, flash
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, has_request_context, flash, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 import uuid
 import os
@@ -1445,6 +1445,14 @@ socketio = SocketIO(
     logger=get_logger("socketio.server"),
     engineio_logger=get_logger("engineio.server"),
 )
+
+
+@app.route("/service-worker.js")
+def service_worker():
+    response = send_from_directory(app.static_folder, "service-worker.js", mimetype="application/javascript")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["Service-Worker-Allowed"] = "/"
+    return response
 
 
 @app.context_processor

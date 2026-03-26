@@ -1207,10 +1207,10 @@
         padding-top: 0;
     }
 
-    @supports (-webkit-touch-callout: none) {
+    @supports (height: 100svh) {
         body.mobile-fixed-nav-page,
         body.mobile-fixed-nav-page > .container.mt-4 {
-            min-height: -webkit-fill-available;
+            min-height: 100svh;
         }
     }
 
@@ -1230,6 +1230,13 @@
         right: 0.5rem;
         top: 0;
         bottom: 0;
+    }
+
+    @supports (height: 100svh) {
+        .chat-shell-card {
+            height: 100svh;
+            bottom: auto;
+        }
     }
 
     .card-body.d-flex.flex-column {
@@ -1611,21 +1618,6 @@ let mapLayerGroup = null;
 let pendingThreadStateRefresh = null;
 let activeTracerouteRequest = null;
 
-function isIosStandalonePwa() {
-    const userAgent = navigator.userAgent || '';
-    const isIosDevice = /iPad|iPhone|iPod/.test(userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-    return isIosDevice && isStandalone;
-}
-
-function restoreViewportAfterKeyboardClose() {
-    if (!isIosStandalonePwa()) return;
-    window.scrollTo(0, 0);
-    document.body.scrollTop = 0;
-    document.documentElement.scrollTop = 0;
-}
-
 document.addEventListener('DOMContentLoaded', async function() {
     initializePendingChatContext();
 
@@ -1669,22 +1661,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
     messageInput.addEventListener('input', updateCharacterCounter);
-    messageInput.addEventListener('blur', function() {
-        window.setTimeout(restoreViewportAfterKeyboardClose, 80);
-        window.setTimeout(restoreViewportAfterKeyboardClose, 240);
-    });
     if (messagesContainer) {
         messagesContainer.addEventListener('click', handleThreadCardClick);
         messagesContainer.addEventListener('input', handleThreadListInput);
         messagesContainer.addEventListener('scroll', () => updateNodesBackToTopVisibility(messagesContainer));
-    }
-
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', function() {
-            if (document.activeElement !== messageInput) {
-                window.setTimeout(restoreViewportAfterKeyboardClose, 60);
-            }
-        });
     }
 
     await loadCurrentProfileAndStatus();

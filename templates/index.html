@@ -290,7 +290,6 @@
     --firefly-chat-surface: rgba(255, 255, 255, 0.92);
     --firefly-chat-surface-muted: rgba(244, 248, 251, 0.9);
     --firefly-chat-border: rgba(175, 191, 205, 0.68);
-    --firefly-shell-height: 100vh;
 }
 
 [data-bs-theme="dark"] {
@@ -1186,31 +1185,13 @@
 
 /* Mobile compact profile controls */
 @media (max-width: 767.98px) {
-    html {
-        height: var(--firefly-shell-height);
-        min-height: var(--firefly-shell-height);
-        max-height: var(--firefly-shell-height);
-        overflow: hidden;
-    }
-
     body > .navbar {
         display: none;
     }
 
-    body.mobile-fixed-nav-page {
-        position: fixed;
-        inset: 0;
-        width: 100%;
-        height: var(--firefly-shell-height);
-        min-height: var(--firefly-shell-height);
-        max-height: var(--firefly-shell-height);
-        overflow: hidden;
-        overscroll-behavior-y: none;
-    }
-
     body {
         background: var(--mudp-light-bg);
-        min-height: var(--firefly-shell-height);
+        min-height: 100vh;
     }
 
     body[data-bs-theme="dark"] {
@@ -1222,11 +1203,8 @@
         margin-top: 0 !important;
         padding-left: 0.5rem;
         padding-right: 0.5rem;
-        padding-bottom: 0;
+        padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
         padding-top: 0;
-        height: var(--firefly-shell-height);
-        min-height: var(--firefly-shell-height);
-        overflow: hidden;
     }
 
     .row {
@@ -1244,9 +1222,7 @@
         left: 0.5rem;
         right: 0.5rem;
         top: 0;
-        bottom: auto;
-        height: var(--firefly-shell-height);
-        max-height: var(--firefly-shell-height);
+        bottom: 0;
     }
 
     .card-body.d-flex.flex-column {
@@ -1628,18 +1604,7 @@ let mapLayerGroup = null;
 let pendingThreadStateRefresh = null;
 let activeTracerouteRequest = null;
 
-function lockMobileShellHeight() {
-    if (window.innerWidth >= 768) {
-        return;
-    }
-    const measuredHeight = Math.round(window.innerHeight || document.documentElement.clientHeight || 0);
-    if (measuredHeight > 0) {
-        document.documentElement.style.setProperty('--firefly-shell-height', `${measuredHeight}px`);
-    }
-}
-
 document.addEventListener('DOMContentLoaded', async function() {
-    lockMobileShellHeight();
     initializePendingChatContext();
 
     try {
@@ -1699,10 +1664,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     setInterval(async () => {
         refreshProfileBanner();
     }, 30000);
-});
-
-window.addEventListener('orientationchange', function() {
-    window.setTimeout(lockMobileShellHeight, 120);
 });
 
 function openProfileSelectorIfRequested() {

@@ -1186,18 +1186,31 @@
 
 /* Mobile compact profile controls */
 @media (max-width: 767.98px) {
+    html {
+        height: var(--firefly-shell-height);
+        min-height: var(--firefly-shell-height);
+        max-height: var(--firefly-shell-height);
+        overflow: hidden;
+    }
+
     body > .navbar {
         display: none;
     }
 
     body.mobile-fixed-nav-page {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: var(--firefly-shell-height);
+        min-height: var(--firefly-shell-height);
+        max-height: var(--firefly-shell-height);
         overflow: hidden;
         overscroll-behavior-y: none;
     }
 
     body {
         background: var(--mudp-light-bg);
-        min-height: 100vh;
+        min-height: var(--firefly-shell-height);
     }
 
     body[data-bs-theme="dark"] {

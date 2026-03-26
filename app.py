@@ -2058,6 +2058,7 @@ def login():
     username = (request.form.get("username") or "").strip()
     password = request.form.get("password") or ""
     is_async_request = request.headers.get("X-Requested-With") == "fetch"
+    redirect_target = url_for("index", open_profiles=1)
 
     def fail(message, status=400):
         if is_async_request:
@@ -2080,8 +2081,8 @@ def login():
     _clear_session_user()
     _set_session_user(user)
     if is_async_request:
-        return jsonify({"redirect_url": url_for("index")})
-    return redirect(url_for("index"))
+        return jsonify({"redirect_url": redirect_target})
+    return redirect(redirect_target)
 
 
 @app.route("/logout", methods=["POST"])

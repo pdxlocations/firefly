@@ -33,7 +33,7 @@
                             </option>
                         {% endfor %}
                     </select>
-                    <button id="setProfileBtn" class="btn btn-primary" type="button">Set</button>
+                    <button id="setProfileBtn" class="btn btn-primary" type="button">Activate</button>
                 </div>
             </div>
             <div class="profile-selector-status mb-3">
@@ -3032,7 +3032,7 @@ function syncProfileSelectors() {
     });
     const selectedValue = currentProfile?.id || '';
 
-    ['profileSelect', 'profilesTabProfileSelect'].forEach(selectId => {
+    ['profileSelect'].forEach(selectId => {
         const select = document.getElementById(selectId);
         if (!select) return;
         select.innerHTML = options.join('');
@@ -3053,23 +3053,10 @@ function renderProfilesView(container) {
 
     container.innerHTML = `
         <div class="profile-manager">
-            <div class="card">
-                <div class="card-body">
-                    <div class="profile-manager__selector">
-                        <div class="profile-manager__selector-field">
-                            <label for="profilesTabProfileSelect" class="form-label">Active Profile</label>
-                            <select id="profilesTabProfileSelect" class="form-select">
-                                <option value="">Select profile...</option>
-                            </select>
-                        </div>
-                        <button id="profilesTabSetProfileBtn" class="btn btn-primary" type="button">Set Profile</button>
-                    </div>
-                </div>
-            </div>
             <div class="profile-manager__grid">
                 <div class="card">
                     <div class="card-header">
-                        <h5 class="mb-0">Existing Profiles</h5>
+                        <h5 class="mb-0">User Profiles</h5>
                     </div>
                     <div class="card-body">
                         <div id="profilesList">${profileCards}</div>
@@ -3118,7 +3105,6 @@ function renderProfilesView(container) {
     `;
 
     syncProfileSelectors();
-    document.getElementById('profilesTabSetProfileBtn')?.addEventListener('click', setProfileFromProfilesTab);
     document.getElementById('createProfileForm')?.addEventListener('submit', createManagedProfile);
     document.getElementById('addNewChannelBtn')?.addEventListener('click', () => addProfileChannelRow('newChannelsList'));
     document.getElementById('newNodeId')?.addEventListener('input', syncGeneratedProfileNames);
@@ -3127,16 +3113,6 @@ function renderProfilesView(container) {
 
     renderProfileChannelRows('newChannelsList', [{ name: '', key: '' }]);
     applyGeneratedProfileDefaults(true);
-}
-
-function setProfileFromProfilesTab() {
-    const select = document.getElementById('profilesTabProfileSelect');
-    const button = document.getElementById('profilesTabSetProfileBtn');
-    if (!select || !button) return;
-    setProfile({
-        target: button,
-        profileSelectId: 'profilesTabProfileSelect',
-    });
 }
 
 function renderManagedProfileCard(profileId, profile) {
@@ -3158,7 +3134,7 @@ function renderManagedProfileCard(profileId, profile) {
                 <small class="text-muted profile-item__created">Created: ${escapeHtml(String(profile.created_at || '').slice(0, 10))}</small>
             </div>
             <div class="profile-item__actions">
-                <button class="btn btn-success btn-sm" type="button" data-set-profile-id="${escapeHtml(profileId)}">Set</button>
+                <button class="btn btn-success btn-sm" type="button" data-set-profile-id="${escapeHtml(profileId)}">Activate</button>
                 <button class="btn btn-primary btn-sm" type="button" data-edit-profile-id="${escapeHtml(profileId)}">Edit</button>
                 <button class="btn btn-danger btn-sm" type="button" data-delete-profile-id="${escapeHtml(profileId)}">Delete</button>
             </div>
@@ -4027,7 +4003,7 @@ async function setProfile(event) {
     } finally {
         setBtn.disabled = false;
         if (setBtn.id === 'setProfileBtn') {
-            setBtn.textContent = 'Set';
+            setBtn.textContent = 'Activate';
         } else {
             updateConnectButtons();
         }

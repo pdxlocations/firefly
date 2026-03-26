@@ -607,8 +607,8 @@
         margin-top: 0 !important;
         padding-top: 0.5rem;
         padding-bottom: 0.5rem;
-        height: calc(var(--firefly-app-height) - 76px);
-        min-height: calc(var(--firefly-app-height) - 76px);
+        height: calc(100vh - 76px);
+        min-height: calc(100vh - 76px);
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -1191,7 +1191,7 @@
 
     body {
         background: var(--mudp-light-bg);
-        min-height: var(--firefly-app-height);
+        min-height: 100vh;
     }
 
     body[data-bs-theme="dark"] {
@@ -1201,11 +1201,17 @@
     body > .container.mt-4 {
         max-width: 100%;
         margin-top: 0 !important;
-        min-height: var(--firefly-app-height);
         padding-left: 0.5rem;
         padding-right: 0.5rem;
         padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
         padding-top: 0;
+    }
+
+    @supports (-webkit-touch-callout: none) {
+        body.mobile-fixed-nav-page,
+        body.mobile-fixed-nav-page > .container.mt-4 {
+            min-height: -webkit-fill-available;
+        }
     }
 
     .row {
@@ -1605,6 +1611,21 @@ let mapLayerGroup = null;
 let pendingThreadStateRefresh = null;
 let activeTracerouteRequest = null;
 
+function isIosStandalonePwa() {
+    const userAgent = navigator.userAgent || '';
+    const isIosDevice = /iPad|iPhone|iPod/.test(userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    return isIosDevice && isStandalone;
+}
+
+function restoreViewportAfterKeyboardClose() {
+    if (!isIosStandalonePwa()) return;
+    window.scrollTo(0, 0);
+    document.body.scrollTop = 0;
+    document.documentElement.scrollTop = 0;
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
     initializePendingChatContext();
 
@@ -1648,10 +1669,22 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
     messageInput.addEventListener('input', updateCharacterCounter);
+    messageInput.addEventListener('blur', function() {
+        window.setTimeout(restoreViewportAfterKeyboardClose, 80);
+        window.setTimeout(restoreViewportAfterKeyboardClose, 240);
+    });
     if (messagesContainer) {
         messagesContainer.addEventListener('click', handleThreadCardClick);
         messagesContainer.addEventListener('input', handleThreadListInput);
         messagesContainer.addEventListener('scroll', () => updateNodesBackToTopVisibility(messagesContainer));
+    }
+
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', function() {
+            if (document.activeElement !== messageInput) {
+                window.setTimeout(restoreViewportAfterKeyboardClose, 60);
+            }
+        });
     }
 
     await loadCurrentProfileAndStatus();

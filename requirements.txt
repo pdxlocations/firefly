@@ -5,7 +5,7 @@ python-engineio
 eventlet
 meshtastic
 cryptography
-mudp
+mudp>=1.5.7
 Pypubsub
-vnode
-meshdb
+vnode>=0.1.10
+meshdb>=0.2.0

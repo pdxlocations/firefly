@@ -11,15 +11,22 @@ import subprocess
 import importlib.util
 import signal
 import atexit
+from local_deps import bootstrap_local_dependency, ensure_dependency_version
 from database import Database
 from firefly_logging import configure_logging, get_logger, make_log_print
 
+bootstrap_local_dependency("meshdb")
+bootstrap_local_dependency("mudp")
+bootstrap_local_dependency("vnode")
+ensure_dependency_version("meshdb", "0.2.0")
+ensure_dependency_version("mudp", "1.5.7")
+ensure_dependency_version("vnode", "0.1.10")
 
 configure_logging()
 logger = get_logger("firefly.start")
 print = make_log_print(logger)
 
-REQUIRED_RUNTIME_MODULES = ("meshdb", "vnode")
+REQUIRED_RUNTIME_MODULES = ("meshdb", "mudp", "vnode")
 _SHUTDOWN_IN_PROGRESS = False
 
 

@@ -6,8 +6,16 @@ This script validates the current interpreter before starting the app
 
 import sys
 import importlib.util
+from local_deps import bootstrap_local_dependency, ensure_dependency_version
 
-REQUIRED_RUNTIME_MODULES = ("meshdb", "vnode")
+bootstrap_local_dependency("meshdb")
+bootstrap_local_dependency("mudp")
+bootstrap_local_dependency("vnode")
+ensure_dependency_version("meshdb", "0.2.0")
+ensure_dependency_version("mudp", "1.5.7")
+ensure_dependency_version("vnode", "0.1.10")
+
+REQUIRED_RUNTIME_MODULES = ("meshdb", "mudp", "vnode")
 
 
 def has_required_modules():

@@ -49,27 +49,6 @@ class Database:
                 )
             """)
             
-            # Nodes table - stores nodeinfo by channel (shared across profiles using same channel)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS nodes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    channel INTEGER NOT NULL,  -- Channel number from generate_hash()
-                    node_id TEXT NOT NULL,
-                    node_num INTEGER NOT NULL,
-                    long_name TEXT,
-                    short_name TEXT,
-                    macaddr BLOB,
-                    hw_model TEXT,
-                    role TEXT,
-                    public_key BLOB,
-                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    packet_count INTEGER DEFAULT 1,
-                    raw_nodeinfo TEXT,  -- JSON blob of the full nodeinfo payload
-                    UNIQUE(channel, node_num)  -- Unique per channel, not per profile
-                )
-            """)
-            
             # Messages table - stores all messages by channel (not by profile)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
@@ -104,6 +83,18 @@ class Database:
                     profile_id TEXT NOT NULL,
                     channel INTEGER NOT NULL,
                     last_seen_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_message_id INTEGER,
+                    PRIMARY KEY (profile_id, channel),
+                    FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE
+                )
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS profile_channel_clears (
+                    profile_id TEXT NOT NULL,
+                    channel INTEGER NOT NULL,
+                    cleared_before_timestamp TIMESTAMP NOT NULL,
+                    cleared_through_message_id INTEGER,
                     PRIMARY KEY (profile_id, channel),
                     FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE
                 )
@@ -114,6 +105,7 @@ class Database:
                     profile_id TEXT NOT NULL,
                     peer_node_num INTEGER NOT NULL,
                     last_seen_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_message_id INTEGER,
                     PRIMARY KEY (profile_id, peer_node_num),
                     FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE
                 )
@@ -139,6 +131,17 @@ class Database:
             except sqlite3.OperationalError:
                 pass
 
+            try:
+                conn.execute("ALTER TABLE profile_channel_clears ADD COLUMN cleared_through_message_id INTEGER")
+            except sqlite3.OperationalError:
+                pass
+
+            for table_name in ("profile_last_seen", "profile_dm_last_seen"):
+                try:
+                    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN last_seen_message_id INTEGER")
+                except sqlite3.OperationalError:
+                    pass
+
             for column_sql, column_name in [
                 ("ALTER TABLE messages ADD COLUMN message_type TEXT DEFAULT 'channel'", "message_type"),
                 ("ALTER TABLE messages ADD COLUMN reply_packet_id INTEGER", "reply_packet_id"),
@@ -156,9 +159,6 @@ class Database:
                     pass
             
             # Create indexes for better performance
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_channel ON nodes (channel)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes (last_seen DESC)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_channel_last_seen ON nodes (channel, last_seen DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages (channel)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_type ON messages (message_type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_owner_profile ON messages (owner_profile_id)")
@@ -166,6 +166,7 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages (timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_channel_timestamp ON messages (channel, timestamp DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_last_seen ON profile_last_seen (profile_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_channel_clears ON profile_channel_clears (profile_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_dm_last_seen ON profile_dm_last_seen (profile_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles (user_id)")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users (username COLLATE NOCASE)")
@@ -173,8 +174,34 @@ class Database:
                 conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_node_id_unique ON profiles (node_id)")
             except sqlite3.IntegrityError as e:
                 print(f"[DB] Could not create unique node_id index: {e}")
+
+            self._drop_legacy_node_tables(conn)
             
             conn.commit()
+
+    def _drop_legacy_node_tables(self, conn) -> None:
+        for table_name in ("nodes", "channel_nodedb"):
+            try:
+                row = conn.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = ?
+                    """,
+                    (table_name,),
+                ).fetchone()
+                if not row:
+                    continue
+
+                row_count = int(conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0] or 0)
+                if row_count > 0:
+                    print(f"[DB] Retaining legacy table {table_name} with {row_count} row(s)")
+                    continue
+
+                conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                print(f"[DB] Dropped empty legacy table {table_name}")
+            except Exception as e:
+                print(f"[DB] Failed to drop legacy table {table_name}: {e}")
 
     @staticmethod
     def _normalize_channels(channels=None, legacy_channel: str = "", legacy_key: str = "") -> List[Dict]:
@@ -642,111 +669,6 @@ class Database:
             print(f"Error deleting profile: {e}")
             return False
 
-    # === CHANNEL-BASED NODE METHODS (NEW) ===
-    
-    def store_node_for_channel(self, channel: int, node_num: int, node_id: str, 
-                              long_name: str = None, short_name: str = None, 
-                              macaddr: bytes = None, hw_model: str = None, 
-                              role: str = None, public_key: bytes = None, 
-                              raw_nodeinfo: str = None) -> bool:
-        """Store or update a node for a specific channel (accessible to all profiles using that channel)"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                # Check if node exists for this channel
-                cursor = conn.execute("""
-                    SELECT id, packet_count FROM nodes WHERE channel = ? AND node_num = ?
-                """, (channel, node_num))
-                existing = cursor.fetchone()
-                
-                if existing:
-                    # Update existing node
-                    conn.execute("""
-                        UPDATE nodes SET 
-                            node_id = COALESCE(?, node_id),
-                            long_name = COALESCE(?, long_name),
-                            short_name = COALESCE(?, short_name),
-                            macaddr = COALESCE(?, macaddr),
-                            hw_model = COALESCE(?, hw_model),
-                            role = COALESCE(?, role),
-                            public_key = COALESCE(?, public_key),
-                            last_seen = CURRENT_TIMESTAMP,
-                            packet_count = packet_count + 1,
-                            raw_nodeinfo = COALESCE(?, raw_nodeinfo)
-                        WHERE id = ?
-                    """, (node_id, long_name, short_name, macaddr, hw_model, 
-                         role, public_key, raw_nodeinfo, existing[0]))
-                else:
-                    # Insert new node
-                    conn.execute("""
-                        INSERT INTO nodes 
-                        (channel, node_num, node_id, long_name, short_name, 
-                         macaddr, hw_model, role, public_key, raw_nodeinfo)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (channel, node_num, node_id, long_name, short_name, 
-                         macaddr, hw_model, role, public_key, raw_nodeinfo))
-                conn.commit()
-                return True
-        except Exception as e:
-            print(f"Error storing node for channel: {e}")
-            return False
-    
-    def get_nodes_for_channel(self, channel: int) -> List[Dict]:
-        """Get all nodes seen on a specific channel (accessible to all profiles using that channel)"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
-                SELECT node_num, node_id, long_name, short_name, macaddr, 
-                       hw_model, role, first_seen, last_seen, packet_count, raw_nodeinfo
-                FROM nodes WHERE channel = ? ORDER BY last_seen DESC
-            """, (channel,))
-            
-            nodes = []
-            for row in cursor:
-                # Ensure node_id is properly formatted as hex
-                node_id = row['node_id']
-                if not node_id and row['node_num']:
-                    # Fallback: create hex node_id from node_num
-                    node_id = f"!{hex(row['node_num'])[2:].zfill(8)}"
-                elif node_id and not node_id.startswith('!'):
-                    # Fix malformed node_id that might be decimal
-                    try:
-                        # If it's a decimal number, convert to hex format
-                        decimal_val = int(node_id)
-                        node_id = f"!{hex(decimal_val)[2:].zfill(8)}"
-                    except ValueError:
-                        # If it's not a number, keep as is
-                        pass
-                
-                node_data = {
-                    'node_num': row['node_num'],
-                    'node_id': node_id,
-                    'long_name': row['long_name'],
-                    'short_name': row['short_name'],
-                    'hw_model': row['hw_model'],
-                    'role': row['role'],
-                    'first_seen': row['first_seen'],
-                    'last_seen': row['last_seen'],
-                    'packet_count': row['packet_count']
-                }
-                
-                # Add raw nodeinfo if available
-                if row['raw_nodeinfo']:
-                    try:
-                        node_data['raw_nodeinfo'] = json.loads(row['raw_nodeinfo'])
-                    except:
-                        pass
-                        
-                # Format MAC address if available
-                if row['macaddr']:
-                    try:
-                        mac_bytes = row['macaddr']
-                        node_data['macaddr'] = ':'.join(f'{b:02x}' for b in mac_bytes)
-                    except:
-                        pass
-                        
-                nodes.append(node_data)
-            return nodes
-    
     def store_message(self, message_id: str, packet_id: int = None,
                      sender_num: int = None, sender_display: str = None,
                      content: str = None, sender_ip: str = None, direction: str = "received",
@@ -777,7 +699,7 @@ class Database:
         """Get database statistics"""
         with sqlite3.connect(self.db_path) as conn:
             if profile_id:
-                # Get the profile's channel to count nodes and messages for that channel
+                # Profile-level stats retained for message counts only.
                 profile_cursor = conn.execute("""
                     SELECT channel, key FROM profiles WHERE id = ?
                 """, (profile_id,))
@@ -789,9 +711,9 @@ class Database:
                     
                     cursor = conn.execute("""
                         SELECT 
-                            (SELECT COUNT(*) FROM nodes WHERE channel = ?) as node_count,
+                            0 as node_count,
                             (SELECT COUNT(*) FROM messages WHERE channel = ?) as message_count
-                    """, (channel, channel))
+                    """, (channel,))
                 else:
                     cursor = conn.execute("""
                         SELECT 0 as node_count, 0 as message_count
@@ -800,7 +722,7 @@ class Database:
                 cursor = conn.execute("""
                     SELECT 
                         (SELECT COUNT(*) FROM profiles) as profile_count,
-                        (SELECT COUNT(*) FROM nodes) as total_nodes,
+                        0 as total_nodes,
                         (SELECT COUNT(*) FROM messages) as total_messages
                 """)
             
@@ -817,24 +739,87 @@ class Database:
                     'total_messages': row[2]
                 }
 
-    def get_messages_for_channel(self, channel: int, limit: int = 100) -> List[Dict]:
+    def _channel_clear_state(self, conn, profile_id: Optional[str], channel: int) -> Optional[Dict]:
+        if not profile_id:
+            return None
+
+        row = conn.execute(
+            """
+            SELECT cleared_before_timestamp, cleared_through_message_id
+            FROM profile_channel_clears
+            WHERE profile_id = ? AND channel = ?
+            """,
+            (profile_id, int(channel)),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "cleared_before_timestamp": row[0],
+            "cleared_through_message_id": row[1],
+        }
+
+    def _visible_channel_message_id_bounds(
+        self,
+        conn,
+        profile_id: Optional[str],
+        channel: int,
+    ) -> Tuple[Optional[int], Optional[int]]:
+        clear_state = self._channel_clear_state(conn, profile_id, channel) or {}
+        query = """
+            SELECT MIN(id) AS min_message_id, MAX(id) AS max_message_id
+            FROM messages
+            WHERE channel = ?
+              AND COALESCE(message_type, 'channel') = 'channel'
+        """
+        params = [int(channel)]
+        if clear_state.get("cleared_through_message_id") is not None:
+            query += " AND id > ?"
+            params.append(int(clear_state["cleared_through_message_id"]))
+        elif clear_state.get("cleared_before_timestamp"):
+            query += """
+                AND {message_ts_expr} > {clear_ts_expr}
+            """.format(
+                message_ts_expr=self._sqlite_ts_expr("timestamp"),
+                clear_ts_expr=self._sqlite_ts_expr("?"),
+            )
+            params.append(clear_state["cleared_before_timestamp"])
+
+        row = conn.execute(query, params).fetchone()
+        if not row:
+            return None, None
+        return row[0], row[1]
+
+    def get_messages_for_channel(self, channel: int, limit: int = 100, profile_id: str = None) -> List[Dict]:
         """Get messages for a specific channel (accessible to any profile using that channel)"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            
-            # Get messages for the specific channel
-            cursor = conn.execute("""
+
+            clear_state = self._channel_clear_state(conn, profile_id, channel)
+            query = """
                 SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
-                       n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
+                       NULL AS sender_long_name, NULL AS sender_short_name, NULL AS sender_node_id,
                        m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
                        m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
                        m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
                 FROM messages m
-                LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
                 WHERE m.channel = ? AND COALESCE(m.message_type, 'channel') = 'channel'
-                ORDER BY m.timestamp DESC LIMIT ?
-            """, (channel, limit))
-            
+            """
+            params = [int(channel)]
+            if clear_state and clear_state.get("cleared_through_message_id") is not None:
+                query += " AND m.id > ?"
+                params.append(int(clear_state["cleared_through_message_id"]))
+            elif clear_state and clear_state.get("cleared_before_timestamp"):
+                query += """
+                    AND {message_ts_expr} > {clear_ts_expr}
+                """.format(
+                    message_ts_expr=self._sqlite_ts_expr("m.timestamp"),
+                    clear_ts_expr=self._sqlite_ts_expr("?"),
+                )
+                params.append(clear_state["cleared_before_timestamp"])
+            query += " ORDER BY m.timestamp DESC LIMIT ?"
+            params.append(int(limit))
+            cursor = conn.execute(query, params)
+
             return self._serialize_messages(cursor)
 
     def get_dm_messages_for_profile(self, profile_id: str, limit: int = 200) -> List[Dict]:
@@ -843,12 +828,11 @@ class Database:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
-                       n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
+                       NULL AS sender_long_name, NULL AS sender_short_name, NULL AS sender_node_id,
                        m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
                        m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
                        m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
                 FROM messages m
-                LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
                 WHERE m.owner_profile_id = ? AND COALESCE(m.message_type, 'channel') = 'dm'
                 ORDER BY m.timestamp DESC LIMIT ?
             """, (profile_id, limit))
@@ -862,25 +846,65 @@ class Database:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                conn.execute(
+                cursor = conn.execute(
                     """
-                    UPDATE messages
-                    SET ack_status = ?, ack_error = ?, ack_updated_at = CURRENT_TIMESTAMP
+                    SELECT id, ack_status
+                    FROM messages
                     WHERE packet_id = ?
                       AND direction = 'sent'
                       AND COALESCE(ack_requested, 0) = 1
                     """,
-                    (ack_status, ack_error, int(packet_id)),
+                    (int(packet_id),),
                 )
+                rows_to_update = cursor.fetchall()
+
+                def resolved_ack_state(current_status: str, next_status: str, next_error: str):
+                    current = str(current_status or "").strip().lower()
+                    incoming = str(next_status or "").strip().lower()
+                    success_states = {"ack", "implicit_ack"}
+
+                    if current in success_states:
+                        if incoming in success_states:
+                            if current == "implicit_ack" and incoming == "ack":
+                                return "ack", None, True
+                            if current == "ack" and incoming == "implicit_ack":
+                                return "ack", None, False
+                            return current or incoming, None, False
+                        return current, None, False
+
+                    if incoming in success_states:
+                        return incoming, None, True
+
+                    if current == incoming and (current != "nak" or (next_error or None) == None):
+                        return current or incoming, next_error, False
+
+                    return incoming, next_error, True
+
+                for row in rows_to_update:
+                    next_status, next_error, should_update = resolved_ack_state(
+                        row["ack_status"],
+                        ack_status,
+                        ack_error,
+                    )
+                    if not should_update:
+                        continue
+                    conn.execute(
+                        """
+                        UPDATE messages
+                        SET ack_status = ?, ack_error = ?, ack_updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (next_status, next_error, int(row["id"])),
+                    )
+
                 cursor = conn.execute(
                     """
                     SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
-                           n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
+                           NULL AS sender_long_name, NULL AS sender_short_name, NULL AS sender_node_id,
                            m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
                            m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
                            m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
                     FROM messages m
-                    LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
                     WHERE m.packet_id = ?
                       AND m.direction = 'sent'
                       AND COALESCE(m.ack_requested, 0) = 1
@@ -918,21 +942,55 @@ class Database:
             print(f"Error updating received message sender display: {e}")
             return 0
 
-    def delete_channel_messages(self, channel: int) -> int:
-        """Delete all channel messages for a specific channel hash."""
+    def clear_channel_messages_for_profile(self, profile_id: str, channel: int) -> int:
+        """Hide all currently visible channel messages for one profile without deleting shared rows."""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute(
+                now_timestamp = self._current_timestamp()
+                previous_clear_state = self._channel_clear_state(conn, profile_id, channel) or {}
+                query = """
+                    SELECT COUNT(*) AS message_count, MAX(id) AS max_message_id
+                    FROM messages
+                    WHERE channel = ?
+                      AND COALESCE(message_type, 'channel') = 'channel'
+                """
+                params = [int(channel)]
+                if previous_clear_state.get("cleared_through_message_id") is not None:
+                    query += " AND id > ?"
+                    params.append(int(previous_clear_state["cleared_through_message_id"]))
+                elif previous_clear_state.get("cleared_before_timestamp"):
+                    query += """
+                      AND {message_ts_expr} > {clear_ts_expr}
+                    """.format(
+                        message_ts_expr=self._sqlite_ts_expr("timestamp"),
+                        clear_ts_expr=self._sqlite_ts_expr("?"),
+                    )
+                    params.append(previous_clear_state["cleared_before_timestamp"])
+
+                row = conn.execute(query, params).fetchone()
+                cleared_count = int((row[0] if row else 0) or 0)
+                cleared_through_message_id = int((row[1] if row else 0) or 0) if row and row[1] is not None else None
+
+                conn.execute(
                     """
-                    DELETE FROM messages
-                    WHERE channel = ? AND COALESCE(message_type, 'channel') = 'channel'
+                    INSERT OR REPLACE INTO profile_channel_clears
+                    (profile_id, channel, cleared_before_timestamp, cleared_through_message_id)
+                    VALUES (?, ?, ?, ?)
                     """,
-                    (channel,),
+                    (profile_id, int(channel), now_timestamp, cleared_through_message_id),
+                )
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO profile_last_seen
+                    (profile_id, channel, last_seen_timestamp, last_seen_message_id)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (profile_id, int(channel), now_timestamp, cleared_through_message_id),
                 )
                 conn.commit()
-                return int(cursor.rowcount or 0)
+                return cleared_count
         except Exception as e:
-            print(f"Error deleting channel messages: {e}")
+            print(f"Error clearing channel messages for profile: {e}")
             return 0
 
     def delete_dm_thread_for_profile(self, profile_id: str, peer_node_num: int) -> int:
@@ -959,12 +1017,13 @@ class Database:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 now_timestamp = self._current_timestamp()
+                _, max_message_id = self._visible_channel_message_id_bounds(conn, profile_id, channel)
                 # Update or insert last seen record
                 conn.execute("""
                     INSERT OR REPLACE INTO profile_last_seen 
-                    (profile_id, channel, last_seen_timestamp)
-                    VALUES (?, ?, ?)
-                """, (profile_id, channel, now_timestamp))
+                    (profile_id, channel, last_seen_timestamp, last_seen_message_id)
+                    VALUES (?, ?, ?, ?)
+                """, (profile_id, channel, now_timestamp, max_message_id))
                 conn.commit()
                 return True
         except Exception as e:
@@ -975,48 +1034,59 @@ class Database:
         """Get unread messages for a specific channel (based on profile's last seen timestamp)"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
+            clear_state = self._channel_clear_state(conn, profile_id, channel) or {}
             
             # Get the last seen timestamp for this profile+channel combination
             cursor = conn.execute("""
-                SELECT last_seen_timestamp FROM profile_last_seen 
+                SELECT last_seen_timestamp, last_seen_message_id
+                FROM profile_last_seen 
                 WHERE profile_id = ? AND channel = ?
             """, (profile_id, channel))
             last_seen_row = cursor.fetchone()
-            
-            if last_seen_row and last_seen_row['last_seen_timestamp']:
-                # Get messages newer than last seen
-                cursor = conn.execute("""
-                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
-                           n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
-                           m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
-                           m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
-                           m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
-                    FROM messages m
-                    LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
-                    WHERE m.channel = ?
-                      AND COALESCE(m.message_type, 'channel') = 'channel'
-                      AND COALESCE(m.direction, 'received') = 'received'
-                      AND {message_ts_expr} > {seen_ts_expr}
-                    ORDER BY m.timestamp DESC LIMIT ?
+
+            query = """
+                SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
+                       NULL AS sender_long_name, NULL AS sender_short_name, NULL AS sender_node_id,
+                       m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
+                       m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
+                       m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
+                FROM messages m
+                WHERE m.channel = ?
+                  AND COALESCE(m.message_type, 'channel') = 'channel'
+                  AND COALESCE(m.direction, 'received') = 'received'
+            """
+            params = [channel]
+
+            lower_bound_message_id = None
+            if clear_state.get("cleared_through_message_id") is not None:
+                lower_bound_message_id = int(clear_state["cleared_through_message_id"])
+            if last_seen_row and last_seen_row["last_seen_message_id"] is not None:
+                last_seen_message_id = int(last_seen_row["last_seen_message_id"])
+                lower_bound_message_id = max(lower_bound_message_id or 0, last_seen_message_id)
+
+            if lower_bound_message_id is not None:
+                query += " AND m.id > ?"
+                params.append(lower_bound_message_id)
+            elif last_seen_row and last_seen_row["last_seen_timestamp"]:
+                query += """
+                  AND {message_ts_expr} > {seen_ts_expr}
                 """.format(
                     message_ts_expr=self._sqlite_ts_expr("m.timestamp"),
                     seen_ts_expr=self._sqlite_ts_expr("?"),
-                ), (channel, last_seen_row['last_seen_timestamp'], limit))
-            else:
-                # No last seen timestamp - return all messages (but limit to prevent overload)
-                cursor = conn.execute("""
-                    SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
-                           n.long_name AS sender_long_name, n.short_name AS sender_short_name, n.node_id AS sender_node_id,
-                           m.content, m.timestamp, m.sender_ip, m.direction, m.channel, m.message_type,
-                           m.reply_packet_id, m.target_node_num, m.owner_profile_id, m.hop_limit, m.hop_start,
-                           m.rx_snr, m.rx_rssi, m.ack_requested, m.ack_status, m.ack_error, m.ack_updated_at
-                    FROM messages m
-                    LEFT JOIN nodes n ON n.channel = m.channel AND n.node_num = m.sender_num
-                    WHERE m.channel = ?
-                      AND COALESCE(m.message_type, 'channel') = 'channel'
-                      AND COALESCE(m.direction, 'received') = 'received'
-                    ORDER BY m.timestamp DESC LIMIT ?
-                """, (channel, limit))
+                )
+                params.append(last_seen_row["last_seen_timestamp"])
+            elif clear_state.get("cleared_before_timestamp"):
+                query += """
+                  AND {message_ts_expr} > {clear_ts_expr}
+                """.format(
+                    message_ts_expr=self._sqlite_ts_expr("m.timestamp"),
+                    clear_ts_expr=self._sqlite_ts_expr("?"),
+                )
+                params.append(clear_state["cleared_before_timestamp"])
+
+            query += " ORDER BY m.timestamp DESC LIMIT ?"
+            params.append(limit)
+            cursor = conn.execute(query, params)
 
             return self._serialize_messages(cursor)
 
@@ -1036,33 +1106,50 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             for channel in normalized_channels:
+                clear_state = self._channel_clear_state(conn, profile_id, channel) or {}
                 cursor = conn.execute("""
-                    SELECT last_seen_timestamp
+                    SELECT last_seen_timestamp, last_seen_message_id
                     FROM profile_last_seen
                     WHERE profile_id = ? AND channel = ?
                 """, (profile_id, channel))
                 last_seen_row = cursor.fetchone()
+                query = """
+                    SELECT COUNT(*) AS unread_count
+                    FROM messages
+                    WHERE channel = ?
+                      AND COALESCE(message_type, 'channel') = 'channel'
+                      AND COALESCE(direction, 'received') = 'received'
+                """
+                params = [channel]
 
-                if last_seen_row and last_seen_row["last_seen_timestamp"]:
-                    cursor = conn.execute("""
-                        SELECT COUNT(*) AS unread_count
-                        FROM messages
-                        WHERE channel = ?
-                          AND COALESCE(message_type, 'channel') = 'channel'
-                          AND COALESCE(direction, 'received') = 'received'
-                          AND {message_ts_expr} > {seen_ts_expr}
+                lower_bound_message_id = None
+                if clear_state.get("cleared_through_message_id") is not None:
+                    lower_bound_message_id = int(clear_state["cleared_through_message_id"])
+                if last_seen_row and last_seen_row["last_seen_message_id"] is not None:
+                    last_seen_message_id = int(last_seen_row["last_seen_message_id"])
+                    lower_bound_message_id = max(lower_bound_message_id or 0, last_seen_message_id)
+
+                if lower_bound_message_id is not None:
+                    query += " AND id > ?"
+                    params.append(lower_bound_message_id)
+                elif last_seen_row and last_seen_row["last_seen_timestamp"]:
+                    query += """
+                        AND {message_ts_expr} > {seen_ts_expr}
                     """.format(
                         message_ts_expr=self._sqlite_ts_expr("timestamp"),
                         seen_ts_expr=self._sqlite_ts_expr("?"),
-                    ), (channel, last_seen_row["last_seen_timestamp"]))
-                else:
-                    cursor = conn.execute("""
-                        SELECT COUNT(*) AS unread_count
-                        FROM messages
-                        WHERE channel = ?
-                          AND COALESCE(message_type, 'channel') = 'channel'
-                          AND COALESCE(direction, 'received') = 'received'
-                    """, (channel,))
+                    )
+                    params.append(last_seen_row["last_seen_timestamp"])
+                elif clear_state.get("cleared_before_timestamp"):
+                    query += """
+                        AND {message_ts_expr} > {clear_ts_expr}
+                    """.format(
+                        message_ts_expr=self._sqlite_ts_expr("timestamp"),
+                        clear_ts_expr=self._sqlite_ts_expr("?"),
+                    )
+                    params.append(clear_state["cleared_before_timestamp"])
+
+                cursor = conn.execute(query, params)
 
                 row = cursor.fetchone()
                 unread_count = int((row["unread_count"] if row else 0) or 0)
@@ -1076,11 +1163,19 @@ class Database:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 now_timestamp = self._current_timestamp()
+                row = conn.execute("""
+                    SELECT MAX(id)
+                    FROM messages
+                    WHERE owner_profile_id = ?
+                      AND COALESCE(message_type, 'channel') = 'dm'
+                      AND (sender_num = ? OR target_node_num = ?)
+                """, (profile_id, int(peer_node_num), int(peer_node_num))).fetchone()
+                last_seen_message_id = row[0] if row and row[0] is not None else None
                 conn.execute("""
                     INSERT OR REPLACE INTO profile_dm_last_seen
-                    (profile_id, peer_node_num, last_seen_timestamp)
-                    VALUES (?, ?, ?)
-                """, (profile_id, int(peer_node_num), now_timestamp))
+                    (profile_id, peer_node_num, last_seen_timestamp, last_seen_message_id)
+                    VALUES (?, ?, ?, ?)
+                """, (profile_id, int(peer_node_num), now_timestamp, last_seen_message_id))
                 conn.commit()
                 return True
         except Exception as e:
@@ -1103,8 +1198,17 @@ class Database:
                   AND COALESCE(m.direction, 'received') = 'received'
                   AND m.sender_num IS NOT NULL
                   AND (
-                    d.last_seen_timestamp IS NULL
-                    OR {message_ts_expr} > {seen_ts_expr}
+                    (
+                      d.last_seen_message_id IS NOT NULL
+                      AND m.id > d.last_seen_message_id
+                    )
+                    OR (
+                      d.last_seen_message_id IS NULL
+                      AND (
+                        d.last_seen_timestamp IS NULL
+                        OR {message_ts_expr} > {seen_ts_expr}
+                      )
+                    )
                   )
                 GROUP BY m.sender_num
             """.format(

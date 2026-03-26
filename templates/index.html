@@ -254,8 +254,8 @@
                     </div>
                     <div class="mb-3">
                         <label for="editShortName" class="form-label">Short Name *</label>
-                        <input type="text" class="form-control" id="editShortName" required maxlength="4" title="Use 1 emoji without modifiers or exactly 4 letters/numbers.">
-                        <div class="form-text">Use 1 emoji without modifiers or exactly 4 letters/numbers.</div>
+                        <input type="text" class="form-control" id="editShortName" required maxlength="4" title="Use 1 emoji without modifiers or 1-4 letters/numbers.">
+                        <div class="form-text">Use 1 emoji without modifiers or 1-4 letters/numbers.</div>
                     </div>
                     <div class="mb-3">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -328,6 +328,7 @@
     word-wrap: break-word;
     overflow-wrap: break-word;
     hyphens: auto;
+    position: relative;
 }
 
 .message {
@@ -798,6 +799,43 @@
     gap: 0.55rem;
 }
 
+.nodes-back-to-top {
+    position: sticky;
+    bottom: 1rem;
+    margin-top: 1rem;
+    margin-left: calc(100% - 2.9rem);
+    width: 2.9rem;
+    height: 2.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--firefly-chat-accent);
+    border: 1px solid var(--firefly-chat-accent);
+    color: #ffffff;
+    box-shadow: 0 10px 24px rgba(23, 71, 111, 0.28);
+    transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease;
+    z-index: 5;
+}
+
+.nodes-back-to-top:hover,
+.nodes-back-to-top:focus {
+    background: var(--firefly-chat-accent-strong);
+    border-color: var(--firefly-chat-accent-strong);
+    color: #ffffff;
+}
+
+.nodes-back-to-top.is-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(0.35rem);
+}
+
+.nodes-back-to-top svg {
+    width: 1.2rem;
+    height: 1.2rem;
+}
+
 .node-card {
     border: 1px solid var(--firefly-chat-border);
     border-radius: 0.95rem;
@@ -1019,6 +1057,13 @@
     background: var(--bs-tertiary-bg);
 }
 
+.channel-editor-row__footer {
+    display: flex;
+    justify-content: center;
+    gap: 0.65rem;
+    margin-top: 0.65rem;
+}
+
 .remove-channel-btn {
     display: inline-flex;
     align-items: center;
@@ -1026,6 +1071,7 @@
     line-height: 1;
     padding: 0;
     min-height: 2.4rem;
+    min-width: 2.75rem;
 }
 
 .profile-item {
@@ -1604,6 +1650,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (messagesContainer) {
         messagesContainer.addEventListener('click', handleThreadCardClick);
         messagesContainer.addEventListener('input', handleThreadListInput);
+        messagesContainer.addEventListener('scroll', () => updateNodesBackToTopVisibility(messagesContainer));
     }
 
     await loadCurrentProfileAndStatus();
@@ -2713,13 +2760,6 @@ function renderChannelThreadCardHtml(thread) {
                 </div>
                 <div class="thread-card__actions">
                     <div class="small text-muted text-nowrap">${escapeHtml(timestamp)}</div>
-                    <button
-                        class="btn btn-sm btn-outline-danger thread-card__delete"
-                        type="button"
-                        data-delete-channel-index="${Number(index)}"
-                    >
-                        Delete
-                    </button>
                 </div>
             </div>
         </div>
@@ -2738,6 +2778,13 @@ function handleThreadCardClick(event) {
         return;
     }
 
+    const setProfileTrigger = event.target.closest('[data-set-profile-id]');
+    if (setProfileTrigger) {
+        event.preventDefault();
+        void setProfile({ target: setProfileTrigger });
+        return;
+    }
+
     const editProfileTrigger = event.target.closest('[data-edit-profile-id]');
     if (editProfileTrigger) {
         event.preventDefault();
@@ -2749,17 +2796,6 @@ function handleThreadCardClick(event) {
     if (deleteProfileTrigger) {
         event.preventDefault();
         void deleteManagedProfile(deleteProfileTrigger.dataset.deleteProfileId);
-        return;
-    }
-
-    const deleteChannelTrigger = event.target.closest('[data-delete-channel-index]');
-    if (deleteChannelTrigger) {
-        event.preventDefault();
-        event.stopPropagation();
-        const channelIndex = Number(deleteChannelTrigger.dataset.deleteChannelIndex);
-        if (Number.isInteger(channelIndex)) {
-            void deleteChannelThread(channelIndex);
-        }
         return;
     }
 
@@ -2817,10 +2853,34 @@ function handleThreadCardClick(event) {
         if (Number.isInteger(nodeNum)) {
             void openTracerouteModal(nodeNum);
         }
+        return;
+    }
+
+    const backToTopTrigger = event.target.closest('[data-node-back-to-top]');
+    if (backToTopTrigger) {
+        event.preventDefault();
+        const container = document.getElementById('messagesContainer');
+        if (container) {
+            container.scrollTo({ top: 0, behavior: 'smooth' });
+            updateNodesBackToTopVisibility(container);
+        }
     }
 }
 
 function handleEditChannelListClick(event) {
+    const deleteChannelTrigger = event.target.closest('[data-delete-profile-channel-index]');
+    if (deleteChannelTrigger) {
+        event.preventDefault();
+        const profileId = document.getElementById('editProfileId')?.value || '';
+        const channelIndex = Number(deleteChannelTrigger.dataset.deleteProfileChannelIndex);
+        const channelRow = deleteChannelTrigger.closest('.channel-editor-row');
+        const channelLabel = channelRow?.querySelector('.channel-name-input')?.value.trim() || `Channel ${channelIndex + 1}`;
+        if (profileId && Number.isInteger(channelIndex)) {
+            void deleteProfileChannelThread(profileId, channelIndex, channelLabel);
+        }
+        return;
+    }
+
     const removeChannelTrigger = event.target.closest('[data-remove-channel]');
     if (!removeChannelTrigger) return;
 
@@ -2829,6 +2889,34 @@ function handleEditChannelListClick(event) {
     const channelIndex = Number(removeChannelTrigger.dataset.removeChannelIndex);
     if (containerId && Number.isInteger(channelIndex)) {
         removeProfileChannelRow(containerId, channelIndex);
+    }
+}
+
+async function deleteProfileChannelThread(profileId, channelIndex, channelLabel) {
+    const label = channelLabel || `Channel ${Number(channelIndex) + 1}`;
+    if (!confirm(`Delete all messages for ${label} on this profile?`)) return;
+
+    try {
+        const response = await fetch('/api/threads/channel', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                profile_id: profileId,
+                channel_index: Number(channelIndex),
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+        if (currentProfile && currentProfile.id === profileId) {
+            await loadMessages(activeChannelIndex);
+            applyUnreadState(data);
+            renderActiveMessages();
+            updateComposerState();
+        }
+    } catch (error) {
+        console.error('Error deleting channel thread:', error);
+        alert('Error deleting channel thread: ' + error.message);
     }
 }
 
@@ -2886,13 +2974,34 @@ function renderNodesList(container) {
                 </div>
             </div>
         </div>
+        <button
+            class="nodes-back-to-top is-hidden"
+            type="button"
+            aria-label="Back to top"
+            title="Back to top"
+            data-node-back-to-top
+        >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m3.75 10.25 4.25-4.5 4.25 4.5"></path>
+            </svg>
+        </button>
     `;
+    updateNodesBackToTopVisibility(container);
 }
 
 function renderNodeListResults(nodes) {
     return nodes.length
         ? `<div class="node-list">${nodes.map(renderNodeCardHtml).join('')}</div>`
         : '<div class="text-muted small">No nodes match this search.</div>';
+}
+
+function updateNodesBackToTopVisibility(container = document.getElementById('messagesContainer')) {
+    if (!container) return;
+    const button = container.querySelector('[data-node-back-to-top]');
+    if (!button) return;
+
+    const shouldShow = activeChatTab === 'nodes' && container.scrollTop > 220;
+    button.classList.toggle('is-hidden', !shouldShow);
 }
 
 function updateNodeListFilter() {
@@ -2985,8 +3094,8 @@ function renderProfilesView(container) {
                         </div>
                         <div class="mb-3">
                             <label for="newShortName" class="form-label">Short Name *</label>
-                            <input type="text" class="form-control" id="newShortName" required maxlength="4" title="Use 1 emoji without modifiers or exactly 4 letters/numbers.">
-                            <div class="form-text">Use 1 emoji without modifiers or exactly 4 letters/numbers.</div>
+                            <input type="text" class="form-control" id="newShortName" required maxlength="4" title="Use 1 emoji without modifiers or 1-4 letters/numbers.">
+                            <div class="form-text">Use 1 emoji without modifiers or 1-4 letters/numbers.</div>
                         </div>
                         <div class="mb-3">
                             <div class="d-flex justify-content-between align-items-center mb-2">
@@ -3049,6 +3158,7 @@ function renderManagedProfileCard(profileId, profile) {
                 <small class="text-muted profile-item__created">Created: ${escapeHtml(String(profile.created_at || '').slice(0, 10))}</small>
             </div>
             <div class="profile-item__actions">
+                <button class="btn btn-success btn-sm" type="button" data-set-profile-id="${escapeHtml(profileId)}">Set</button>
                 <button class="btn btn-primary btn-sm" type="button" data-edit-profile-id="${escapeHtml(profileId)}">Edit</button>
                 <button class="btn btn-danger btn-sm" type="button" data-delete-profile-id="${escapeHtml(profileId)}">Delete</button>
             </div>
@@ -3061,9 +3171,9 @@ function renderProfileChannelRows(containerId, channels) {
     if (!container) return;
     const normalized = Array.isArray(channels) && channels.length ? channels : [{ name: '', key: '' }];
     container.innerHTML = normalized.map((channel, index) => `
-        <div class="channel-editor-row" data-channel-index="${index}">
+        <div class="channel-editor-row" data-channel-index="${index}" ${Number.isInteger(Number(channel.profile_index)) ? `data-profile-channel-index="${Number(channel.profile_index)}"` : ''}>
             <div class="row g-2 align-items-end">
-                <div class="col-12 col-md-5">
+                <div class="col-12 col-md-6">
                     <label class="form-label small text-muted">Channel Name</label>
                     <input type="text" class="form-control channel-name-input" maxlength="64" value="${escapeHtml(channel.name || '')}" placeholder="e.g. LongFast">
                 </div>
@@ -3071,9 +3181,12 @@ function renderProfileChannelRows(containerId, channels) {
                     <label class="form-label small text-muted">Key</label>
                     <input type="text" class="form-control channel-key-input" maxlength="256" value="${escapeHtml(channel.key || '')}" placeholder="e.g. AQ==">
                 </div>
-                <div class="col-12 col-md-1">
-                    <button class="btn btn-outline-danger w-100 remove-channel-btn" type="button" data-remove-channel="${containerId}" data-remove-channel-index="${index}">×</button>
-                </div>
+            </div>
+            <div class="channel-editor-row__footer">
+                ${containerId === 'editChannelsList' && Number.isInteger(Number(channel.profile_index)) ? `
+                    <button class="btn btn-outline-danger btn-sm" type="button" data-delete-profile-channel-index="${Number(channel.profile_index)}">Delete Message History</button>
+                ` : ''}
+                <button class="btn btn-outline-danger btn-sm remove-channel-btn" type="button" data-remove-channel="${containerId}" data-remove-channel-index="${index}">×</button>
             </div>
         </div>
     `).join('');
@@ -3098,6 +3211,9 @@ function collectProfileChannels(containerId, requireValues = true) {
     const channels = rows.map(row => ({
         name: row.querySelector('.channel-name-input')?.value.trim() || '',
         key: row.querySelector('.channel-key-input')?.value.trim() || '',
+        ...(Number.isInteger(Number(row.dataset.profileChannelIndex))
+            ? { profile_index: Number(row.dataset.profileChannelIndex) }
+            : {}),
     }));
     const filtered = channels.filter(channel => channel.name || channel.key);
     return requireValues ? filtered.filter(channel => channel.name && channel.key) : filtered;
@@ -3160,10 +3276,10 @@ function validateProfileIdentityFields({ node_id: nodeId, long_name: longName, s
     }
 
     const shortValue = String(shortName || '');
-    const isAlphanumericShortName = /^[A-Za-z0-9]{4}$/.test(shortValue) && utf8ByteLength(shortValue) <= 4;
+    const isAlphanumericShortName = /^[A-Za-z0-9]{1,4}$/.test(shortValue) && utf8ByteLength(shortValue) <= 4;
     const isSingleEmojiShortName = isSingleSimpleEmoji(shortValue);
     if (!isAlphanumericShortName && !isSingleEmojiShortName) {
-        return 'Short name must be 1 emoji without modifiers or exactly 4 alphanumeric characters.';
+        return 'Short name must be 1 emoji without modifiers or 1-4 alphanumeric characters.';
     }
 
     return '';
@@ -3287,7 +3403,13 @@ function openEditProfileModal(profileId) {
     document.getElementById('editLongName').value = profile.long_name || '';
     document.getElementById('editShortName').value = profile.short_name || '';
     document.getElementById('editHopLimit').value = profile.hop_limit !== undefined ? profile.hop_limit : 3;
-    renderProfileChannelRows('editChannelsList', profile.channels || [{ name: '', key: '' }]);
+    renderProfileChannelRows(
+        'editChannelsList',
+        (profile.channels || [{ name: '', key: '' }]).map((channel, index) => ({
+            ...channel,
+            profile_index: index,
+        }))
+    );
     new bootstrap.Modal(document.getElementById('editProfileModal')).show();
 }
 
@@ -3762,34 +3884,6 @@ function addIncomingMessage(message) {
     scheduleThreadStateRefresh();
 }
 
-async function deleteChannelThread(channelIndex) {
-    const channels = getProfileChannels();
-    const channel = channels[Number(channelIndex)];
-    const label = channel?.name || `Channel ${Number(channelIndex) + 1}`;
-    if (!confirm(`Delete all messages for ${label}?`)) return;
-
-    try {
-        const response = await fetch('/api/threads/channel', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channel_index: Number(channelIndex) })
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-
-        const channelNumber = getChannelNumberByIndex(channelIndex);
-        if (channelNumber !== null) {
-            channelMessages = channelMessages.filter(message => normalizeNumber(message.channel) !== channelNumber);
-        }
-        clearUnreadCount(unreadChannelMessageCounts, channelNumber);
-        renderActiveMessages();
-        updateComposerState();
-    } catch (error) {
-        console.error('Error deleting channel thread:', error);
-        alert('Error deleting channel thread: ' + error.message);
-    }
-}
-
 async function deleteDmThread(nodeNum) {
     const target = dmTargets.find(item => Number(item.node_num) === Number(nodeNum));
     const label = target?.label || target?.node_id || `!${Number(nodeNum).toString(16).padStart(8, '0')}`;
@@ -3837,17 +3931,18 @@ async function setProfile(event) {
     const clickedButton = event ? event.target : null;
     const isDesktopConnectButton = clickedButton && clickedButton.id === 'desktopConnectBtn';
     const isMobileConnectButton = clickedButton && clickedButton.id === 'mobileConnectBtn';
+    const directProfileId = clickedButton?.dataset?.setProfileId || '';
     const isConnectButton = isDesktopConnectButton || isMobileConnectButton;
     const requestedSelectId = event && event.profileSelectId ? event.profileSelectId : 'profileSelect';
     const selectedProfileId = document.getElementById(requestedSelectId)?.value || '';
-    const profileId = isDesktopConnectButton
+    const profileId = directProfileId || (isDesktopConnectButton
         ? (currentProfile?.id || '')
         : (isMobileConnectButton
             ? (document.getElementById('profileSelect')?.value || currentProfile?.id || '')
-            : selectedProfileId);
+            : selectedProfileId));
     const setBtn = isDesktopConnectButton
         ? document.getElementById('desktopConnectBtn')
-        : (isMobileConnectButton ? document.getElementById('mobileConnectBtn') : document.getElementById('setProfileBtn'));
+        : (isMobileConnectButton ? document.getElementById('mobileConnectBtn') : (clickedButton || document.getElementById('setProfileBtn')));
 
     if (!setBtn) return;
 

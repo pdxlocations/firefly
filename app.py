@@ -44,7 +44,7 @@ SOCKETIO_CLIENT_VERSION = "4.7.5"
 BROADCAST_NODE_NUM = 0xFFFFFFFF
 DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
 NODE_ID_PATTERN = re.compile(r"^![0-9a-f]{8}$")
-SHORT_NAME_ALNUM_PATTERN = re.compile(r"^[A-Za-z0-9]{4}$")
+SHORT_NAME_ALNUM_PATTERN = re.compile(r"^[A-Za-z0-9]{1,4}$")
 
 # Cross-source de-duplication cache for user-visible packet handling.
 _DEDUP_CACHE = set()
@@ -210,7 +210,7 @@ def _validate_profile_request_payload(data):
     if len(long_name) >= 32:
         return None, "long_name must be fewer than 32 characters"
     if not _is_valid_short_name(short_name):
-        return None, "short_name must be 1 emoji without modifiers or exactly 4 alphanumeric characters"
+        return None, "short_name must be 1 emoji without modifiers or 1-4 alphanumeric characters"
 
     hop_limit = (data or {}).get("hop_limit", 3)
     if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
@@ -523,6 +523,117 @@ def _mesh_stores_for_profiles(profiles):
     return stores
 
 
+def _generated_node_long_name(node_num):
+    try:
+        suffix = f"{int(node_num):08x}"[-4:]
+        return f"Meshtastic {suffix}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _generated_node_short_name(node_num):
+    try:
+        return f"{int(node_num):08x}"[-4:]
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_fallback_node_label(value, node_num):
+    normalized_value = str(value or "").strip()
+    if not normalized_value:
+        return True
+
+    normalized_value_lower = normalized_value.lower()
+    fallback_candidates = {
+        "unknown",
+        str(_node_id_from_num(node_num) or "").lower(),
+        str(_generated_node_long_name(node_num) or "").lower(),
+        str(_generated_node_short_name(node_num) or "").lower(),
+    }
+    return normalized_value_lower in fallback_candidates
+
+
+def _merge_node_records(existing, incoming):
+    if not incoming:
+        return existing
+    if not existing:
+        return dict(incoming)
+
+    merged = dict(existing)
+    node_num = incoming.get("node_num") or existing.get("node_num")
+
+    def prefer(preferred_key, *, treat_fallback=False, fallback_values=None):
+        current_value = merged.get(preferred_key)
+        incoming_value = incoming.get(preferred_key)
+        if incoming_value in (None, ""):
+            return
+        if current_value in (None, ""):
+            merged[preferred_key] = incoming_value
+            return
+        if treat_fallback and _is_fallback_node_label(current_value, node_num) and not _is_fallback_node_label(incoming_value, node_num):
+            merged[preferred_key] = incoming_value
+            return
+        if fallback_values and current_value in fallback_values and incoming_value not in fallback_values:
+            merged[preferred_key] = incoming_value
+
+    prefer("node_id")
+    prefer("long_name", treat_fallback=True)
+    prefer("short_name", treat_fallback=True)
+    prefer("hw_model", fallback_values={"UNSET"})
+    prefer("role", fallback_values={"CLIENT"})
+    prefer("public_key")
+    prefer("macaddr")
+    prefer("raw_nodeinfo")
+    prefer("hops_away")
+    prefer("snr")
+    prefer("latitude")
+    prefer("longitude")
+    prefer("altitude")
+    prefer("position_timestamp")
+    prefer("first_seen")
+    prefer("last_seen")
+    prefer("packet_count")
+
+    return merged
+
+
+def _channel_numbers_for_profile(profile):
+    effective_profile = _effective_profile(profile)
+    return [
+        channel.get("channel_number")
+        for channel in _profile_channels_with_numbers(effective_profile)
+        if channel.get("channel_number") is not None
+    ]
+
+
+def _nodes_for_profile(profile):
+    effective_profile = _effective_profile(profile)
+    if not effective_profile:
+        return []
+
+    mesh_store = _get_mesh_store(effective_profile)
+    if not mesh_store:
+        return []
+    try:
+        return mesh_store.list_nodes()
+    except Exception:
+        return []
+
+
+def _node_for_profile(profile, node_num):
+    effective_profile = _effective_profile(profile)
+    if not effective_profile:
+        return None
+
+    mesh_store = _get_mesh_store(effective_profile)
+    if not mesh_store:
+        return None
+    try:
+        return mesh_store.get_node(int(node_num))
+    except Exception:
+        return None
+
+
 def _profiles_matching_packet(packet):
     matched_profiles = []
     seen_profile_ids = set()
@@ -564,6 +675,27 @@ def _matching_mesh_stores_for_packet(packet):
     return _mesh_stores_for_profiles(_profiles_matching_packet(packet))
 
 
+def _storage_mesh_stores_for_packet(packet):
+    packet_channel = getattr(packet, "channel", None)
+    try:
+        normalized_channel = int(packet_channel or 0)
+    except (TypeError, ValueError):
+        normalized_channel = 0
+
+    unique_stores = []
+    seen_keys = set()
+    for profile, mesh_store in _matching_mesh_stores_for_packet(packet):
+        if normalized_channel > 0:
+            key = ("channel", normalized_channel)
+        else:
+            key = ("profile", profile.get("id"))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        unique_stores.append((profile, mesh_store))
+    return unique_stores
+
+
 def _find_sender_node_for_packet(packet, sender_num):
     if sender_num in (None, 0):
         return None
@@ -575,23 +707,25 @@ def _find_sender_node_for_packet(packet, sender_num):
             "short_name": local_sender_profile.get("short_name"),
         }
 
+    merged_node = None
     for _profile, mesh_store in _matching_mesh_stores_for_packet(packet):
         try:
             found_node = mesh_store.get_node(sender_num)
         except Exception:
             found_node = None
-        if found_node:
-            return found_node
+        merged_node = _merge_node_records(merged_node, found_node)
+        if merged_node and not _is_fallback_node_label(merged_node.get("long_name"), sender_num):
+            return merged_node
 
     active_profile = udp_server.get_active_profile()
     if active_profile:
         mesh_store = _get_mesh_store(active_profile)
         if mesh_store:
             try:
-                return mesh_store.get_node(sender_num)
+                merged_node = _merge_node_records(merged_node, mesh_store.get_node(sender_num))
             except Exception:
-                return None
-    return None
+                pass
+    return merged_node
 
 
 def _emit_message_to_profile_rooms(message, profiles):
@@ -655,7 +789,7 @@ def _message_has_fallback_sender_display(message):
 def _hydrate_message_sender_labels(messages, profile):
     mesh_store = _get_mesh_store(profile)
     if not mesh_store:
-        return messages
+        mesh_store = None
 
     for message in messages or []:
         sender_num = message.get("sender_num")
@@ -663,7 +797,7 @@ def _hydrate_message_sender_labels(messages, profile):
             continue
 
         try:
-            found_node = mesh_store.get_node(int(sender_num))
+            found_node = mesh_store.get_node(int(sender_num)) if mesh_store else None
         except Exception:
             found_node = None
         if not found_node:
@@ -685,13 +819,8 @@ def _get_chat_payload(profile):
     effective_profile = _effective_profile(profile)
     channel_number = _profile_channel_num(effective_profile)
     channel_messages = []
-    seen_channel_numbers = set()
-    for channel in _profile_channels(profile):
-        channel_hash = _channel_number_for_config(channel)
-        if channel_hash is None or channel_hash in seen_channel_numbers:
-            continue
-        seen_channel_numbers.add(channel_hash)
-        channel_messages.extend(db.get_messages_for_channel(channel_hash))
+    if effective_profile and channel_number is not None:
+        channel_messages = db.get_messages_for_channel(channel_number, profile_id=effective_profile["id"])
     dm_messages = db.get_dm_messages_for_profile(effective_profile["id"]) if effective_profile else []
     _hydrate_message_sender_labels(channel_messages, effective_profile)
     _hydrate_message_sender_labels(dm_messages, effective_profile)
@@ -1052,7 +1181,7 @@ def on_recieve(packet: mesh_pb2.MeshPacket, addr=None):
     _maybe_ack_local_direct_packet(packet)
     _log_packet_summary(packet_for_storage, addr=addr)
 
-    for profile, mesh_store in _matching_mesh_stores_for_packet(packet_for_storage):
+    for profile, mesh_store in _storage_mesh_stores_for_packet(packet_for_storage):
         try:
             mesh_store.record_packet(packet_for_storage)
         except Exception as e:
@@ -1279,20 +1408,12 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
         print(f"[NODEINFO_DEBUG] Packet not addressed to us (to: {packet_to}, us: {my_node_num})")
 
     try:
-        target_profiles = _profiles_matching_packet(packet)
-        if not target_profiles:
+        target_mesh_stores = _storage_mesh_stores_for_packet(packet)
+        if not target_mesh_stores:
             print("[NODEINFO_DEBUG] No matching local profiles; skipping node persistence")
             return
 
-        for profile in target_profiles:
-            mesh_store = _get_mesh_store(profile)
-            if not mesh_store:
-                print(
-                    f"[NODEINFO_DEBUG] No mesh store for profile {profile.get('id')}; "
-                    f"skipping persistence for node {sender_num}"
-                )
-                continue
-
+        for profile, mesh_store in target_mesh_stores:
             before = mesh_store.get_node(sender_num)
             stored = mesh_store.record_packet(packet)
             after = mesh_store.get_node(sender_num)
@@ -1325,8 +1446,14 @@ def on_nodeinfo(packet: mesh_pb2.MeshPacket, addr=None):
 
             display_name = after.get("long_name") or after.get("short_name") or after.get("node_id")
             if display_name:
+                try:
+                    message_channel = int(getattr(packet, "channel", 0) or 0)
+                except Exception:
+                    message_channel = 0
+                if message_channel <= 0:
+                    message_channel = _profile_channel_num(profile)
                 updated_rows = db.update_received_message_sender_display(
-                    _profile_channel_num(profile),
+                    message_channel,
                     sender_num,
                     display_name,
                 )
@@ -2225,7 +2352,7 @@ def set_current_profile():
             unread_messages = db.get_unread_messages_for_channel(current_profile["id"], expected_channel)
             unread_count = len(unread_messages)
             print(
-                f"[PROFILE] Loaded {len(chat_payload['channel_messages'])} channel messages across configured channels, {len(chat_payload['dm_messages'])} dms, {unread_count} unread for selected channel {expected_channel}"
+                f"[PROFILE] Loaded {len(chat_payload['channel_messages'])} channel messages, {len(chat_payload['dm_messages'])} dms, {unread_count} unread for selected channel {expected_channel}"
             )
         else:
             unread_count = 0  # Can't determine messages without channel
@@ -2461,28 +2588,47 @@ def mark_dm_read():
 @app.route("/api/threads/channel", methods=["DELETE"])
 @login_required
 def delete_channel_thread():
-    """Delete channel message history for the selected profile channel."""
+    """Delete channel message history for a user's profile channel."""
+    current_user = _get_session_user()
     current_profile = _get_session_profile()
-    if not current_profile:
-        return jsonify({"error": "No profile selected"}), 400
 
     data = request.get_json(silent=True) or {}
-    channel_index = data.get("channel_index", _selected_channel_index(current_profile))
+    requested_profile_id = (data.get("profile_id") or "").strip()
+    if requested_profile_id:
+        target_profile = profile_manager.get_profile(requested_profile_id, user_id=current_user["id"])
+        if not target_profile:
+            return jsonify({"error": "Profile not found"}), 404
+    else:
+        target_profile = current_profile
+
+    if not target_profile:
+        return jsonify({"error": "No profile selected"}), 400
+
+    default_channel_index = _selected_channel_index(target_profile) if current_profile and target_profile.get("id") == current_profile.get("id") else 0
+    channel_index = data.get("channel_index", default_channel_index)
     try:
         channel_index = int(channel_index)
     except (TypeError, ValueError):
         return jsonify({"error": "channel_index must be an integer"}), 400
 
-    channels = _profile_channels(current_profile)
+    channels = _profile_channels(target_profile)
     if channel_index < 0 or channel_index >= len(channels):
         return jsonify({"error": "channel_index out of range"}), 400
 
-    channel_hash = _profile_channel_num(_effective_profile(current_profile, channel_index=channel_index))
+    channel_hash = _profile_channel_num(_effective_profile(target_profile, channel_index=channel_index))
     if channel_hash is None:
         return jsonify({"error": "Unable to determine channel"}), 400
 
-    deleted_count = db.delete_channel_messages(channel_hash)
-    return jsonify({"message": "Channel thread deleted", "deleted_count": deleted_count, "channel_index": channel_index})
+    deleted_count = db.clear_channel_messages_for_profile(target_profile["id"], channel_hash)
+    response = {
+        "message": "Channel thread deleted",
+        "deleted_count": deleted_count,
+        "channel_index": channel_index,
+        "profile_id": target_profile["id"],
+    }
+    if current_profile and current_profile.get("id") == target_profile.get("id"):
+        response.update(_unread_state_for_profile(current_profile))
+    return jsonify(response)
 
 
 @app.route("/api/threads/dm", methods=["DELETE"])
@@ -2512,8 +2658,7 @@ def get_nodes():
     if not current_profile:
         return jsonify({"error": "No profile selected"}), 400
 
-    mesh_store = _get_mesh_store(current_profile)
-    nodes = mesh_store.list_nodes() if mesh_store else []
+    nodes = _nodes_for_profile(current_profile)
     return jsonify({"nodes": nodes, "count": len(nodes)})
 
 
@@ -2525,8 +2670,7 @@ def get_node_details(node_num):
     if not current_profile:
         return jsonify({"error": "No profile selected"}), 400
 
-    mesh_store = _get_mesh_store(current_profile)
-    node = mesh_store.get_node(node_num) if mesh_store else None
+    node = _node_for_profile(current_profile, node_num)
 
     if not node:
         return jsonify({"error": "Node not found"}), 404
@@ -2587,11 +2731,10 @@ def get_stats():
 
     current_profile = _get_session_profile()
     if current_profile:
-        mesh_store = _get_mesh_store(current_profile)
         expected_channel = _current_profile_channel_num()
         profile_stats = {
-            "nodes": mesh_store.count_nodes() if mesh_store else 0,
-            "messages": len(db.get_messages_for_channel(expected_channel)) if expected_channel is not None else 0,
+            "nodes": len(_nodes_for_profile(current_profile)),
+            "messages": len(db.get_messages_for_channel(expected_channel, profile_id=current_profile["id"])) if expected_channel is not None else 0,
         }
         return jsonify({"profile": profile_stats, "global": global_stats})
     return jsonify({"global": global_stats})

@@ -1189,6 +1189,11 @@
         display: none;
     }
 
+    body.mobile-fixed-nav-page {
+        overflow: hidden;
+        overscroll-behavior-y: none;
+    }
+
     body {
         background: var(--mudp-light-bg);
         min-height: 100vh;
@@ -1203,14 +1208,20 @@
         margin-top: 0 !important;
         padding-left: 0.5rem;
         padding-right: 0.5rem;
-        padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+        padding-bottom: 0;
         padding-top: 0;
+        height: 100vh;
+        overflow: hidden;
     }
 
     @supports (height: 100svh) {
         body.mobile-fixed-nav-page,
         body.mobile-fixed-nav-page > .container.mt-4 {
             min-height: 100svh;
+        }
+
+        body.mobile-fixed-nav-page > .container.mt-4 {
+            height: 100svh;
         }
     }
 

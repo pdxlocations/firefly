@@ -607,8 +607,8 @@
         margin-top: 0 !important;
         padding-top: 0.5rem;
         padding-bottom: 0.5rem;
-        height: calc(100vh - 76px);
-        min-height: calc(100vh - 76px);
+        height: calc(var(--firefly-app-height) - 76px);
+        min-height: calc(var(--firefly-app-height) - 76px);
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -1191,7 +1191,7 @@
 
     body {
         background: var(--mudp-light-bg);
-        min-height: 100vh;
+        min-height: var(--firefly-app-height);
     }
 
     body[data-bs-theme="dark"] {
@@ -1201,6 +1201,7 @@
     body > .container.mt-4 {
         max-width: 100%;
         margin-top: 0 !important;
+        min-height: var(--firefly-app-height);
         padding-left: 0.5rem;
         padding-right: 0.5rem;
         padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));

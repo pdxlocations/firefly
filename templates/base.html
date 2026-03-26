@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}Firefly{% endblock %}</title>
     <meta name="theme-color" content="#1f5d96">
     <meta name="mobile-web-app-capable" content="yes">
@@ -18,6 +18,7 @@
     <style>
         /* Firefly color palette */
         :root {
+            --firefly-app-height: 100vh;
             --mudp-dark-bg: #0b1420;
             --mudp-dark-surface: #162231;
             --mudp-dark-surface-hover: #223347;
@@ -391,13 +392,13 @@
         body[data-bs-theme="dark"] {
             background: linear-gradient(180deg, #08111b 0%, var(--mudp-dark-bg) 45%, #101c2b 100%) !important;
             color: var(--mudp-dark-text) !important;
-            min-height: 100vh;
+            min-height: var(--firefly-app-height);
         }
         
         body[data-bs-theme="light"] {
             background: linear-gradient(180deg, #f7fafc 0%, var(--mudp-light-bg) 55%, #e8eff5 100%) !important;
             color: var(--mudp-light-text) !important;
-            min-height: 100vh;
+            min-height: var(--firefly-app-height);
         }
         
         /* Enhanced component styling with custom colors */
@@ -1064,6 +1065,45 @@
           }
 
           window.addEventListener('resize', syncProfileSelectorSheets);
+      });
+
+      document.addEventListener('DOMContentLoaded', function() {
+          const root = document.documentElement;
+          let viewportSyncFrame = null;
+
+          function applyViewportHeight() {
+              viewportSyncFrame = null;
+              const visualViewport = window.visualViewport;
+              const viewportHeight = visualViewport
+                  ? Math.round(visualViewport.height + visualViewport.offsetTop)
+                  : Math.round(window.innerHeight || 0);
+
+              if (viewportHeight > 0) {
+                  root.style.setProperty('--firefly-app-height', `${viewportHeight}px`);
+              }
+          }
+
+          function scheduleViewportHeightSync() {
+              if (viewportSyncFrame !== null) {
+                  window.cancelAnimationFrame(viewportSyncFrame);
+              }
+              viewportSyncFrame = window.requestAnimationFrame(applyViewportHeight);
+          }
+
+          scheduleViewportHeightSync();
+          window.addEventListener('resize', scheduleViewportHeightSync);
+          window.addEventListener('orientationchange', scheduleViewportHeightSync);
+          window.addEventListener('pageshow', scheduleViewportHeightSync);
+
+          if (window.visualViewport) {
+              window.visualViewport.addEventListener('resize', scheduleViewportHeightSync);
+              window.visualViewport.addEventListener('scroll', scheduleViewportHeightSync);
+          }
+
+          document.addEventListener('focusout', function() {
+              window.setTimeout(scheduleViewportHeightSync, 60);
+              window.setTimeout(scheduleViewportHeightSync, 220);
+          });
       });
 
       document.addEventListener('DOMContentLoaded', function() {

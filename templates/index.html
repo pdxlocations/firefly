@@ -290,6 +290,7 @@
     --firefly-chat-surface: rgba(255, 255, 255, 0.92);
     --firefly-chat-surface-muted: rgba(244, 248, 251, 0.9);
     --firefly-chat-border: rgba(175, 191, 205, 0.68);
+    --firefly-shell-height: 100vh;
 }
 
 [data-bs-theme="dark"] {
@@ -1210,19 +1211,9 @@
         padding-right: 0.5rem;
         padding-bottom: 0;
         padding-top: 0;
-        height: 100vh;
+        height: var(--firefly-shell-height);
+        min-height: var(--firefly-shell-height);
         overflow: hidden;
-    }
-
-    @supports (height: 100svh) {
-        body.mobile-fixed-nav-page,
-        body.mobile-fixed-nav-page > .container.mt-4 {
-            min-height: 100svh;
-        }
-
-        body.mobile-fixed-nav-page > .container.mt-4 {
-            height: 100svh;
-        }
     }
 
     .row {
@@ -1240,14 +1231,9 @@
         left: 0.5rem;
         right: 0.5rem;
         top: 0;
-        bottom: 0;
-    }
-
-    @supports (height: 100svh) {
-        .chat-shell-card {
-            height: 100svh;
-            bottom: auto;
-        }
+        bottom: auto;
+        height: var(--firefly-shell-height);
+        max-height: var(--firefly-shell-height);
     }
 
     .card-body.d-flex.flex-column {
@@ -1629,7 +1615,18 @@ let mapLayerGroup = null;
 let pendingThreadStateRefresh = null;
 let activeTracerouteRequest = null;
 
+function lockMobileShellHeight() {
+    if (window.innerWidth >= 768) {
+        return;
+    }
+    const measuredHeight = Math.round(window.innerHeight || document.documentElement.clientHeight || 0);
+    if (measuredHeight > 0) {
+        document.documentElement.style.setProperty('--firefly-shell-height', `${measuredHeight}px`);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
+    lockMobileShellHeight();
     initializePendingChatContext();
 
     try {
@@ -1689,6 +1686,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     setInterval(async () => {
         refreshProfileBanner();
     }, 30000);
+});
+
+window.addEventListener('orientationchange', function() {
+    window.setTimeout(lockMobileShellHeight, 120);
 });
 
 function openProfileSelectorIfRequested() {

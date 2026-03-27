@@ -1060,18 +1060,20 @@
 .channel-editor-row__footer {
     display: flex;
     justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
     gap: 0.65rem;
     margin-top: 0.65rem;
 }
 
-.remove-channel-btn {
+.channel-editor-row__action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     line-height: 1;
-    padding: 0;
-    min-height: 2.4rem;
-    min-width: 2.75rem;
+    min-height: 1.9rem;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.78rem;
 }
 
 .profile-item {
@@ -2772,7 +2774,9 @@ function handleThreadCardClick(event) {
         event.preventDefault();
         const containerId = removeChannelTrigger.dataset.removeChannel;
         const channelIndex = Number(removeChannelTrigger.dataset.removeChannelIndex);
-        if (containerId && Number.isInteger(channelIndex)) {
+        const channelRow = removeChannelTrigger.closest('.channel-editor-row');
+        const channelLabel = channelRow?.querySelector('.channel-name-input')?.value.trim() || `Channel ${channelIndex + 1}`;
+        if (containerId && Number.isInteger(channelIndex) && confirmRemoveProfileChannel(channelLabel)) {
             removeProfileChannelRow(containerId, channelIndex);
         }
         return;
@@ -2887,9 +2891,16 @@ function handleEditChannelListClick(event) {
     event.preventDefault();
     const containerId = removeChannelTrigger.dataset.removeChannel;
     const channelIndex = Number(removeChannelTrigger.dataset.removeChannelIndex);
-    if (containerId && Number.isInteger(channelIndex)) {
+    const channelRow = removeChannelTrigger.closest('.channel-editor-row');
+    const channelLabel = channelRow?.querySelector('.channel-name-input')?.value.trim() || `Channel ${channelIndex + 1}`;
+    if (containerId && Number.isInteger(channelIndex) && confirmRemoveProfileChannel(channelLabel)) {
         removeProfileChannelRow(containerId, channelIndex);
     }
+}
+
+function confirmRemoveProfileChannel(channelLabel) {
+    const label = channelLabel || 'this channel';
+    return confirm(`Delete ${label} from this profile?`);
 }
 
 async function deleteProfileChannelThread(profileId, channelIndex, channelLabel) {
@@ -3160,9 +3171,9 @@ function renderProfileChannelRows(containerId, channels) {
             </div>
             <div class="channel-editor-row__footer">
                 ${containerId === 'editChannelsList' && Number.isInteger(Number(channel.profile_index)) ? `
-                    <button class="btn btn-outline-danger btn-sm" type="button" data-delete-profile-channel-index="${Number(channel.profile_index)}">Delete Message History</button>
+                    <button class="btn btn-outline-danger btn-sm channel-editor-row__action" type="button" data-delete-profile-channel-index="${Number(channel.profile_index)}">Delete Message History</button>
                 ` : ''}
-                <button class="btn btn-outline-danger btn-sm remove-channel-btn" type="button" data-remove-channel="${containerId}" data-remove-channel-index="${index}">×</button>
+                <button class="btn btn-outline-danger btn-sm channel-editor-row__action" type="button" data-remove-channel="${containerId}" data-remove-channel-index="${index}">Delete Channel</button>
             </div>
         </div>
     `).join('');

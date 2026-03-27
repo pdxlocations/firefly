@@ -367,6 +367,19 @@
     margin-bottom: 0.2rem;
 }
 
+.message__sender-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 1.2rem;
+    padding: 0.08rem 0.42rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.02em;
+}
+
 .message__content {
     margin-top: 0.2rem;
     line-height: 1.28;
@@ -853,13 +866,28 @@
 }
 
 .node-card__title {
+    display: grid;
+    gap: 0.08rem;
     min-width: 0;
+}
+
+.node-card__name-line {
+    display: flex;
+    align-items: center;
+    gap: 0.42rem;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.node-card__short-pill {
+    flex: 0 0 auto;
 }
 
 .node-card__name {
     font-weight: 700;
     line-height: 1.2;
     font-size: 0.92rem;
+    min-width: 0;
 }
 
 .node-card__meta {
@@ -2726,6 +2754,50 @@ function getMessageSenderShortName(message) {
     return '';
 }
 
+function getMessageSenderNodeId(message) {
+    if (!message) return '';
+
+    const explicitSender = String(message.sender || '').trim();
+    if (explicitSender) {
+        return explicitSender;
+    }
+
+    if (currentProfile && message.sender === currentProfile.node_id) {
+        return String(currentProfile.node_id || '').trim();
+    }
+
+    return '';
+}
+
+function getSenderBadgeColor(nodeId) {
+    const cleaned = String(nodeId || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase();
+    const hex = cleaned.length >= 6 ? cleaned.slice(-6) : cleaned.padStart(6, '0');
+    return `#${hex}`;
+}
+
+function getSenderBadgeTextColor(backgroundHex) {
+    const hex = String(backgroundHex || '').replace('#', '');
+    if (hex.length !== 6) {
+        return '#ffffff';
+    }
+
+    const red = parseInt(hex.slice(0, 2), 16);
+    const green = parseInt(hex.slice(2, 4), 16);
+    const blue = parseInt(hex.slice(4, 6), 16);
+    const luminance = ((red * 299) + (green * 587) + (blue * 114)) / 1000;
+    return luminance >= 150 ? '#162231' : '#ffffff';
+}
+
+function getMessageSenderDisplayName(message) {
+    if (!message) return 'Unknown';
+
+    if (currentProfile && message.sender === currentProfile.node_id) {
+        return (currentProfile.long_name || currentProfile.node_id || 'Unknown').trim();
+    }
+
+    return String(message.sender_display || message.sender || 'Unknown').trim();
+}
+
 function formatThreadPreview(message, maxLength = 110, includeSenderShortName = false) {
     if (!message) return 'No messages yet.';
 
@@ -3730,15 +3802,22 @@ function renderDmThreadCardHtml(thread) {
 
 function renderNodeCardHtml(node) {
     const lastSeen = formatNodeLastSeen(node.last_seen);
-    const nodeId = escapeHtml(node.node_id || `!${Number(node.node_num).toString(16).padStart(8, '0')}`);
+    const rawNodeId = node.node_id || `!${Number(node.node_num).toString(16).padStart(8, '0')}`;
+    const nodeId = escapeHtml(rawNodeId);
+    const shortName = (node.short_name || '?').trim() || '?';
+    const shortNameBadgeColor = getSenderBadgeColor(rawNodeId);
+    const shortNameBadgeTextColor = getSenderBadgeTextColor(shortNameBadgeColor);
     return `
         <div class="node-card">
             <div class="node-card__header">
                 <div class="node-card__title">
-                    <div class="node-card__name">${escapeHtml(node.long_name || 'Unknown')}</div>
+                    <div class="node-card__name-line">
+                        <span class="message__sender-pill node-card__short-pill" style="background-color: ${escapeHtml(shortNameBadgeColor)}; color: ${escapeHtml(shortNameBadgeTextColor)};">${escapeHtml(shortName)}</span>
+                        <div class="node-card__name">${escapeHtml(node.long_name || 'Unknown')}</div>
+                    </div>
                     <div class="node-card__meta">
                         <code class="text-primary">${nodeId}</code>
-                        <span>${escapeHtml(node.short_name || '?')}</span>
+                        <code>${escapeHtml(String(node.node_num || 'Unknown'))}</code>
                         <span>${escapeHtml(node.hw_model || 'Unknown')}</span>
                     </div>
                 </div>
@@ -3752,10 +3831,6 @@ function renderNodeCardHtml(node) {
                 <div class="node-card__fact">
                     <span class="node-card__label">Hops</span>
                     <div class="node-card__value">${formatNodeHopsBadge(node.hops_away)}</div>
-                </div>
-                <div class="node-card__fact">
-                    <span class="node-card__label">Node Num</span>
-                    <div class="node-card__value"><code>${escapeHtml(String(node.node_num || 'Unknown'))}</code></div>
                 </div>
             </div>
             <div class="node-card__actions">
@@ -3780,10 +3855,17 @@ function getMessageSortTimestamp(message) {
 function renderMessageHtml(message) {
     const isOwnMessage = currentProfile && message.sender === currentProfile.node_id;
     const timestamp = formatTimestamp(message.timestamp);
-    const dmBadge = message.message_type === 'dm' ? '<span class="badge bg-secondary ms-1">DM</span>' : '';
     const ackBadge = renderAckStatusHtml(message);
     const replyPreview = renderReplyPreview(message);
     const messageContentHtml = renderMessageContentHtml(message.content || '');
+    const senderShortName = getMessageSenderShortName(message);
+    const senderNodeId = getMessageSenderNodeId(message);
+    const senderDisplayName = getMessageSenderDisplayName(message);
+    const senderBadgeColor = getSenderBadgeColor(senderNodeId);
+    const senderBadgeTextColor = getSenderBadgeTextColor(senderBadgeColor);
+    const senderShortNameBadge = senderShortName
+        ? `<span class="message__sender-pill" style="background-color: ${escapeHtml(senderBadgeColor)}; color: ${escapeHtml(senderBadgeTextColor)};">${escapeHtml(senderShortName)}</span>`
+        : '';
     const replyButton = message.packet_id ? `
         <button class="reply-trigger" type="button" onclick="startReply(${message.packet_id})" aria-label="Reply" title="Reply">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -3798,10 +3880,10 @@ function renderMessageHtml(message) {
             <div class="message__layout">
                 <div class="message__body">
                     <div class="message__sender-line">
-                        <strong class="${isOwnMessage ? 'text-primary' : 'text-info'}">${escapeHtml(message.sender_display || message.sender || 'Unknown')}</strong>
-                        <small class="text-muted">(${escapeHtml(message.sender || 'Unknown')})</small>
+                        ${senderShortNameBadge}
+                        <strong class="${isOwnMessage ? 'text-primary' : 'text-info'}">${escapeHtml(senderDisplayName)}</strong>
+                        <small class="text-muted">(${escapeHtml(senderNodeId || 'Unknown')})</small>
                         ${isOwnMessage ? '<span class="badge bg-primary ms-1">You</span>' : ''}
-                        ${dmBadge}
                     </div>
                     ${replyPreview}
                     <div class="message__content">${messageContentHtml}</div>
@@ -4684,12 +4766,19 @@ function renderMarkdownInline(text) {
         tokenStore.push(html);
         return token;
     };
+    const createExternalLinkToken = (labelHtml, url) => {
+        const safeUrl = escapeHtml(url);
+        return addToken(`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${labelHtml}</a>`);
+    };
 
     let html = escapeHtml(text);
     html = html.replace(/`([^`\n]+)`/g, (_, code) => addToken(`<code>${code}</code>`));
-    html = html.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
-        const safeUrl = escapeHtml(url);
-        return addToken(`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+    html = html.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => createExternalLinkToken(label, url));
+    html = html.replace(/(^|[\s(>])((https?:\/\/)[^\s<]+)/g, (_, prefix, rawUrl) => {
+        const match = rawUrl.match(/^(.*?)([.,!?;:)]*)$/);
+        const url = match ? match[1] : rawUrl;
+        const trailing = match ? match[2] : '';
+        return `${prefix}${createExternalLinkToken(url, url)}${trailing}`;
     });
     html = html.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '<strong>$2</strong>');
     html = html.replace(/(\*|_)(?=\S)([\s\S]*?\S)\1/g, '<em>$2</em>');

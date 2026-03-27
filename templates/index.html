@@ -3854,6 +3854,7 @@ function getMessageSortTimestamp(message) {
 
 function renderMessageHtml(message) {
     const isOwnMessage = currentProfile && message.sender === currentProfile.node_id;
+    const showYouBadge = isOwnMessage && message.message_type !== 'dm';
     const timestamp = formatTimestamp(message.timestamp);
     const ackBadge = renderAckStatusHtml(message);
     const replyPreview = renderReplyPreview(message);
@@ -3883,7 +3884,7 @@ function renderMessageHtml(message) {
                         ${senderShortNameBadge}
                         <strong class="${isOwnMessage ? 'text-primary' : 'text-info'}">${escapeHtml(senderDisplayName)}</strong>
                         <small class="text-muted">(${escapeHtml(senderNodeId || 'Unknown')})</small>
-                        ${isOwnMessage ? '<span class="badge bg-primary ms-1">You</span>' : ''}
+                        ${showYouBadge ? '<span class="badge bg-primary ms-1">You</span>' : ''}
                     </div>
                     ${replyPreview}
                     <div class="message__content">${messageContentHtml}</div>

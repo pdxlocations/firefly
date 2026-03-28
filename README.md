@@ -6,7 +6,14 @@
 
 A real-time web-based chat application for Meshtastic mesh networks. Features node discovery, profile management, and persistent message storage with an intuitive web interface.
 
-<img width="1240" height="756" alt="firefly-screenshot" src="https://github.com/user-attachments/assets/5de46082-2d0d-4a3d-b39e-ff1d1908e20b" />
+<p align="center">
+<img width="250" height="415" alt="channels" src="https://github.com/user-attachments/assets/387deefd-0782-4a4b-ba93-96d617350e9a" />
+<img width="250" height="415" alt="nodes" src="https://github.com/user-attachments/assets/021ddd96-f77e-4b1c-9821-c32a75b7950b" />
+<img width="250" height="415" alt="chat" src="https://github.com/user-attachments/assets/f9481f03-e52a-474f-b8f8-d2b43a8d4ae4" />
+<img width="250" height="415" alt="dm" src="https://github.com/user-attachments/assets/68248ac5-2bea-422d-aa38-a1434a843889" />
+<img width="250" height="415" alt="map" src="https://github.com/user-attachments/assets/ee920b68-1496-4e3f-8cc6-3c916c2cdf86" />
+<img width="250" height="415" alt="profiles" src="https://github.com/user-attachments/assets/8c073ce9-e5e5-4ef7-a9d0-3540c18f1e61" />
+</p>
 
 ## Features
 

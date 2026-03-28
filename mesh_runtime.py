@@ -1230,6 +1230,19 @@ def find_meshdb_node_id_conflict(profiles, node_id: str, exclude_profile_id: Opt
 
     profile_iterable = profiles.values() if isinstance(profiles, dict) else (profiles or [])
     excluded_profile_id = str(exclude_profile_id) if exclude_profile_id else None
+    excluded_owner_num = None
+
+    if excluded_profile_id:
+        for profile in profile_iterable:
+            if not isinstance(profile, dict):
+                continue
+            if str(profile.get("id") or "") != excluded_profile_id:
+                continue
+            try:
+                excluded_owner_num = owner_node_num(profile)
+            except Exception:
+                excluded_owner_num = None
+            break
 
     seen_channels = set()
     shared_meshdb_root = _meshdb_root()
@@ -1281,7 +1294,7 @@ def find_meshdb_node_id_conflict(profiles, node_id: str, exclude_profile_id: Opt
                 continue
 
             matched_node_num = int(row["node_num"])
-            if profile_id and excluded_profile_id == profile_id and matched_node_num == profile_owner_num:
+            if excluded_owner_num is not None and matched_node_num == excluded_owner_num:
                 continue
 
             return {

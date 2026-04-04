@@ -38,6 +38,7 @@ print = make_log_print(logger)
 
 
 BROADCAST_NODE_NUM = 0xFFFFFFFF
+STALE_NODE_RETENTION_SECONDS = 7 * 24 * 60 * 60
 
 
 def _normalized_profile_node_id(profile: Dict) -> str:
@@ -641,6 +642,7 @@ class MeshNodeStore:
             self.channel_nums = [generate_hash(profile["channel"], profile["key"])]
         self.channel_num = self.channel_nums[0]
         self._migrate_legacy_profile_nodes()
+        self.prune_stale_nodes()
 
     def _iter_channel_nums(self) -> List[int]:
         return list(dict.fromkeys(self.channel_nums or [self.channel_num]))
@@ -735,6 +737,36 @@ class MeshNodeStore:
                 last_heard=int(time.time()),
                 hops_away=0,
             )
+
+    def prune_stale_nodes(self) -> int:
+        cutoff = int(time.time()) - STALE_NODE_RETENTION_SECONDS
+        pruned_rows = 0
+
+        for channel_num in self._iter_channel_nums():
+            node_db = self._node_db(channel_num)
+            try:
+                with node_db.connect() as con:
+                    cursor = con.execute(
+                        f"""
+                        DELETE FROM {node_db.table}
+                        WHERE node_num != ?
+                          AND last_heard IS NOT NULL
+                          AND last_heard < ?
+                        """,
+                        (str(self.owner_node_num), cutoff),
+                    )
+                    con.commit()
+                    pruned_rows += int(cursor.rowcount or 0)
+            except Exception:
+                continue
+
+        if pruned_rows:
+            print(
+                f"[MESHDB] Pruned {pruned_rows} stale node(s) for profile {self.profile_id}; "
+                f"messages retained"
+            )
+
+        return pruned_rows
 
     def record_packet(self, packet) -> Dict[str, bool]:
         packet_dict = meshdb.normalize_packet(packet, "mudp")

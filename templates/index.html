@@ -2028,7 +2028,7 @@ function buildMessageNotificationPayload(message) {
 
     const bodyText = (message.content || '').trim() || 'New message';
     const senderDisplayName = getMessageSenderDisplayName(message);
-    const alertText = `(${senderDisplayName}) : ${bodyText}`;
+    const alertText = `${senderDisplayName}: ${bodyText}`;
 
     if ((message.message_type || 'channel') === 'dm') {
         const peerNodeNum = getPeerNodeNum(message);

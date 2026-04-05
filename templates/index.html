@@ -2005,13 +2005,19 @@ function shouldSuppressSystemNotification(message) {
 function buildMessageNotificationPayload(message) {
     if (!currentProfile || !message) return null;
 
-    const bodyText = truncateText((message.content || '').replace(/\s+/g, ' ').trim(), 140) || 'New message';
+    const bodyText = (message.content || '').trim() || 'New message';
+    const senderDisplayName = getMessageSenderDisplayName(message);
+    const senderShortName = getMessageSenderShortName(message);
+    const senderLabel = senderShortName
+        ? `${senderDisplayName} (${senderShortName})`
+        : senderDisplayName;
+
     if ((message.message_type || 'channel') === 'dm') {
         const peerNodeNum = getPeerNodeNum(message);
         if (!peerNodeNum) return null;
 
         return {
-            title: `DM from ${getPeerLabel(message, peerNodeNum)}`,
+            title: `New DM message from: ${senderLabel}`,
             options: {
                 body: bodyText,
                 icon: notificationAssetUrls.icon,
@@ -2029,12 +2035,11 @@ function buildMessageNotificationPayload(message) {
     const channelLabel = channelIndex !== null
         ? (getProfileChannels()[channelIndex]?.name || `Channel ${channelIndex + 1}`)
         : 'Channel';
-    const senderLabel = getMessageSenderDisplayName(message);
 
     return {
-        title: `New message in ${channelLabel}`,
+        title: `New ${channelLabel} message from: ${senderLabel}`,
         options: {
-            body: `${senderLabel}: ${bodyText}`,
+            body: bodyText,
             icon: notificationAssetUrls.icon,
             badge: notificationAssetUrls.badge,
             tag: `firefly-channel-${currentProfile.id}-${channelNumber ?? 'unknown'}`,

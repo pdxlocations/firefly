@@ -1,4 +1,4 @@
-const STATIC_CACHE = "firefly-static-v2";
+const STATIC_CACHE = "firefly-static-v3";
 const STATIC_ASSETS = [
   "/static/manifest.json",
   "/static/css/style.css",
@@ -55,6 +55,28 @@ self.addEventListener("fetch", event => {
         caches.open(STATIC_CACHE).then(cache => cache.put(request, responseCopy));
         return networkResponse;
       });
+    })
+  );
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+
+  const requestedUrl = event.notification?.data?.url || "/";
+  const targetUrl = new URL(requestedUrl, self.location.origin).href;
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then(windowClients => {
+      for (const client of windowClients) {
+        if (!("focus" in client)) {
+          continue;
+        }
+        if ("navigate" in client) {
+          return client.navigate(targetUrl).then(() => client.focus());
+        }
+        return client.focus();
+      }
+      return clients.openWindow(targetUrl);
     })
   );
 });

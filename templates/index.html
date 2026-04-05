@@ -1633,6 +1633,18 @@ let mapInstance = null;
 let mapLayerGroup = null;
 let pendingThreadStateRefresh = null;
 let activeTracerouteRequest = null;
+const notificationAssetUrls = {
+    icon: '{{ url_for("static", filename="images/firefly-logo-dark.png") }}',
+    badge: '{{ url_for("static", filename="images/favicon.svg") }}',
+};
+const currentUserId = {{ (current_user.id if current_user else '')|tojson }};
+const notificationPreferenceStorageKey = `firefly.notifications.enabled:${currentUserId}`;
+let notificationSettings = {
+    enabled: false,
+    supported: typeof Notification !== 'undefined',
+    permission: typeof Notification !== 'undefined' ? Notification.permission : 'unsupported',
+    busy: false,
+};
 
 document.addEventListener('DOMContentLoaded', async function() {
     initializePendingChatContext();
@@ -1684,6 +1696,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     await loadCurrentProfileAndStatus();
+    await loadNotificationPreferences();
     await loadMessages();
     await loadDmTargets();
     await applyPendingChatContext();
@@ -1785,6 +1798,19 @@ function getChannelNumberByIndex(channelIndex) {
     return null;
 }
 
+function getChannelIndexByNumber(channelNumber) {
+    const normalizedChannelNumber = normalizeNumber(channelNumber);
+    if (normalizedChannelNumber === null) return null;
+
+    const channels = getProfileChannels();
+    for (let index = 0; index < channels.length; index += 1) {
+        if (normalizeNumber(channels[index]?.channel_number) === normalizedChannelNumber) {
+            return index;
+        }
+    }
+    return null;
+}
+
 function getUnreadTotal(unreadMap) {
     let total = 0;
     unreadMap.forEach(count => {
@@ -1820,6 +1846,219 @@ function incrementUnreadCount(unreadMap, key) {
     if (normalizedKey === null) return;
     unreadMap.set(normalizedKey, (unreadMap.get(normalizedKey) || 0) + 1);
     updateNavigationBadges();
+}
+
+function getNotificationPermissionState() {
+    return typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+}
+
+function syncNotificationCapabilityState() {
+    notificationSettings.supported = typeof Notification !== 'undefined';
+    notificationSettings.permission = getNotificationPermissionState();
+}
+
+function syncNotificationToggleUi() {
+    syncNotificationCapabilityState();
+
+    const toggle = document.getElementById('notificationsToggle');
+    const status = document.getElementById('notificationsStatusText');
+    if (!toggle || !status) return;
+
+    toggle.checked = Boolean(notificationSettings.enabled);
+    toggle.disabled = Boolean(notificationSettings.busy) || !notificationSettings.supported;
+    status.textContent = notificationSettings.enabled && notificationSettings.permission === 'granted'
+        ? 'Enabled'
+        : 'Disabled';
+    status.className = notificationSettings.enabled && notificationSettings.permission === 'granted'
+        ? 'badge text-bg-success'
+        : 'badge text-bg-secondary';
+}
+
+async function persistNotificationPreference(enabled) {
+    const normalizedEnabled = Boolean(enabled);
+    window.localStorage.setItem(notificationPreferenceStorageKey, normalizedEnabled ? 'true' : 'false');
+    notificationSettings.enabled = normalizedEnabled;
+    syncNotificationCapabilityState();
+    syncNotificationToggleUi();
+    return { notifications_enabled: normalizedEnabled };
+}
+
+async function showSystemNotification(title, options) {
+    syncNotificationCapabilityState();
+    if (!notificationSettings.supported || notificationSettings.permission !== 'granted') {
+        return;
+    }
+
+    try {
+        if ('serviceWorker' in navigator) {
+            const registration = await navigator.serviceWorker.ready;
+            await registration.showNotification(title, options);
+            return;
+        }
+    } catch (error) {
+        console.error('Service worker notification failed:', error);
+    }
+
+    try {
+        const notification = new Notification(title, options);
+        notification.onclick = function() {
+            window.focus();
+            const targetUrl = notification?.data?.url;
+            if (targetUrl) {
+                window.location.assign(targetUrl);
+            }
+            notification.close();
+        };
+    } catch (error) {
+        console.error('Browser notification failed:', error);
+    }
+}
+
+async function loadNotificationPreferences() {
+    syncNotificationCapabilityState();
+
+    try {
+        notificationSettings.enabled = window.localStorage.getItem(notificationPreferenceStorageKey) === 'true';
+    } catch (error) {
+        console.error('Error loading notification preferences:', error);
+        notificationSettings.enabled = false;
+    }
+
+    syncNotificationToggleUi();
+}
+
+async function handleNotificationToggleChange(event) {
+    const toggle = event?.target;
+    const desiredState = Boolean(toggle?.checked);
+
+    syncNotificationCapabilityState();
+    if (!notificationSettings.supported) {
+        notificationSettings.enabled = false;
+        syncNotificationToggleUi();
+        showNotification('This browser does not support notifications.', 'warning');
+        return;
+    }
+
+    notificationSettings.busy = true;
+    syncNotificationToggleUi();
+
+    try {
+        if (desiredState) {
+            let permission = notificationSettings.permission;
+            if (permission !== 'granted') {
+                permission = await Notification.requestPermission();
+                notificationSettings.permission = permission;
+            }
+            if (permission !== 'granted') {
+                notificationSettings.enabled = false;
+                syncNotificationToggleUi();
+                showNotification('Notifications remain off because browser permission was not granted.', 'warning', 5000);
+                return;
+            }
+        }
+
+        await persistNotificationPreference(desiredState);
+        showNotification(
+            desiredState ? 'Notifications enabled for this device.' : 'Notifications disabled for this device.',
+            desiredState ? 'success' : 'info',
+            3000
+        );
+
+        if (desiredState) {
+            void showSystemNotification('Firefly notifications enabled', {
+                body: 'You will now receive alerts for new messages.',
+                icon: notificationAssetUrls.icon,
+                badge: notificationAssetUrls.badge,
+                tag: 'firefly-notifications-enabled',
+                data: { url: window.location.href },
+            });
+        }
+    } catch (error) {
+        console.error('Error updating notification preference:', error);
+        showNotification(`Unable to update notifications: ${error.message}`, 'danger', 5000);
+        try {
+            await loadNotificationPreferences();
+        } catch (_reloadError) {
+            syncNotificationToggleUi();
+        }
+    } finally {
+        notificationSettings.busy = false;
+        syncNotificationToggleUi();
+    }
+}
+
+function shouldSuppressSystemNotification(message) {
+    const pageIsActive = document.visibilityState === 'visible' && document.hasFocus();
+    if (!pageIsActive) {
+        return false;
+    }
+
+    if ((message.message_type || 'channel') === 'dm') {
+        const peerNodeNum = getPeerNodeNum(message);
+        return Boolean(peerNodeNum && isViewingDmThread(peerNodeNum));
+    }
+
+    const channelNumber = normalizeNumber(message.channel);
+    return channelNumber !== null && isViewingChannelThread(channelNumber);
+}
+
+function buildMessageNotificationPayload(message) {
+    if (!currentProfile || !message) return null;
+
+    const bodyText = truncateText((message.content || '').replace(/\s+/g, ' ').trim(), 140) || 'New message';
+    if ((message.message_type || 'channel') === 'dm') {
+        const peerNodeNum = getPeerNodeNum(message);
+        if (!peerNodeNum) return null;
+
+        return {
+            title: `DM from ${getPeerLabel(message, peerNodeNum)}`,
+            options: {
+                body: bodyText,
+                icon: notificationAssetUrls.icon,
+                badge: notificationAssetUrls.badge,
+                tag: `firefly-dm-${currentProfile.id}-${peerNodeNum}`,
+                data: {
+                    url: `${window.location.origin}${window.location.pathname}?tab=dms&dm=${encodeURIComponent(String(peerNodeNum))}`,
+                },
+            },
+        };
+    }
+
+    const channelNumber = normalizeNumber(message.channel);
+    const channelIndex = getChannelIndexByNumber(channelNumber);
+    const channelLabel = channelIndex !== null
+        ? (getProfileChannels()[channelIndex]?.name || `Channel ${channelIndex + 1}`)
+        : 'Channel';
+    const senderLabel = getMessageSenderDisplayName(message);
+
+    return {
+        title: `New message in ${channelLabel}`,
+        options: {
+            body: `${senderLabel}: ${bodyText}`,
+            icon: notificationAssetUrls.icon,
+            badge: notificationAssetUrls.badge,
+            tag: `firefly-channel-${currentProfile.id}-${channelNumber ?? 'unknown'}`,
+            data: {
+                url: channelIndex !== null
+                    ? `${window.location.origin}${window.location.pathname}?channel=${encodeURIComponent(String(channelIndex))}`
+                    : `${window.location.origin}${window.location.pathname}`,
+            },
+        },
+    };
+}
+
+function notifyForIncomingMessage(message) {
+    syncNotificationCapabilityState();
+    if (!notificationSettings.enabled || !notificationSettings.supported || notificationSettings.permission !== 'granted') {
+        return;
+    }
+    if (shouldSuppressSystemNotification(message)) {
+        return;
+    }
+
+    const payload = buildMessageNotificationPayload(message);
+    if (!payload) return;
+    void showSystemNotification(payload.title, payload.options);
 }
 
 function clearUnreadCount(unreadMap, key) {
@@ -3138,6 +3377,17 @@ function renderProfilesView(container) {
         <div class="profile-manager">
             <div class="profile-manager__grid">
                 <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center gap-3">
+                        <h5 class="mb-0">Notifications</h5>
+                        <div class="d-flex align-items-center gap-3">
+                            <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="notificationsToggle">
+                            </div>
+                            <span id="notificationsStatusText" class="badge text-bg-secondary">Disabled</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
                     <div class="card-header">
                         <h5 class="mb-0">User Profiles</h5>
                     </div>
@@ -3188,6 +3438,8 @@ function renderProfilesView(container) {
     `;
 
     syncProfileSelectors();
+    document.getElementById('notificationsToggle')?.addEventListener('change', handleNotificationToggleChange);
+    syncNotificationToggleUi();
     document.getElementById('createProfileForm')?.addEventListener('submit', createManagedProfile);
     document.getElementById('addNewChannelBtn')?.addEventListener('click', () => addProfileChannelRow('newChannelsList'));
     document.getElementById('newNodeId')?.addEventListener('input', syncGeneratedProfileNames);
@@ -3935,6 +4187,7 @@ function addIncomingMessage(message) {
                     incrementUnreadCount(unreadDmMessageCounts, peerNodeNum);
                 }
             }
+            notifyForIncomingMessage(message);
         }
     } else {
         const inserted = upsertMessage(channelMessages, message);
@@ -3947,6 +4200,7 @@ function addIncomingMessage(message) {
                     incrementUnreadCount(unreadChannelMessageCounts, channelNumber);
                 }
             }
+            notifyForIncomingMessage(message);
         }
     }
     renderActiveMessages();

@@ -819,8 +819,21 @@ def _get_chat_payload(profile):
     effective_profile = _effective_profile(profile)
     channel_number = _profile_channel_num(effective_profile)
     channel_messages = []
-    if effective_profile and channel_number is not None:
-        channel_messages = db.get_messages_for_channel(channel_number, profile_id=effective_profile["id"])
+    if effective_profile:
+        # The client renders a channel inbox and maintains unread state for every
+        # configured channel.  Supplying only the selected channel here left an
+        # unread thread without its history after a reload (and it could render
+        # the empty-state copy despite having a badge).  Load each configured
+        # channel so the message collection and unread collection share scope.
+        channel_numbers = _channel_numbers_for_profile(effective_profile)
+        for configured_channel_number in dict.fromkeys(channel_numbers):
+            channel_messages.extend(
+                db.get_messages_for_channel(
+                    configured_channel_number,
+                    profile_id=effective_profile["id"],
+                )
+            )
+        channel_messages.sort(key=lambda message: message.get("timestamp") or "", reverse=True)
     dm_messages = db.get_dm_messages_for_profile(effective_profile["id"]) if effective_profile else []
     _hydrate_message_sender_labels(channel_messages, effective_profile)
     _hydrate_message_sender_labels(dm_messages, effective_profile)

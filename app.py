@@ -833,7 +833,9 @@ def _get_chat_payload(profile):
                     profile_id=effective_profile["id"],
                 )
             )
-        channel_messages.sort(key=lambda message: message.get("timestamp") or "", reverse=True)
+        # Message rendering is chronological, with the composer anchored below
+        # the list.  Keep the newest message last after combining channels.
+        channel_messages.sort(key=lambda message: message.get("timestamp") or "")
     dm_messages = db.get_dm_messages_for_profile(effective_profile["id"]) if effective_profile else []
     _hydrate_message_sender_labels(channel_messages, effective_profile)
     _hydrate_message_sender_labels(dm_messages, effective_profile)

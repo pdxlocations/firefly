@@ -4792,7 +4792,17 @@ function formatNodeHopsBadge(value) {
 
 function formatTimestamp(rawTimestamp) {
     const ts = parseTimestampValue(rawTimestamp);
-    return ts ? ts.toLocaleTimeString([], {hour12: true, hour: 'numeric', minute: '2-digit'}) : '';
+    if (!ts) return '';
+
+    const now = new Date();
+    const isToday = ts.getFullYear() === now.getFullYear()
+        && ts.getMonth() === now.getMonth()
+        && ts.getDate() === now.getDate();
+    const time = ts.toLocaleTimeString([], {hour12: true, hour: 'numeric', minute: '2-digit'});
+
+    return isToday
+        ? time
+        : `${ts.toLocaleDateString([], {month: 'short', day: 'numeric'})}, ${time}`;
 }
 
 function truncateText(value, maxLength) {

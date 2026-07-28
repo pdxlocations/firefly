@@ -1633,6 +1633,7 @@ let mapInstance = null;
 let mapLayerGroup = null;
 let pendingThreadStateRefresh = null;
 let activeTracerouteRequest = null;
+let channelSelectionRequestId = 0;
 const notificationAssetUrls = {
     icon: '{{ url_for("static", filename="images/firefly-logo-dark.png") }}',
     badge: '{{ url_for("static", filename="images/favicon.svg") }}',
@@ -2755,6 +2756,24 @@ async function setActiveChannel(channelIndex, updateUrl = true) {
         return;
     }
 
+    // Swap the visible conversation from the already-loaded inbox immediately.
+    // Persisting the selected channel is kept in the background so latency does
+    // not make a channel click feel like a message reload.
+    const previousChannelRoom = currentChannelRoom;
+    const previousChannelIndex = activeChannelIndex;
+    const previousProfile = currentProfile;
+    activeChannelIndex = normalizedIndex;
+    currentProfile = {
+        ...currentProfile,
+        selected_channel_index: normalizedIndex,
+    };
+    currentChannelRoom = getChannelNumberByIndex(normalizedIndex);
+    setActiveChatTab('channel');
+    updateComposerState();
+    renderActiveMessages();
+    if (updateUrl) updateChatUrl();
+
+    const requestId = ++channelSelectionRequestId;
     try {
         const response = await fetch('/api/current-channel', {
             method: 'POST',
@@ -2766,10 +2785,13 @@ async function setActiveChannel(channelIndex, updateUrl = true) {
             throw new Error(data.error || `HTTP ${response.status}`);
         }
 
-        leaveCurrentChannelRoom();
+        // Ignore an older selection that completed after a newer click.
+        if (requestId !== channelSelectionRequestId) return;
+
+        if (socket && previousChannelRoom !== null && previousChannelRoom !== undefined) {
+            socket.emit('leave_channel', { channel: previousChannelRoom });
+        }
         currentProfile = data.profile || currentProfile;
-        channelMessages = data.channel_messages || [];
-        dmMessages = data.dm_messages || dmMessages;
         activeChannelIndex = Number.isInteger(data.selected_channel_index) ? data.selected_channel_index : normalizedIndex;
         currentChannelRoom = data.channel_number ?? null;
 
@@ -2785,14 +2807,20 @@ async function setActiveChannel(channelIndex, updateUrl = true) {
         applyUnreadState(data);
     } catch (error) {
         console.error('Error selecting channel:', error);
-        alert('Error selecting channel: ' + error.message);
+        if (requestId === channelSelectionRequestId) {
+            // The socket is still subscribed to the previous channel until a
+            // successful response, so return the UI to that known-good state.
+            currentProfile = previousProfile;
+            activeChannelIndex = previousChannelIndex;
+            currentChannelRoom = previousChannelRoom;
+            setActiveChatTab('channel');
+            updateComposerState();
+            renderActiveMessages();
+            if (updateUrl) updateChatUrl();
+            alert('Error selecting channel: ' + error.message);
+        }
         return;
     }
-
-    setActiveChatTab('channel');
-    updateComposerState();
-    renderActiveMessages();
-    if (updateUrl) updateChatUrl();
 }
 
 function updateComposerState() {

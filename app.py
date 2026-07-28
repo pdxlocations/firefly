@@ -2433,9 +2433,14 @@ def set_current_channel():
 
     _set_session_channel_index(channel_index)
 
-    chat_payload = _get_chat_payload(current_profile)
-    if chat_payload["channel_number"] is not None:
-        db.update_profile_last_seen(current_profile["id"], chat_payload["channel_number"])
+    # The browser already has the profile's channel history in its local inbox.
+    # Do not rebuild and hydrate every channel plus the DM history on each click;
+    # that made a simple channel selection wait on work unrelated to the selected
+    # conversation.
+    selected_channel = _effective_profile(current_profile, channel_index=channel_index)
+    channel_number = _profile_channel_num(selected_channel)
+    if channel_number is not None:
+        db.update_profile_last_seen(current_profile["id"], channel_number)
     response_profile = _serialize_profile_for_client(current_profile)
     unread_state = _unread_state_for_profile(current_profile)
 
@@ -2444,9 +2449,7 @@ def set_current_channel():
             "message": "Channel selected",
             "profile": response_profile,
             "interface_status": _interface_status_for_profile(current_profile),
-            "channel_messages": chat_payload["channel_messages"],
-            "dm_messages": chat_payload["dm_messages"],
-            "channel_number": chat_payload["channel_number"],
+            "channel_number": channel_number,
             "selected_channel_index": channel_index,
             **unread_state,
         }

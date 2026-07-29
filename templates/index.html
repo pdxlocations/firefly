@@ -1634,6 +1634,7 @@ let mapLayerGroup = null;
 let pendingThreadStateRefresh = null;
 let activeTracerouteRequest = null;
 let channelSelectionRequestId = 0;
+let isSendingMessage = false;
 const notificationAssetUrls = {
     icon: '{{ url_for("static", filename="images/firefly-logo-dark.png") }}',
     badge: '{{ url_for("static", filename="images/favicon.svg") }}',
@@ -2848,10 +2849,10 @@ function updateComposerState() {
         input.placeholder = activeChannel ? `Message ${activeChannel.name}...` : 'Open a channel to reply...';
     }
 
-    sendBtn.textContent = 'Send';
+    sendBtn.textContent = isSendingMessage ? 'Sending…' : 'Send';
 
-    input.disabled = (activeChatTab === 'dm' && !activeDmTargetNodeNum) || (activeChatTab === 'channel' && !getActiveChannel());
-    sendBtn.disabled = (activeChatTab === 'dm' && !activeDmTargetNodeNum) || (activeChatTab === 'channel' && !getActiveChannel());
+    input.disabled = isSendingMessage || (activeChatTab === 'dm' && !activeDmTargetNodeNum) || (activeChatTab === 'channel' && !getActiveChannel());
+    sendBtn.disabled = isSendingMessage || (activeChatTab === 'dm' && !activeDmTargetNodeNum) || (activeChatTab === 'channel' && !getActiveChannel());
 
     const replyMessage = getMessageByPacketId(replyingToPacketId);
     if (replyMessage && replyBar && replyAuthor && replyPreview) {
@@ -4467,6 +4468,10 @@ async function reconnectProfile(button) {
 }
 
 async function sendMessage() {
+    // The button can be disabled, but Enter can still invoke this function.
+    // Keep a separate in-flight guard so only one request may be sent at once.
+    if (isSendingMessage) return;
+
     const btn = document.getElementById('sendBtn');
     const messageInput = document.getElementById('messageInput');
     const message = messageInput.value.trim();
@@ -4498,7 +4503,10 @@ async function sendMessage() {
         payload.reply_packet_id = replyingToPacketId;
     }
 
+    isSendingMessage = true;
     btn.disabled = true;
+    btn.textContent = 'Sending…';
+    messageInput.disabled = true;
     try {
         const response = await fetch('/api/send-message', {
             method: 'POST',
@@ -4520,7 +4528,8 @@ async function sendMessage() {
         console.error('Error sending message:', err);
         alert('Error sending message: ' + err.message);
     } finally {
-        btn.disabled = false;
+        isSendingMessage = false;
+        updateComposerState();
         messageInput.focus();
     }
 }

@@ -1,6 +1,8 @@
 # Use Python 3.11 slim image as base
 FROM python:3.11-slim-bookworm
 
+LABEL org.opencontainers.image.source="https://github.com/pdxlocations/firefly"
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1

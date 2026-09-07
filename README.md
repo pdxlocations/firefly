@@ -200,7 +200,13 @@ Native runs use the same application defaults without Docker:
 - **FIREFLY_PORT**: Web interface port (default: `5011`)
 - **FIREFLY_DATABASE_FILE**: SQLite database path (default: `firefly.db`)
 - **FIREFLY_UDP_PORT**: UDP multicast port (default: `4403`)
-- **FIREFLY_MCAST_GRP**: Multicast group address (default: `224.0.0.69`)
+- **FIREFLY_MCAST_GRP**: Multicast group address (default: `239.0.0.69` for Meshtastic 2.8+)
+
+Firefly explicitly configures the multicast address for both sending and receiving;
+changing mUDP's standalone defaults does not change Firefly's address. For older
+firmware, launch with `FIREFLY_MCAST_GRP=224.0.0.69 python start.py`. With Docker
+Compose, set `FIREFLY_MCAST_GRP=224.0.0.69` in `.env` and recreate the container.
+Existing virtual-node configurations pick up the selected address when started.
 
 ## Network Requirements
 

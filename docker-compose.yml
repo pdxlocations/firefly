@@ -24,6 +24,7 @@ services:
       - FIREFLY_SECRET_KEY=${FIREFLY_SECRET_KEY:-dev-secret-key-change-in-production}
       - FIREFLY_DEBUG=${FIREFLY_DEBUG:-false}
       - FIREFLY_UDP_PORT=${FIREFLY_UDP_PORT:-4403}
+      - FIREFLY_MCAST_GRP=${FIREFLY_MCAST_GRP:-239.0.0.69}
       # Keep this in sync with the networking option above so startup logs show the right URL.
       - NETWORK_MODE=host
       # - NETWORK_MODE=bridge

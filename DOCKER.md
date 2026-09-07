@@ -50,6 +50,7 @@ Key variables:
 - `FIREFLY_DATABASE_FILE`: SQLite database path (default: `/app/data/mudpchat.db`)
 - `FIREFLY_SECRET_KEY`: Flask secret key (change in production!)
 - `FIREFLY_UDP_PORT`: UDP port for Meshtastic communication (default: 4403)
+- `FIREFLY_MCAST_GRP`: Multicast group (default: `239.0.0.69` for Meshtastic 2.8+; set to `224.0.0.69` for older firmware)
 - `FIREFLY_DEBUG`: Enable debug mode (default: false)
 
 ### Docker Compose Options

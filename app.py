@@ -38,7 +38,8 @@ logger = get_logger("firefly.app")
 print = make_log_print(logger)
 
 
-MCAST_GRP = os.getenv("FIREFLY_MCAST_GRP", "224.0.0.69")
+# Meshtastic 2.8+ group; FIREFLY_MCAST_GRP can select the legacy group.
+MCAST_GRP = os.getenv("FIREFLY_MCAST_GRP", "239.0.0.69")
 MCAST_PORT = int(os.getenv("FIREFLY_UDP_PORT", "4403"))
 SOCKETIO_CLIENT_VERSION = "4.7.5"
 BROADCAST_NODE_NUM = 0xFFFFFFFF

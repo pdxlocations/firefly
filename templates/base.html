@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Firefly{% endblock %}</title>
     <meta name="theme-color" content="#1f5d96">
@@ -898,6 +899,7 @@
                         {{ current_user.username }}
                     </button>
                     <form method="post" action="{{ url_for('logout') }}" class="navbar-auth__form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-outline-light btn-sm navbar-auth__button" type="submit">Logout</button>
                     </form>
                 {% endif %}
@@ -936,6 +938,7 @@
                     </div>
                     <div class="modal-body">
                         <form method="post" action="{{ url_for('update_account_password') }}" class="mb-4" data-async-form>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="fw-semibold mb-3">Change Password</div>
                             <div class="mb-3">
                                 <label class="form-label" for="accountCurrentPassword">Current Password</label>
@@ -956,6 +959,7 @@
                             <div class="fw-semibold text-danger mb-2">Delete Account</div>
                             <p class="small text-muted mb-3">This removes your login and all profiles owned by this account.</p>
                             <form method="post" action="{{ url_for('delete_account') }}" data-async-form data-confirm-message="Delete your account permanently?">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <div class="mb-3">
                                     <label class="form-label" for="accountDeletePassword">Current Password</label>
                                     <input class="form-control" id="accountDeletePassword" name="current_password" type="password" autocomplete="current-password" required>

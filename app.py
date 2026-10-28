@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 
 import base64
+import secrets
+from runtime_files import session_secret
+from local_deps import bootstrap_local_dependency
+
+for _dependency in ("meshdb", "mudp", "vnode"):
+    bootstrap_local_dependency(_dependency)
+
 from collections import deque
 
 from datetime import datetime
@@ -30,6 +37,12 @@ from mesh_runtime import (
     VirtualNodeManager,
     count_nodes_for_profiles,
     find_meshdb_node_id_conflict,
+    migrate_profile_identities,
+    prepare_profile_identity,
+    ensure_profile_config,
+    base64_public_key,
+    _config_path,
+    _runtime_root,
 )
 from vnode.crypto import b64_decode
 
@@ -43,8 +56,6 @@ MCAST_GRP = os.getenv("FIREFLY_MCAST_GRP", "239.0.0.69")
 MCAST_PORT = int(os.getenv("FIREFLY_UDP_PORT", "4403"))
 SOCKETIO_CLIENT_VERSION = "4.7.5"
 BROADCAST_NODE_NUM = 0xFFFFFFFF
-DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
-NODE_ID_PATTERN = re.compile(r"^![0-9a-f]{8}$")
 SHORT_NAME_ALNUM_PATTERN = re.compile(r"^[A-Za-z0-9]{1,4}$")
 
 # Cross-source de-duplication cache for user-visible packet handling.
@@ -62,6 +73,7 @@ if db_dir and not os.path.exists(db_dir):
     print(f"[DATABASE] Created database directory: {db_dir}")
 
 db = Database(db_path)
+migrate_profile_identities(db, MCAST_GRP, MCAST_PORT)
 
 # Map WebSocket session IDs to Flask session IDs for cleanup
 websocket_to_flask_sessions = {}
@@ -74,7 +86,10 @@ def _get_session_profile():
     profile = session.get("current_profile")
     current_user = _get_session_user()
     if profile and current_user and profile.get("user_id") == current_user.get("id"):
-        return profile
+        fresh = db.get_profile(profile["id"], user_id=current_user["id"])
+        if fresh:
+            session["current_profile"] = fresh
+        return fresh
     return None
 
 
@@ -165,11 +180,6 @@ def login_required(view):
     return wrapped
 
 
-def _normalize_node_id(node_id):
-    value = (node_id or "").strip()
-    return value.lower() if value.startswith("!") else value
-
-
 def _normalize_text_field(value):
     return value.strip() if isinstance(value, str) else ""
 
@@ -199,15 +209,19 @@ def _is_valid_channel_key(channel_key):
 
 
 def _validate_profile_request_payload(data):
-    normalized_node_id = _normalize_node_id(_normalize_text_field((data or {}).get("node_id")))
+    if not isinstance(data, dict):
+        return None, "Profile must be a JSON object"
+    if "node_id" in data:
+        return None, "Node ID is derived from the public key and cannot be set"
     long_name = _normalize_text_field((data or {}).get("long_name"))
     short_name = _normalize_text_field((data or {}).get("short_name"))
     channels = _profile_channels(data)
 
-    if not normalized_node_id or not long_name or not short_name or not channels:
-        return None, "node_id, long_name, short_name, and at least one channel are required"
-    if not NODE_ID_PATTERN.fullmatch(normalized_node_id):
-        return None, "node_id must be ! followed by 8 hexadecimal characters"
+    if not long_name or not short_name or not channels:
+        return None, "long_name, short_name, and at least one channel are required"
+    for index, channel in enumerate(channels, start=1):
+        if not _is_valid_channel_key(channel["key"]):
+            return None, f"channel {index} key must be base64 for 1 byte, 128 bits, or 256 bits"
     if len(long_name) >= 32:
         return None, "long_name must be fewer than 32 characters"
     if not _is_valid_short_name(short_name):
@@ -218,7 +232,6 @@ def _validate_profile_request_payload(data):
         return None, "hop_limit must be an integer between 0 and 7"
 
     return {
-        "node_id": normalized_node_id,
         "long_name": long_name,
         "short_name": short_name,
         "channels": channels,
@@ -472,7 +485,7 @@ def _emit_node_update(profile_id, node):
 
 shared_packet_receiver = SharedPacketReceiver(MCAST_GRP, MCAST_PORT)
 virtual_node_manager = VirtualNodeManager(MCAST_GRP, MCAST_PORT, shared_receiver=shared_packet_receiver)
-shared_packet_receiver.start()
+
 
 
 def _get_mesh_store(profile=None):
@@ -1580,14 +1593,34 @@ pub.subscribe(on_max_retransmit, "mesh.tx.max_retransmit")
 
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.getenv("FIREFLY_SECRET_KEY", DEFAULT_SECRET_KEY)
+app.config["SECRET_KEY"] = session_secret(_runtime_root())
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=None,  # Socket.IO enforces the same origin by default.
     async_mode="threading",
     logger=get_logger("socketio.server"),
     engineio_logger=get_logger("engineio.server"),
 )
+
+
+def csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_urlsafe(32)
+    return session['csrf_token']
+
+
+app.jinja_env.globals['csrf_token'] = csrf_token
+
+
+@app.before_request
+def protect_writes():
+    if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        expected = session.get('csrf_token')
+        supplied = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token')
+        if not expected or not supplied or not secrets.compare_digest(expected, supplied):
+            return jsonify({'error': 'Invalid CSRF token; reload the page and retry'}), 403
 
 
 @app.route("/service-worker.js")
@@ -1620,9 +1653,9 @@ class ProfileManager:
         """Get a specific profile"""
         return self.db.get_profile(profile_id, user_id=user_id)
 
-    def create_profile(self, profile_id, user_id, node_id, long_name, short_name, channels, hop_limit=3):
+    def create_profile(self, profile_id, user_id, node_id, long_name, short_name, channels, hop_limit=3, identity_public_key=None):
         """Create a new profile"""
-        return self.db.create_profile(profile_id, user_id, node_id, long_name, short_name, channels, hop_limit)
+        return self.db.create_profile(profile_id, user_id, node_id, long_name, short_name, channels, hop_limit, identity_public_key)
 
     def update_profile(self, profile_id, user_id, node_id, long_name, short_name, channels, hop_limit=3):
         """Update an existing profile"""
@@ -1647,7 +1680,7 @@ def create_interface_for_profile(profile):
     try:
         interface = virtual_node_manager.start(profile)
         print(
-            f"[INTERFACE] Created virtual node for profile {profile.get('long_name', 'unknown')} with key {profile_key[:8]}..."
+            f"[INTERFACE] Created virtual node for profile {profile.get('long_name', 'unknown')} ({profile['node_id']})"
         )
         return interface
 
@@ -1761,7 +1794,11 @@ class UDPChatServer:
         effective_profile = _effective_profile(profile)
         channel_hash = generate_hash(effective_profile.get("channel", ""), effective_profile.get("key", ""))
 
-        if self.running and self.current_profile_id == effective_profile.get("id") and self.current_channel_hash == channel_hash:
+        config_matches = self.current_profile and all(
+            self.current_profile.get(field) == effective_profile.get(field)
+            for field in ('node_id', 'long_name', 'short_name', 'hop_limit')
+        )
+        if self.running and self.current_profile_id == effective_profile.get("id") and self.current_channel_hash == channel_hash and config_matches:
             print(
                 f"[UDP] Reusing existing virtual node for profile {effective_profile.get('long_name', 'unknown')} on channel {channel_hash}"
             )
@@ -2215,17 +2252,17 @@ def create_profile():
     if error:
         return jsonify({"error": error}), 400
 
-    normalized_node_id = validated["node_id"]
     channels = validated["channels"]
-    for index, channel in enumerate(channels, start=1):
-        if not _is_valid_channel_key(channel.get("key")):
-            return jsonify({"error": f"channel {index} key must be base64 for 1 byte, 128 bits, or 256 bits"}), 400
+    hop_limit = validated["hop_limit"]
+    profile_id = str(uuid.uuid4())
+    identity = {"id": profile_id}
+    normalized_node_id = prepare_profile_identity(identity)
     conflict_error = _profile_node_id_conflict_error(normalized_node_id)
     if conflict_error:
         return jsonify({"error": conflict_error}), 409
-
-    hop_limit = validated["hop_limit"]
-    profile_id = str(uuid.uuid4())
+    from runtime_files import read_identity_payload
+    identity_payload, _ = read_identity_payload(_config_path(identity))
+    public_key = base64_public_key(identity_payload['security']['private_key'])
     success = profile_manager.create_profile(
         profile_id,
         current_user["id"],
@@ -2234,13 +2271,15 @@ def create_profile():
         validated["short_name"],
         channels,
         hop_limit,
+        identity_public_key=public_key,
     )
 
     if success:
         created_profile = profile_manager.get_profile(profile_id, user_id=current_user["id"])
         if created_profile:
+            ensure_profile_config(created_profile, MCAST_GRP, MCAST_PORT)
             _seed_profile_mesh_identity(created_profile)
-        return jsonify({"profile_id": profile_id, "message": "Profile created successfully"})
+        return jsonify({"profile_id": profile_id, "node_id": normalized_node_id, "message": "Profile created successfully"})
     else:
         return jsonify({"error": "Failed to create profile. Node ID may already be in use."}), 409
 
@@ -2259,7 +2298,7 @@ def update_profile(profile_id):
     if error:
         return jsonify({"error": error}), 400
 
-    normalized_node_id = validated["node_id"]
+    normalized_node_id = existing_profile["node_id"]
     channels = validated["channels"]
     conflict_error = _profile_node_id_conflict_error(normalized_node_id, exclude_profile_id=profile_id)
     if conflict_error:
@@ -2280,7 +2319,10 @@ def update_profile(profile_id):
     if success:
         updated_profile = profile_manager.get_profile(profile_id, user_id=current_user["id"])
         if updated_profile:
+            ensure_profile_config(updated_profile, MCAST_GRP, MCAST_PORT)
             _seed_profile_mesh_identity(updated_profile)
+            if _get_session_profile() and _get_session_profile()["id"] == profile_id:
+                _set_session_profile(updated_profile)
         return jsonify({"message": "Profile updated successfully"})
     else:
         return jsonify({"error": "Failed to update profile"}), 500
@@ -2939,6 +2981,11 @@ def handle_disconnect():
             print(f"[WEBSOCKET] Error unregistering Flask session {flask_session_id}: {e}")
     else:
         print(f"[WEBSOCKET] No Flask session mapping found for WebSocket session {request.sid}")
+
+
+for _profile in db.get_all_profiles().values():
+    _seed_profile_mesh_identity(_profile)
+shared_packet_receiver.start()
 
 
 if __name__ == "__main__":

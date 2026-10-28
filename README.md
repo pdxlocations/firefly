@@ -29,7 +29,7 @@ A real-time web-based chat application for Meshtastic mesh networks. Features no
 ## Requirements
 
 ### Native Installation
-- Python 3.7+
+- Python 3.11–3.14
 - Modern web browser with WebSocket support
 - Local network access
 
@@ -85,6 +85,44 @@ The easiest way to run Firefly is using Docker:
    pip install -r requirements.txt
    ```
 
+## Upgrading an existing installation
+
+Stop Firefly, update this checkout, then upgrade packages in the same virtual
+environment used to run it:
+
+```bash
+git pull
+.venv/bin/python -m pip install --upgrade -r requirements.txt
+.venv/bin/python runtime_probe.py
+.venv/bin/python start.py
+```
+
+An old Firefly SQLite database is supported; do not delete it first. Startup
+migrates profile IDs to vnode's public-key-derived identities before enabling
+network reception. Existing keys are reused where available; profiles without
+keys receive new ones. Profile UUIDs and account settings remain usable. Node
+IDs may change, so other nodes may need to discover the new identity before
+sending DMs. Historical messages keep their original sender IDs.
+
+The migration saves a database and profile-config backup under
+`firefly_runtime/backups/identity-*` (or the configured runtime directory).
+It runs automatically and is safe to repeat. After migration, missing or corrupt
+identity files stop startup rather than silently rotating keys. Runtime storage
+must be writable and persistent alongside the database. Docker's existing data
+volume covers the default runtime directory.
+
+Firefly uses pip-installed dependencies by default, including on remote hosts.
+No sibling repositories are required. For development only,
+`FIREFLY_LOCAL_DEPS=1` enables sibling meshdb/mudp/vnode checkouts; those must meet
+the minimum versions. The startup probe reports loaded module paths. Supported
+vnode, meshdb, and mudp release ranges are bounded in `requirements.txt`.
+
+Profile APIs no longer accept a `node_id` in create or update requests. The create
+response returns the generated `node_id`. Browser clients send a CSRF token;
+other HTTP clients must obtain the token from the page's `csrf-token` meta tag,
+retain the session cookie, and send `X-CSRF-Token` on writes. Reload existing
+browser tabs after upgrading.
+
 ## Usage
 
 ### Starting the Application
@@ -128,12 +166,11 @@ The easiest way to run Firefly is using Docker:
    - Go to the "Profiles" page
    - Click "Create New Profile"
    - Fill in your Meshtastic node details:
-     - **Node ID**: Your Meshtastic node ID (e.g., !deadbeef)
      - **Long Name**: Full display name for your node
      - **Short Name**: Short identifier (4 chars max)
      - **Channel**: Meshtastic channel name
      - **Key**: Encryption key for the channel
-   - Click "Create Profile"
+   - Click "Create Profile". Firefly generates a private key and derives your read-only node ID from its public key.
 
 2. **Select Your Profile**
    - Return to the "Chat" page
@@ -174,7 +211,7 @@ To chat with others on your network:
 
 ### Profiles Page
 - Create, edit, and delete Meshtastic profiles
-- Configure node ID, names, channel, and encryption key
+- View the derived node ID and configure names, channels, and encryption keys
 - Switch between different profiles
 
 ## Configuration
@@ -188,7 +225,7 @@ Configure Firefly using environment variables in `.env` file:
 - **FIREFLY_WEB_PORT**: Published host port in `docker-compose.yml` (default: `5011`)
 - **FIREFLY_UDP_PORT**: UDP multicast port (default: 4403)
 - **FIREFLY_DATABASE_FILE**: SQLite database path (Docker default: `/app/data/mudpchat.db`)
-- **FIREFLY_SECRET_KEY**: Flask secret key (change in production!)
+- **FIREFLY_SECRET_KEY**: Optional Flask session secret; otherwise a random secret is saved in the runtime directory
 - **FIREFLY_DEBUG**: Enable debug mode (default: false)
 - **NETWORK_MODE**: Set by `docker-compose.yml` to match bridge vs host networking for startup messages
 
@@ -360,7 +397,8 @@ For detailed Docker usage, see [DOCKER.md](DOCKER.md).
 - Node information and messages are stored locally in SQLite database
 - Database contains channel encryption keys - protect the database file
 - The Flask server binds to `0.0.0.0` by default; use firewall rules if exposing it beyond trusted networks
-- **Docker**: Change `FIREFLY_SECRET_KEY` in production deployments
+- A persistent random Flask session secret is generated unless `FIREFLY_SECRET_KEY` is configured
+- Authenticated writes require a CSRF token; Socket.IO enforces the same origin
 
 ## License
 

@@ -2,10 +2,9 @@ Flask
 Flask-SocketIO
 python-socketio
 python-engineio
-eventlet
 meshtastic
-cryptography
-mudp>=1.5.7
+cryptography>=43,<44
+mudp>=1.6.0,<2
 Pypubsub
-vnode>=0.1.10
-meshdb>=0.2.0
+vnode>=0.2.3,<0.3
+meshdb>=0.3.0,<0.4

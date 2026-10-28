@@ -48,7 +48,7 @@ Key variables:
 - `FIREFLY_PORT`: Application port inside the container (default: `5011`)
 - `FIREFLY_WEB_PORT`: Published host port for bridge mode in `docker-compose.yml` (default: `5011`)
 - `FIREFLY_DATABASE_FILE`: SQLite database path (default: `/app/data/mudpchat.db`)
-- `FIREFLY_SECRET_KEY`: Flask secret key (change in production!)
+- `FIREFLY_SECRET_KEY`: Optional Flask session secret (otherwise generated and saved in the data volume)
 - `FIREFLY_UDP_PORT`: UDP port for Meshtastic communication (default: 4403)
 - `FIREFLY_MCAST_GRP`: Multicast group (default: `239.0.0.69` for Meshtastic 2.8+; set to `224.0.0.69` for older firmware)
 - `FIREFLY_DEBUG`: Enable debug mode (default: false)
@@ -197,7 +197,7 @@ python3 start.py
 ## Security Considerations
 
 ### Production Deployment
-1. **Change secret key**: Set `FIREFLY_SECRET_KEY` to a secure random value
+1. **Session secret**: Firefly saves a random secret in the data volume by default; optionally set `FIREFLY_SECRET_KEY` to your own secure random value
 2. **Use reverse proxy**: Consider nginx or traefik for HTTPS termination
 3. **Firewall**: Restrict access to necessary ports only
 4. **Updates**: Keep base image and dependencies updated

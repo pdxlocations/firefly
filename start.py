@@ -8,7 +8,7 @@ import sys
 import os
 import socket
 import subprocess
-import importlib.util
+import importlib
 import signal
 import atexit
 from local_deps import bootstrap_local_dependency, ensure_dependency_version
@@ -18,9 +18,9 @@ from firefly_logging import configure_logging, get_logger, make_log_print
 bootstrap_local_dependency("meshdb")
 bootstrap_local_dependency("mudp")
 bootstrap_local_dependency("vnode")
-ensure_dependency_version("meshdb", "0.2.0")
-ensure_dependency_version("mudp", "1.5.7")
-ensure_dependency_version("vnode", "0.1.10")
+ensure_dependency_version("meshdb", "0.3.0")
+ensure_dependency_version("mudp", "1.6.0")
+ensure_dependency_version("vnode", "0.2.3")
 
 configure_logging()
 logger = get_logger("firefly.start")
@@ -41,7 +41,10 @@ def get_network_mode():
 def _missing_runtime_modules():
     missing = []
     for module_name in REQUIRED_RUNTIME_MODULES:
-        if importlib.util.find_spec(module_name) is None:
+        try:
+            module = importlib.import_module(module_name)
+            print(f"[DEPENDENCY] {module_name} {ensure_dependency_version(module_name, '0')}: {module.__file__}")
+        except ImportError:
             missing.append(module_name)
     return missing
 

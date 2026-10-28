@@ -5,22 +5,27 @@ This script validates the current interpreter before starting the app
 """
 
 import sys
-import importlib.util
+import importlib
 from local_deps import bootstrap_local_dependency, ensure_dependency_version
 
 bootstrap_local_dependency("meshdb")
 bootstrap_local_dependency("mudp")
 bootstrap_local_dependency("vnode")
-ensure_dependency_version("meshdb", "0.2.0")
-ensure_dependency_version("mudp", "1.5.7")
-ensure_dependency_version("vnode", "0.1.10")
+ensure_dependency_version("meshdb", "0.3.0")
+ensure_dependency_version("mudp", "1.6.0")
+ensure_dependency_version("vnode", "0.2.3")
 
 REQUIRED_RUNTIME_MODULES = ("meshdb", "mudp", "vnode")
 
 
 def has_required_modules():
     """Check whether the active interpreter has the runtime dependencies we need."""
-    missing = [name for name in REQUIRED_RUNTIME_MODULES if importlib.util.find_spec(name) is None]
+    missing = []
+    for name in REQUIRED_RUNTIME_MODULES:
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            missing.append(name)
     return (len(missing) == 0, missing)
 
 def validate_current_environment():

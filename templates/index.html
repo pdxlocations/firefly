@@ -83,6 +83,7 @@
                                     {{ current_user.username }}
                                 </button>
                                 <form method="post" action="{{ url_for('logout') }}" class="mobile-chat-auth__form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button class="btn btn-outline-primary btn-sm mobile-chat-auth__button" type="submit" aria-label="Logout" title="Logout">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -243,9 +244,9 @@
                 <form id="editProfileForm">
                     <input type="hidden" id="editProfileId">
                     <div class="mb-3">
-                        <label for="editNodeId" class="form-label">Node ID *</label>
-                        <input type="text" class="form-control" id="editNodeId" required maxlength="9" pattern="^![0-9a-fA-F]{8}$" title="Node ID must start with ! and contain 8 hex characters.">
-                        <div class="form-text">Must be `!` followed by 8 hexadecimal characters.</div>
+                        <label for="editNodeId" class="form-label">Node ID</label>
+                        <input type="text" class="form-control" id="editNodeId" readonly aria-describedby="editIdentityHelp">
+                        <div id="editIdentityHelp" class="form-text">Derived from your public key. Editing this profile preserves its identity.</div>
                     </div>
                     <div class="mb-3">
                         <label for="editLongName" class="form-label">Long Name *</label>
@@ -2140,7 +2141,7 @@ async function markCurrentChannelRead(channelIndex = activeChannelIndex) {
     try {
         const response = await fetch('/api/channel-read', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify({ channel_index: channelIndex }),
         });
         const payload = await response.json();
@@ -2157,7 +2158,7 @@ async function markDmThreadRead(peerNodeNum = activeDmTargetNodeNum) {
     try {
         const response = await fetch('/api/dm-read', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify({ peer_node_num: peerNodeNum }),
         });
         const payload = await response.json();
@@ -2778,7 +2779,7 @@ async function setActiveChannel(channelIndex, updateUrl = true) {
     try {
         const response = await fetch('/api/current-channel', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify({ channel_index: normalizedIndex })
         });
         const data = await response.json();
@@ -3270,7 +3271,7 @@ async function deleteProfileChannelThread(profileId, channelIndex, channelLabel)
     try {
         const response = await fetch('/api/threads/channel', {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify({
                 profile_id: profileId,
                 channel_index: Number(channelIndex),
@@ -3451,11 +3452,7 @@ function renderProfilesView(container) {
                 </summary>
                 <div class="profile-manager__create-body">
                     <form id="createProfileForm">
-                        <div class="mb-3">
-                            <label for="newNodeId" class="form-label">Node ID *</label>
-                            <input type="text" class="form-control" id="newNodeId" required maxlength="9" pattern="^![0-9a-fA-F]{8}$" placeholder="e.g. !deadbeef" title="Node ID must start with ! and contain 8 hex characters.">
-                            <div class="form-text">Must be ! followed by 8 hexadecimal characters.</div>
-                        </div>
+                        <p class="text-muted">Your node ID is generated from your public key when you create the profile.</p>
                         <div class="mb-3">
                             <label for="newLongName" class="form-label">Long Name *</label>
                             <input type="text" class="form-control" id="newLongName" required maxlength="31" title="Long name must be fewer than 32 characters.">
@@ -3491,12 +3488,8 @@ function renderProfilesView(container) {
     syncNotificationToggleUi();
     document.getElementById('createProfileForm')?.addEventListener('submit', createManagedProfile);
     document.getElementById('addNewChannelBtn')?.addEventListener('click', () => addProfileChannelRow('newChannelsList'));
-    document.getElementById('newNodeId')?.addEventListener('input', syncGeneratedProfileNames);
-    document.getElementById('newLongName')?.addEventListener('input', markGeneratedNameOverride);
-    document.getElementById('newShortName')?.addEventListener('input', markGeneratedNameOverride);
 
     renderProfileChannelRows('newChannelsList', [{ name: '', key: '' }]);
-    applyGeneratedProfileDefaults(true);
 }
 
 function renderManagedProfileCard(profileId, profile) {
@@ -3626,11 +3619,7 @@ function validateNewChannelKeys(channels) {
     return '';
 }
 
-function validateProfileIdentityFields({ node_id: nodeId, long_name: longName, short_name: shortName }) {
-    if (!/^![0-9a-fA-F]{8}$/.test(nodeId || '')) {
-        return 'Node ID must be ! followed by 8 hexadecimal characters.';
-    }
-
+function validateProfileIdentityFields({ long_name: longName, short_name: shortName }) {
     if (Array.from(longName || '').length >= 32) {
         return 'Long name must be fewer than 32 characters.';
     }
@@ -3645,60 +3634,6 @@ function validateProfileIdentityFields({ node_id: nodeId, long_name: longName, s
     return '';
 }
 
-function createRandomNodeId() {
-    if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
-        const values = new Uint32Array(1);
-        window.crypto.getRandomValues(values);
-        return `!${values[0].toString(16).padStart(8, '0')}`;
-    }
-    const fallback = Math.floor(Math.random() * 0x100000000);
-    return `!${fallback.toString(16).padStart(8, '0')}`;
-}
-
-function generatedNameParts(nodeId) {
-    const hex = String(nodeId || '').replace(/[^0-9a-f]/gi, '').toLowerCase();
-    const suffix = (hex.slice(-4) || '0000').padStart(4, '0');
-    return {
-        longName: `Meshtastic ${suffix}`,
-        shortName: suffix,
-    };
-}
-
-function applyGeneratedProfileDefaults(force = false) {
-    const nodeIdInput = document.getElementById('newNodeId');
-    const longNameInput = document.getElementById('newLongName');
-    const shortNameInput = document.getElementById('newShortName');
-    if (!nodeIdInput || !longNameInput || !shortNameInput) return;
-
-    if (force || !nodeIdInput.value.trim()) {
-        nodeIdInput.value = createRandomNodeId();
-    }
-
-    const generated = generatedNameParts(nodeIdInput.value);
-    const canReplaceLong = force || !longNameInput.value.trim() || longNameInput.dataset.autofill === 'true';
-    const canReplaceShort = force || !shortNameInput.value.trim() || shortNameInput.dataset.autofill === 'true';
-
-    if (canReplaceLong) {
-        longNameInput.value = generated.longName;
-        longNameInput.dataset.autofill = 'true';
-    }
-
-    if (canReplaceShort) {
-        shortNameInput.value = generated.shortName;
-        shortNameInput.dataset.autofill = 'true';
-    }
-}
-
-function syncGeneratedProfileNames() {
-    applyGeneratedProfileDefaults(false);
-}
-
-function markGeneratedNameOverride(event) {
-    const input = event.target;
-    if (!input) return;
-    input.dataset.autofill = 'false';
-}
-
 async function createManagedProfile(event) {
     event.preventDefault();
 
@@ -3710,14 +3645,13 @@ async function createManagedProfile(event) {
     }
 
     const payload = {
-        node_id: document.getElementById('newNodeId')?.value.trim(),
         long_name: document.getElementById('newLongName')?.value.trim(),
         short_name: document.getElementById('newShortName')?.value.trim(),
         channels: collectProfileChannels('newChannelsList'),
         hop_limit: hopLimit,
     };
 
-    if (!payload.node_id || !payload.long_name || !payload.short_name || !payload.channels.length) {
+    if (!payload.long_name || !payload.short_name || !payload.channels.length) {
         alert('All fields are required, including at least one complete channel.');
         return;
     }
@@ -3736,7 +3670,7 @@ async function createManagedProfile(event) {
     try {
         const response = await fetch('/api/profiles', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify(payload),
         });
         const data = await response.json();
@@ -3784,14 +3718,13 @@ async function updateManagedProfile() {
     }
 
     const payload = {
-        node_id: document.getElementById('editNodeId').value.trim(),
         long_name: document.getElementById('editLongName').value.trim(),
         short_name: document.getElementById('editShortName').value.trim(),
         channels: collectProfileChannels('editChannelsList'),
         hop_limit: hopLimit,
     };
 
-    if (!payload.node_id || !payload.long_name || !payload.short_name || !payload.channels.length) {
+    if (!payload.long_name || !payload.short_name || !payload.channels.length) {
         alert('All fields are required, including at least one complete channel.');
         return;
     }
@@ -3802,10 +3735,16 @@ async function updateManagedProfile() {
         return;
     }
 
+    const channelValidationError = validateNewChannelKeys(payload.channels);
+    if (channelValidationError) {
+        alert(channelValidationError);
+        return;
+    }
+
     try {
         const response = await fetch(`/api/profiles/${profileId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify(payload),
         });
         const data = await response.json();
@@ -3838,7 +3777,7 @@ async function deleteManagedProfile(profileId) {
     }
 
     try {
-        const response = await fetch(`/api/profiles/${profileId}`, { method: 'DELETE' });
+        const response = await fetch(`/api/profiles/${profileId}`, { method: 'DELETE', headers: { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content } });
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || `HTTP ${response.status}`);
@@ -4265,7 +4204,7 @@ async function deleteDmThread(nodeNum) {
     try {
         const response = await fetch('/api/threads/dm', {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify({ peer_node_num: Number(nodeNum) })
         });
         const data = await response.json();
@@ -4325,7 +4264,7 @@ async function setProfile(event) {
     try {
         const response = await fetch('/api/current-profile', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify({ profile_id: profileId || null })
         });
         const data = await response.json();
@@ -4425,7 +4364,7 @@ async function reconnectProfile(button) {
 
         const response = await fetch('/api/reconnect-profile', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
         });
         const data = await response.json();
         if (!response.ok) {
@@ -4510,7 +4449,7 @@ async function sendMessage() {
     try {
         const response = await fetch('/api/send-message', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify(payload)
         });
         const data = await response.json().catch(() => ({ error: 'Invalid JSON response' }));
@@ -4894,7 +4833,7 @@ function getNodeDisplayLabel(nodeNum) {
 
 async function exchangeNodeInfo(nodeNum) {
     try {
-        const response = await fetch(`/api/nodes/${nodeNum}/exchange-nodeinfo`, { method: 'POST' });
+        const response = await fetch(`/api/nodes/${nodeNum}/exchange-nodeinfo`, { method: 'POST', headers: { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content } });
         const payload = await response.json();
         if (!response.ok) {
             throw new Error(payload.error || `HTTP ${response.status}`);
@@ -4936,7 +4875,7 @@ async function openTracerouteModal(nodeNum) {
     try {
         const response = await fetch(`/api/nodes/${nodeNum}/traceroute`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
             body: JSON.stringify({}),
         });
         const payload = await response.json();

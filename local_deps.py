@@ -2,12 +2,15 @@
 
 import importlib.metadata
 import re
+import os
 import sys
 import tomllib
 from pathlib import Path
 
 
 def bootstrap_local_dependency(repo_name: str) -> None:
+    if os.getenv("FIREFLY_LOCAL_DEPS") != "1":
+        return
     repo_root = Path(__file__).resolve().parent
     candidate = repo_root.parent / repo_name
     if not candidate.is_dir():
@@ -49,7 +52,7 @@ def _local_repo_version(repo_name: str) -> str | None:
 
 
 def dependency_version(repo_name: str) -> str | None:
-    local_version = _local_repo_version(repo_name)
+    local_version = _local_repo_version(repo_name) if os.getenv("FIREFLY_LOCAL_DEPS") == "1" else None
     if local_version:
         return local_version
     try:

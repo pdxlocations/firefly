@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sqlite3
+from runtime_files import database_connection
 import json
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -20,7 +21,7 @@ class Database:
 
     def init_database(self):
         """Initialize the database with required tables"""
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.execute("PRAGMA foreign_keys = ON")
 
             conn.execute("""
@@ -265,7 +266,7 @@ class Database:
             
         try:
             # Check if we already have profiles in the database
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM profiles")
                 existing_count = cursor.fetchone()[0]
                 
@@ -281,7 +282,7 @@ class Database:
                 print("No profiles found in JSON file")
                 return False
                 
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 migrated_count = 0
                 for profile_id, profile in profiles_data.items():
                     channels = self._normalize_channels(
@@ -325,7 +326,7 @@ class Database:
 
     def create_user(self, user_id: str, username: str, password_hash: str) -> bool:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 conn.execute(
                     """
                     INSERT INTO users (id, username, password_hash)
@@ -343,7 +344,7 @@ class Database:
             return False
 
     def get_user_by_username(self, username: str) -> Optional[Dict]:
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -364,7 +365,7 @@ class Database:
             }
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict]:
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -385,13 +386,13 @@ class Database:
             }
 
     def count_users(self) -> int:
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM users")
             return int(cursor.fetchone()[0] or 0)
 
     def update_user_password(self, user_id: str, password_hash: str) -> bool:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 cursor = conn.execute(
                     """
                     UPDATE users
@@ -408,7 +409,7 @@ class Database:
 
     def delete_user(self, user_id: str) -> bool:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute(
                     """
@@ -434,7 +435,7 @@ class Database:
 
     def claim_orphan_profiles(self, user_id: str) -> int:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 cursor = conn.execute(
                     """
                     UPDATE profiles
@@ -450,7 +451,7 @@ class Database:
             return 0
 
     def node_id_in_use(self, node_id: str, exclude_profile_id: Optional[str] = None) -> bool:
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             if exclude_profile_id:
                 cursor = conn.execute(
                     """
@@ -473,7 +474,7 @@ class Database:
 
     def get_all_profiles(self, user_id: Optional[str] = None) -> Dict:
         """Get all profiles as dictionary (compatible with existing code)"""
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             if user_id:
                 cursor = conn.execute("""
@@ -503,7 +504,7 @@ class Database:
                     'channel': primary_channel,
                     'key': primary_key,
                     'channels': channels,
-                    'hop_limit': row['hop_limit'] or 3,  # Default to 3 if null
+                    'hop_limit': row['hop_limit'] if row['hop_limit'] is not None else 3,  # Default to 3 if null
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
                 }
@@ -511,7 +512,7 @@ class Database:
 
     def get_profile(self, profile_id: str, user_id: Optional[str] = None) -> Optional[Dict]:
         """Get a specific profile"""
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             if user_id:
                 cursor = conn.execute("""
@@ -540,7 +541,7 @@ class Database:
                     'channel': primary_channel,
                     'key': primary_key,
                     'channels': channels,
-                    'hop_limit': row['hop_limit'] or 3,  # Default to 3 if null
+                    'hop_limit': row['hop_limit'] if row['hop_limit'] is not None else 3,  # Default to 3 if null
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at']
                 }
@@ -553,7 +554,7 @@ class Database:
         except (TypeError, ValueError):
             return None
 
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT id, user_id, node_id, long_name, short_name, channel, key, channels_json, hop_limit,
@@ -578,13 +579,13 @@ class Database:
                 'channel': primary_channel,
                 'key': primary_key,
                 'channels': channels,
-                'hop_limit': row['hop_limit'] or 3,
+                'hop_limit': row['hop_limit'] if row['hop_limit'] is not None else 3,
                 'created_at': row['created_at'],
                 'updated_at': row['updated_at']
             }
 
     def create_profile(self, profile_id: str, user_id: str, node_id: str, long_name: str,
-                      short_name: str, channels: List[Dict], hop_limit: int = 3) -> bool:
+                      short_name: str, channels: List[Dict], hop_limit: int = 3, identity_public_key=None) -> bool:
         """Create a new profile"""
         # Validate hop_limit range (0-7)
         if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
@@ -597,7 +598,7 @@ class Database:
             return False
             
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 conn.execute("""
                     INSERT INTO profiles (id, user_id, node_id, long_name, short_name, channel, key, channels_json, hop_limit)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -612,6 +613,8 @@ class Database:
                     json.dumps(channels),
                     hop_limit,
                 ))
+                if identity_public_key:
+                    conn.execute("INSERT INTO profile_identities (profile_id, original_node_id, public_key) VALUES (?, ?, ?)", (profile_id, node_id, identity_public_key))
                 conn.commit()
                 return True
         except sqlite3.IntegrityError as e:
@@ -624,6 +627,9 @@ class Database:
     def update_profile(self, profile_id: str, user_id: str, node_id: str, long_name: str,
                       short_name: str, channels: List[Dict], hop_limit: int = 3) -> bool:
         """Update an existing profile"""
+        existing = self.get_profile(profile_id, user_id=user_id)
+        if not existing or existing["node_id"] != node_id:
+            return False
         # Validate hop_limit range (0-7)
         if not isinstance(hop_limit, int) or hop_limit < 0 or hop_limit > 7:
             hop_limit = 3  # Default to 3 if invalid
@@ -635,7 +641,7 @@ class Database:
             return False
             
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 cursor = conn.execute("""
                     UPDATE profiles SET node_id = ?, long_name = ?, short_name = ?, 
                                       channel = ?, key = ?, channels_json = ?, hop_limit = ?, updated_at = CURRENT_TIMESTAMP
@@ -662,7 +668,7 @@ class Database:
     def delete_profile(self, profile_id: str, user_id: str) -> bool:
         """Delete a profile and all associated data"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 cursor = conn.execute("DELETE FROM profiles WHERE id = ? AND user_id = ?", (profile_id, user_id))
                 return cursor.rowcount > 0
         except Exception as e:
@@ -678,7 +684,7 @@ class Database:
                      ack_status: str = None, ack_error: str = None, ack_updated_at: str = None) -> bool:
         """Store a message by channel (accessible to any profile using that channel)"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 conn.execute("""
                     INSERT INTO messages 
                     (message_id, packet_id, sender_num, sender_display, 
@@ -697,7 +703,7 @@ class Database:
 
     def get_stats(self, profile_id: str = None) -> Dict:
         """Get database statistics"""
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             if profile_id:
                 # Profile-level stats retained for message counts only.
                 profile_cursor = conn.execute("""
@@ -791,7 +797,7 @@ class Database:
 
     def get_messages_for_channel(self, channel: int, limit: int = 100, profile_id: str = None) -> List[Dict]:
         """Get messages for a specific channel (accessible to any profile using that channel)"""
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
             clear_state = self._channel_clear_state(conn, profile_id, channel)
@@ -824,7 +830,7 @@ class Database:
 
     def get_dm_messages_for_profile(self, profile_id: str, limit: int = 200) -> List[Dict]:
         """Get direct messages scoped to a specific profile identity."""
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT m.message_id, m.packet_id, m.sender_num, m.sender_display,
@@ -844,7 +850,7 @@ class Database:
             return []
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute(
                     """
@@ -925,7 +931,7 @@ class Database:
             return 0
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 cursor = conn.execute(
                     """
                     UPDATE messages
@@ -945,7 +951,7 @@ class Database:
     def clear_channel_messages_for_profile(self, profile_id: str, channel: int) -> int:
         """Hide all currently visible channel messages for one profile without deleting shared rows."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 now_timestamp = self._current_timestamp()
                 previous_clear_state = self._channel_clear_state(conn, profile_id, channel) or {}
                 query = """
@@ -996,7 +1002,7 @@ class Database:
     def delete_dm_thread_for_profile(self, profile_id: str, peer_node_num: int) -> int:
         """Delete all DM messages in a thread for a given profile and peer node."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 cursor = conn.execute(
                     """
                     DELETE FROM messages
@@ -1015,7 +1021,7 @@ class Database:
     def update_profile_last_seen(self, profile_id: str, channel: int) -> bool:
         """Update the last seen timestamp for a profile+channel combination"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 now_timestamp = self._current_timestamp()
                 _, max_message_id = self._visible_channel_message_id_bounds(conn, profile_id, channel)
                 # Update or insert last seen record
@@ -1032,7 +1038,7 @@ class Database:
     
     def get_unread_messages_for_channel(self, profile_id: str, channel: int, limit: int = 100) -> List[Dict]:
         """Get unread messages for a specific channel (based on profile's last seen timestamp)"""
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             clear_state = self._channel_clear_state(conn, profile_id, channel) or {}
             
@@ -1103,7 +1109,7 @@ class Database:
         if not normalized_channels:
             return channel_counts
 
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             for channel in normalized_channels:
                 clear_state = self._channel_clear_state(conn, profile_id, channel) or {}
@@ -1161,7 +1167,7 @@ class Database:
     def mark_dm_thread_read(self, profile_id: str, peer_node_num: int) -> bool:
         """Update the last seen timestamp for a DM thread."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with database_connection(self.db_path) as conn:
                 now_timestamp = self._current_timestamp()
                 row = conn.execute("""
                     SELECT MAX(id)
@@ -1185,7 +1191,7 @@ class Database:
     def get_unread_dm_counts(self, profile_id: str) -> Dict[int, int]:
         """Count unread received DMs per peer for a profile."""
         unread_counts: Dict[int, int] = {}
-        with sqlite3.connect(self.db_path) as conn:
+        with database_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT m.sender_num AS peer_node_num, COUNT(*) AS unread_count

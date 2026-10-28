@@ -23,6 +23,7 @@
             </div>
             <div class="card-body p-4 p-lg-5">
                 <form method="post" action="{{ url_for('login') }}" data-async-form>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label class="form-label" for="loginUsername">Username</label>
                         <input class="form-control" id="loginUsername" name="username" type="text" maxlength="64" required autocomplete="username">
@@ -47,6 +48,7 @@
                         </div>
                         <div class="card-body">
                             <form method="post" action="{{ url_for('register') }}" data-async-form>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <div class="mb-3">
                                     <label class="form-label" for="registerUsername">Username</label>
                                     <input class="form-control" id="registerUsername" name="username" type="text" maxlength="64" required autocomplete="username">

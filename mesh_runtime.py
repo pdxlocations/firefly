@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
 import json
+import shutil
+import uuid
 import math
 import os
 import random
 import sqlite3
+from runtime_files import database_connection
 import threading
 import time
 from datetime import datetime, timezone
@@ -16,9 +19,9 @@ from local_deps import bootstrap_local_dependency, ensure_dependency_version
 bootstrap_local_dependency("meshdb")
 bootstrap_local_dependency("mudp")
 bootstrap_local_dependency("vnode")
-ensure_dependency_version("meshdb", "0.2.0")
-ensure_dependency_version("mudp", "1.5.7")
-ensure_dependency_version("vnode", "0.1.10")
+ensure_dependency_version("meshdb", "0.3.0")
+ensure_dependency_version("mudp", "1.6.0")
+ensure_dependency_version("vnode", "0.2.3")
 
 import meshdb
 from meshtastic import mesh_pb2, portnums_pb2
@@ -29,6 +32,7 @@ from mudp.singleton import conn
 from pubsub import pub
 from vnode import VirtualNode, parse_node_id, resolve_hw_model
 from vnode.crypto import b64_decode, decrypt_dm, derive_public_key
+from runtime_files import atomic_private_write, read_identity_payload, exclusive_file_lock
 from encryption import generate_hash
 from firefly_logging import configure_logging, get_logger, make_log_print
 
@@ -196,22 +200,17 @@ def ensure_profile_config(profile: Dict, mcast_group: str, mcast_port: int) -> P
     config_path = _config_path(profile)
     meshdb_root = _meshdb_root(profile)
 
-    existing_security = {}
-    if config_path.exists():
-        try:
-            existing_payload = json.loads(config_path.read_text(encoding="utf-8"))
-            existing_security = dict(existing_payload.get("security", {}))
-        except Exception:
-            existing_security = {}
+    existing_payload, derived_id = read_identity_payload(config_path)
+    if profile["node_id"].lower() != derived_id:
+        raise ValueError("Profile identity differs from its private key; migration required")
 
     payload = {
-        "node_id": profile["node_id"],
         "long_name": profile["long_name"],
         "short_name": profile["short_name"],
         "hw_model": "PRIVATE_HW",
         "role": "CLIENT",
         "is_licensed": False,
-        "hop_limit": int(profile.get("hop_limit", 3) or 3),
+        "hop_limit": int(profile.get("hop_limit", 3)),
         "broadcasts": {
             "send_startup_nodeinfo": False,
             "nodeinfo_interval_seconds": 900,
@@ -235,12 +234,87 @@ def ensure_profile_config(profile: Dict, mcast_group: str, mcast_port: int) -> P
             "path": str(meshdb_root),
         },
         "security": {
-            "private_key": existing_security.get("private_key", ""),
+            "private_key": existing_payload["security"]["private_key"],
         },
     }
 
-    config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_private_write(config_path, json.dumps(payload, indent=2) + "\n")
     return config_path
+
+
+def prepare_profile_identity(profile: Dict) -> str:
+    """Persist a new key before a new profile is inserted into SQLite."""
+    path = _config_path(profile)
+    payload, node_id = read_identity_payload(path, allow_generate=True)
+    atomic_private_write(path, json.dumps(payload, indent=2) + "\n")
+    return node_id
+
+
+def migrate_profile_identities(database, mcast_group: str, mcast_port: int) -> None:
+    """Back up and reconcile stored identities before any network activity.
+
+    Historical messages retain their original sender and target identifiers.
+    The ledger also detects missing or externally replaced keys on later starts.
+    """
+    root = _runtime_root()
+    with exclusive_file_lock(root / ".identity.lock"):
+        profiles = database.get_all_profiles()
+        with database_connection(database.db_path) as con:
+            table_exists = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'profile_identities'"
+            ).fetchone()
+            ledger = dict(con.execute("SELECT profile_id, public_key FROM profile_identities")) if table_exists else {}
+        planned = []
+        seen = set()
+        for profile in profiles.values():
+            path = _config_path(profile)
+            payload, derived_id = read_identity_payload(path, allow_generate=profile['id'] not in ledger)
+            public_key = base64_public_key(payload['security']['private_key'])
+            if profile['id'] in ledger and ledger[profile['id']] != public_key:
+                raise ValueError(f"Identity key changed for profile {profile['id']}; restore the original key")
+            if derived_id in seen or derived_id in {'!00000000', '!ffffffff'}:
+                raise ValueError(f"Derived node ID collision or reserved ID: {derived_id}")
+            seen.add(derived_id)
+            planned.append((profile, payload, derived_id, public_key))
+        needs_migration = any(p['id'] not in ledger or p['node_id'] != nid for p, _, nid, _ in planned)
+        if needs_migration:
+            backup = root / 'backups' / ('identity-' + uuid.uuid4().hex)
+            backup.mkdir(parents=True, mode=0o700)
+            with database_connection(database.db_path) as source, database_connection(backup / 'firefly.db') as target:
+                source.backup(target)
+            (backup / 'firefly.db').chmod(0o600)
+            if (root / 'profiles').exists():
+                shutil.copytree(root / 'profiles', backup / 'profiles')
+                for file in (backup / 'profiles').rglob('*'):
+                    file.chmod(0o700 if file.is_dir() else 0o600)
+            print(f"[IDENTITY] Backup saved to {backup}")
+        # Persist generated keys before committing derived database IDs. Retrying
+        # an interrupted migration will reuse these keys instead of rotating them.
+        for profile, payload, _, _ in planned:
+            path = _config_path(profile)
+            atomic_private_write(path, json.dumps(payload, indent=2) + "\n")
+        with database_connection(database.db_path) as con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute("""CREATE TABLE IF NOT EXISTS profile_identities (
+                profile_id TEXT PRIMARY KEY, original_node_id TEXT NOT NULL,
+                public_key TEXT NOT NULL, migrated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )""")
+            if needs_migration:
+                # Temporary unique values allow two old IDs to exchange places.
+                for profile, _, _, _ in planned:
+                    con.execute('UPDATE profiles SET node_id = ? WHERE id = ?', ('migration-' + profile['id'], profile['id']))
+                for profile, _, node_id, public_key in planned:
+                    con.execute('UPDATE profiles SET node_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (node_id, profile['id']))
+                    con.execute('INSERT OR IGNORE INTO profile_identities (profile_id, original_node_id, public_key) VALUES (?, ?, ?)', (profile['id'], profile['node_id'], public_key))
+            con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_node_id_unique ON profiles (node_id)")
+        for profile, _, node_id, _ in planned:
+            profile['node_id'] = node_id
+            ensure_profile_config(profile, mcast_group, mcast_port)
+
+
+def base64_public_key(private_key: str) -> str:
+    from vnode.crypto import b64_encode
+    return b64_encode(derive_public_key(b64_decode(private_key)))
 
 
 class VirtualNodeManager:
@@ -255,6 +329,8 @@ class VirtualNodeManager:
         self.stop()
         config_path = ensure_profile_config(profile, self.mcast_group, self.mcast_port)
         vnode = FireflyVirtualNode(config_path, shared_receiver=self.shared_receiver)
+        if vnode.node_num != owner_node_num(profile):
+            raise ValueError("Runtime node ID does not match profile identity")
         if self.shared_receiver is None or not self.shared_receiver.running:
             print("[VNODE] Starting full virtual node runtime")
             vnode.start()
@@ -469,7 +545,7 @@ class FireflyVirtualNode(VirtualNode):
 
         normalized_node_id = node_id_from_num(int(node_num))
         try:
-            with sqlite3.connect(db_path) as con:
+            with database_connection(db_path) as con:
                 con.row_factory = sqlite3.Row
                 row = con.execute(
                     """
@@ -734,6 +810,7 @@ class MeshNodeStore:
                 short_name=self.profile.get("short_name") or None,
                 hw_model="PRIVATE_HW",
                 role="CLIENT",
+                public_key=base64_public_key(read_identity_payload(_config_path(self.profile))[0]["security"]["private_key"]),
                 last_heard=int(time.time()),
                 hops_away=0,
             )
@@ -958,7 +1035,7 @@ class MeshNodeStore:
 
         latest_hops: Dict[int, tuple[str, int]] = {}
         try:
-            with sqlite3.connect(self.firefly_db_path) as con:
+            with database_connection(self.firefly_db_path) as con:
                 con.row_factory = sqlite3.Row
                 cursor = con.execute(query, params)
                 for row in cursor.fetchall():

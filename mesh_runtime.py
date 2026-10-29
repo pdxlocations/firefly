@@ -359,7 +359,12 @@ class VirtualNodeManager:
     ) -> int:
         if self.virtual_node is None:
             raise RuntimeError("Virtual node is not running")
-        return self.virtual_node.send_text(int(destination), message, hop_limit=hop_limit, reply_id=reply_id)
+        destination = int(destination)
+        return self.virtual_node.send_text(
+            destination, message,
+            pki_mode="off" if destination == BROADCAST_NODE_NUM else "on",
+            hop_limit=hop_limit, reply_id=reply_id,
+        )
 
     def send_nodeinfo(self, destination: int = BROADCAST_NODE_NUM, *, want_response: bool = False) -> int:
         if self.virtual_node is None:

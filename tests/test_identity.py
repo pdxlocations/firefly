@@ -119,9 +119,14 @@ class IdentityMigrationTests(unittest.TestCase):
             large = mesh_pb2.MeshPacket.FromString(send.call_args.args[0])
             decoded_large = manager.decode_packet_for_profile(b, large)
             self.assertNotIn('xeddsaSignature', meshdb.normalize_packet(decoded_large, 'udp')['decoded'])
-            node_a.send_text(mesh.owner_node_num(b), 'private hello')
+            manager.virtual_node = node_a
+            send.reset_mock()
+            manager.send_text('private hello', destination=mesh.owner_node_num(b))
+            self.assertEqual(send.call_count, 1)
             dm = mesh_pb2.MeshPacket.FromString(send.call_args.args[0])
             self.assertEqual(dm.channel, 0)
+            self.assertTrue(dm.want_ack)
+            self.assertTrue(dm.pki_encrypted)
             plain = manager.decode_packet_for_profile(b, dm, sender_public_key=public_a)
             self.assertIsNotNone(plain)
             self.assertEqual(plain.decoded.payload, b'private hello')
@@ -129,6 +134,12 @@ class IdentityMigrationTests(unittest.TestCase):
             ack = mesh_pb2.MeshPacket.FromString(send.call_args.args[0])
             self.assertEqual(getattr(ack, 'from'), mesh.owner_node_num(b))
             self.assertEqual(ack.to, mesh.owner_node_num(a))
+            # A missing recipient key must fail instead of sending text with
+            # channel encryption, which vnode's default auto mode permits.
+            send.reset_mock()
+            with self.assertRaisesRegex(ValueError, 'stored public key'):
+                manager.send_text('must stay private', destination=0x12345678)
+            send.assert_not_called()
 
     def test_session_secret_persists(self):
         with patch.dict(os.environ, {'FIREFLY_SECRET_KEY': 'change-me'}):

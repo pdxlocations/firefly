@@ -1199,6 +1199,7 @@ def _log_packet_summary(packet: mesh_pb2.MeshPacket, addr=None):
     source_addr = addr[0] if isinstance(addr, tuple) and len(addr) >= 1 else addr
     print(
         f"[RECV] src={source_addr} from={sender} to={destination_label} "
+        f"id={packet.id} channel={packet.channel} pki={packet.pki_encrypted} "
         f"type={packet_type} payload={payload_preview}"
     )
 

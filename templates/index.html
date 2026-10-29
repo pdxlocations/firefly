@@ -4437,6 +4437,8 @@ async function sendMessage() {
     } else if (activeChannelIndex === null || activeChannelIndex === undefined) {
         alert('Select a channel before sending a message.');
         return;
+    } else {
+        payload.channel_index = activeChannelIndex;
     }
     if (replyingToPacketId) {
         payload.reply_packet_id = replyingToPacketId;

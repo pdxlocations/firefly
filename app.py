@@ -1843,8 +1843,13 @@ class UDPChatServer:
             return None
 
         sender_profile = _effective_profile(sender_profile)
-        if not self.running or self.current_profile_id != sender_profile.get("id"):
-            print("[UDP] Active virtual node does not match sender profile, restarting...")
+        sender_channel_hash = generate_hash(sender_profile.get("channel", ""), sender_profile.get("key", ""))
+        if (
+            not self.running
+            or self.current_profile_id != sender_profile.get("id")
+            or self.current_channel_hash != sender_channel_hash
+        ):
+            print("[UDP] Active virtual node does not match sender profile/channel, restarting...")
             if not self.restart_with_profile(sender_profile, session_id=session_id):
                 self.last_send_error = "Transmit identity could not be started for this profile"
                 return None
@@ -2821,6 +2826,16 @@ def send_message():
     message_type = (data.get("message_type") or "channel").strip().lower()
     if message_type not in {"channel", "dm"}:
         return jsonify({"error": "message_type must be 'channel' or 'dm'"}), 400
+
+    # Bind this send to the conversation shown when Send was pressed. Channel
+    # selection is persisted asynchronously and its session cookie may be stale.
+    if "channel_index" in data:
+        channel_index = data["channel_index"]
+        if type(channel_index) is not int:
+            return jsonify({"error": "channel_index must be an integer"}), 400
+        if channel_index < 0 or channel_index >= len(_profile_channels(current_profile)):
+            return jsonify({"error": "channel_index out of range"}), 400
+        current_profile = _effective_profile(current_profile, channel_index=channel_index)
 
     target_node_num = data.get("target_node_num")
     if message_type == "dm":

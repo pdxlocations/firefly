@@ -1646,6 +1646,7 @@ let nodeSearchQuery = '';
 const resendingMessageIds = new Set();
 let channelMessages = [];
 let dmMessages = [];
+let messageSnapshotRequestId = 0;
 let dmTargets = [];
 let replyingToPacketId = null;
 let currentSocketStatusClass = 'bg-secondary';
@@ -2350,20 +2351,47 @@ function leaveCurrentProfileRoom() {
     currentProfileRoom = null;
 }
 
+function beginMessageSnapshot() {
+    return {
+        id: ++messageSnapshotRequestId,
+        profile: currentProfile,
+        channelIndex: activeChannelIndex,
+        channelMessages: new Map(channelMessages.map(message => [message.id, message])),
+        dmMessages: new Map(dmMessages.map(message => [message.id, message])),
+    };
+}
+
+function mergeMessageSnapshot(snapshot, current, beforeRequest) {
+    const merged = [...snapshot];
+    // A response can predate a Socket.IO message or ACK update received while
+    // the request was in flight. Keep those events until history catches up.
+    for (const message of current) {
+        if (beforeRequest.get(message.id) !== message) upsertMessage(merged, message);
+    }
+    return merged;
+}
+
+function applyMessageSnapshot(payload, request) {
+    if (request.id !== messageSnapshotRequestId || request.profile !== currentProfile) return false;
+    const channels = Array.isArray(payload) ? payload : (payload.channel_messages || []);
+    const dms = Array.isArray(payload) ? [] : (payload.dm_messages || []);
+    channelMessages = mergeMessageSnapshot(channels, channelMessages, request.channelMessages);
+    dmMessages = mergeMessageSnapshot(dms, dmMessages, request.dmMessages);
+    return true;
+}
+
 async function loadMessages(channelIndex = activeChannelIndex) {
+    const snapshotRequest = beginMessageSnapshot();
     try {
         const query = (channelIndex === null || channelIndex === undefined)
             ? ''
             : `?channel_index=${encodeURIComponent(channelIndex)}`;
         const response = await fetch(`/api/messages${query}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
-        if (Array.isArray(payload)) {
-            channelMessages = payload;
-            dmMessages = [];
-        } else {
-            channelMessages = payload.channel_messages || [];
-            dmMessages = payload.dm_messages || [];
-            if (Number.isInteger(payload.selected_channel_index)) {
+        if (!applyMessageSnapshot(payload, snapshotRequest)) return;
+        if (!Array.isArray(payload)) {
+            if (activeChannelIndex === snapshotRequest.channelIndex && Number.isInteger(payload.selected_channel_index)) {
                 activeChannelIndex = payload.selected_channel_index;
             }
             applyUnreadState(payload);
@@ -2377,6 +2405,7 @@ async function loadMessages(channelIndex = activeChannelIndex) {
 
 async function refreshThreadStateSnapshot() {
     if (!currentProfile) return;
+    const snapshotRequest = beginMessageSnapshot();
 
     try {
         const response = await fetch('/api/messages');
@@ -2385,8 +2414,7 @@ async function refreshThreadStateSnapshot() {
             return;
         }
 
-        channelMessages = payload.channel_messages || [];
-        dmMessages = payload.dm_messages || [];
+        if (!applyMessageSnapshot(payload, snapshotRequest)) return;
         applyUnreadState(payload);
         syncDmTargetsFromMessages();
         await loadDmTargets();

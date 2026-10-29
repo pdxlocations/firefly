@@ -145,6 +145,48 @@ class IdentityMigrationTests(unittest.TestCase):
         with patch.dict(os.environ, {'FIREFLY_SECRET_KEY': 'change-me'}):
             self.assertEqual(session_secret(self.root), session_secret(self.root))
 
+    def test_dm_uses_nodeinfo_key_from_another_configured_channel(self):
+        from meshtastic.protobuf import mesh_pb2, portnums_pb2
+        from mudp.singleton import conn
+        from vnode.crypto import generate_keypair, decrypt_dm
+        self.profile()
+        self.migrate()
+        profile = self.db.get_profile('p')
+        profile['channels'].append({'name': 'Other', 'key': 'Ag=='})
+        remote_num = 0x4e016635
+        public_key, private_key = generate_keypair()
+        # Receive the exchange reply on LongFast, then send from Other.
+        reply = mesh_pb2.MeshPacket()
+        setattr(reply, 'from', remote_num)
+        reply.to = mesh.owner_node_num(profile)
+        reply.channel = mesh.generate_hash('LongFast', 'AQ==')
+        reply.decoded.portnum = portnums_pb2.PortNum.NODEINFO_APP
+        reply.decoded.payload = mesh_pb2.User(
+            id=mesh.node_id_from_num(remote_num), public_key=public_key,
+        ).SerializeToString()
+        mesh.MeshNodeStore(profile).record_packet(reply)
+        profile.update(channel='Other', key='Ag==')
+        config_path = mesh.ensure_profile_config(profile, '239.0.0.69', 4403)
+        node = mesh.FireflyVirtualNode(config_path, profile=profile)
+        self.assertEqual(node._lookup_public_key(remote_num), public_key)
+        manager = mesh.VirtualNodeManager('239.0.0.69', 4403)
+        manager.virtual_node = node
+        with patch.object(node, 'connect_send_socket'), patch.object(conn, 'sendto') as send:
+            manager.send_text('cross-channel key', destination=remote_num)
+            self.assertEqual(send.call_count, 1)
+            packet = mesh_pb2.MeshPacket.FromString(send.call_args.args[0])
+            self.assertTrue(packet.pki_encrypted)
+            plain = decrypt_dm(
+                receiver_private_key=private_key,
+                sender_public_key=manager.get_profile_public_key(profile),
+                packet_id=packet.id, from_node=node.node_num, payload=packet.encrypted,
+            )
+            self.assertEqual(mesh_pb2.Data.FromString(plain).payload, b'cross-channel key')
+        # Removing LongFast from the profile must remove access to that key.
+        profile['channels'] = [profile['channels'][1]]
+        restricted_node = mesh.FireflyVirtualNode(config_path, profile=profile)
+        self.assertIsNone(restricted_node._lookup_public_key(remote_num))
+
 
 class ProfileApiTests(unittest.TestCase):
     @classmethod

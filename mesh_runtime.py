@@ -328,7 +328,7 @@ class VirtualNodeManager:
     def start(self, profile: Dict) -> VirtualNode:
         self.stop()
         config_path = ensure_profile_config(profile, self.mcast_group, self.mcast_port)
-        vnode = FireflyVirtualNode(config_path, shared_receiver=self.shared_receiver)
+        vnode = FireflyVirtualNode(config_path, shared_receiver=self.shared_receiver, profile=profile)
         if vnode.node_num != owner_node_num(profile):
             raise ValueError("Runtime node ID does not match profile identity")
         if self.shared_receiver is None or not self.shared_receiver.running:
@@ -519,10 +519,11 @@ class SharedPacketReceiver:
 
 
 class FireflyVirtualNode(VirtualNode):
-    def __init__(self, config_path, *, shared_receiver: Optional[SharedPacketReceiver] = None) -> None:
+    def __init__(self, config_path, *, shared_receiver: Optional[SharedPacketReceiver] = None, profile: Optional[Dict] = None) -> None:
         super().__init__(config_path)
         self._shared_receiver = shared_receiver
         self._firefly_started = False
+        self._profile_channels = _profile_channel_map(profile or {})
 
     def _channel_hash(self) -> int:
         return generate_hash(self.config.channel.name, self.config.channel.psk)
@@ -629,21 +630,29 @@ class FireflyVirtualNode(VirtualNode):
             key = self._public_key_b64
             return b64_decode(key) if key else None
 
-        row = meshdb.get_nodeinfo(
-            int(node_num),
-            owner_node_num=self.node_num,
-            db_path=self.meshdb_path,
-            channel=self._channel_hash(),
-            channel_name=self._channel_name(),
-            storage_name=self._storage_name(),
-        )
-        if isinstance(row, dict):
-            public_key = str(row.get("public_key", "")).strip()
-            if public_key:
-                try:
-                    return b64_decode(public_key)
-                except Exception:
-                    pass
+        # The Nodes tab merges all profile channels. A NodeInfo reply may be
+        # stored on a different channel from the active sending transport.
+        channels = {self._channel_hash(): self._channel_name()}
+        for channel_num, channel_name in self._profile_channels.items():
+            channels.setdefault(channel_num, channel_name)
+        for channel_num, channel_name in channels.items():
+            row = meshdb.get_nodeinfo(
+                int(node_num),
+                owner_node_num=self.node_num,
+                db_path=self.meshdb_path,
+                channel=channel_num,
+                channel_name=channel_name,
+                storage_name=_meshdb_storage_name(channel_name),
+            )
+            if isinstance(row, dict):
+                public_key = str(row.get("public_key") or "").strip()
+                if public_key:
+                    try:
+                        key = b64_decode(public_key)
+                        if len(key) == 32:
+                            return key
+                    except Exception:
+                        pass
 
         return self._local_profile_public_key(int(node_num))
 

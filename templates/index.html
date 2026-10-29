@@ -2669,7 +2669,6 @@ function openDmInbox() {
 
 async function openNodesInbox() {
     await loadNodes();
-    nodeSearchQuery = '';
     setActiveChatTab('nodes');
 }
 
@@ -4840,7 +4839,7 @@ async function exchangeNodeInfo(nodeNum) {
         if (!response.ok) {
             throw new Error(payload.error || `HTTP ${response.status}`);
         }
-        showNotification(`Node info exchange requested with ${getNodeDisplayLabel(nodeNum)}.`, 'success');
+        showNotification(`Node info exchange requested with ${getNodeDisplayLabel(nodeNum)}. Wait for its NodeInfo reply before sending a DM.`, 'success');
     } catch (error) {
         console.error('Error exchanging node info:', error);
         alert(`Error exchanging node info: ${error.message}`);

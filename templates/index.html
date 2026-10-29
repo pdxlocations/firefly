@@ -491,6 +491,28 @@
     color: #dc3545;
 }
 
+.message-resend {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0.25rem;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--bs-secondary-color);
+}
+
+.message-resend:hover,
+.message-resend:focus-visible {
+    background: var(--bs-secondary-bg);
+    color: var(--bs-body-color);
+}
+
+.message-resend:disabled { opacity: 0.45; }
+.message-resend svg { width: 1rem; height: 1rem; }
+
 .message .flex-grow-1 {
     min-width: 0; /* Allows flex item to shrink below content size */
     word-wrap: break-word;
@@ -1621,6 +1643,7 @@ let pendingChannelIndex = null;
 let pendingDmTargetNodeNum = null;
 let meshNodes = [];
 let nodeSearchQuery = '';
+const resendingMessageIds = new Set();
 let channelMessages = [];
 let dmMessages = [];
 let dmTargets = [];
@@ -3129,6 +3152,13 @@ function renderChannelThreadCardHtml(thread) {
 }
 
 function handleThreadCardClick(event) {
+    const resendTrigger = event.target.closest('[data-resend-message-id]');
+    if (resendTrigger) {
+        event.preventDefault();
+        event.stopPropagation();
+        void resendMessage(resendTrigger.dataset.resendMessageId, resendTrigger);
+        return;
+    }
     const removeChannelTrigger = event.target.closest('[data-remove-channel]');
     if (removeChannelTrigger) {
         event.preventDefault();
@@ -4489,6 +4519,43 @@ function getPeerNodeNum(message) {
     return null;
 }
 
+async function resendMessage(messageId, button) {
+    const message = dmMessages.find(item => String(item.id) === String(messageId));
+    const meta = getAckStatusMeta(message);
+    if (!message || !currentProfile || !['nak', 'max_retransmit'].includes(meta?.status)) return;
+    if (message.owner_profile_id !== currentProfile.id || message.sender !== currentProfile.node_id) return;
+    if (!message.target_node_num || resendingMessageIds.has(messageId)) return;
+
+    const payload = {
+        message: message.content,
+        message_type: 'dm',
+        target_node_num: message.target_node_num,
+    };
+    if (message.reply_packet_id) payload.reply_packet_id = message.reply_packet_id;
+    resendingMessageIds.add(messageId);
+    button.disabled = true;
+    try {
+        const response = await fetch('/api/send-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content },
+            body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({ error: 'Invalid JSON response' }));
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        await loadMessages();
+        await loadDmTargets();
+        renderActiveMessages();
+    } catch (error) {
+        alert('Error resending message: ' + error.message);
+    } finally {
+        resendingMessageIds.delete(messageId);
+        button.disabled = false;
+        document.querySelectorAll('[data-resend-message-id]').forEach(item => {
+            if (item.dataset.resendMessageId === messageId) item.disabled = false;
+        });
+    }
+}
+
 function getMessageByPacketId(packetId) {
     if (!packetId) return null;
     const source = activeChatTab === 'dm' ? dmMessages : channelMessages;
@@ -4565,10 +4632,23 @@ function renderAckStatusHtml(message) {
 
     const reasonText = formatAckReason(message.ack_error);
     const title = reasonText ? `${meta.label}: ${reasonText}` : meta.label;
+    const canResend = ['nak', 'max_retransmit'].includes(meta.status)
+        && message.message_type === 'dm' && message.id
+        && message.owner_profile_id === currentProfile?.id && message.sender === currentProfile?.node_id;
+    const resendButton = canResend ? `
+        <button class="message-resend" type="button" data-resend-message-id="${escapeHtml(String(message.id))}"
+            title="Resend message" aria-label="Resend message" ${resendingMessageIds.has(String(message.id)) ? 'disabled' : ''}>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 6a5.25 5.25 0 1 1-.25 3.5"></path>
+                <path d="M3 2.5V6h3.5"></path>
+            </svg>
+        </button>
+    ` : '';
     return `
         <span class="message-ack message-ack--${escapeHtml(meta.status)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">
             ${renderAckIconSvg(meta.status)}
         </span>
+        ${resendButton}
     `;
 }
 
